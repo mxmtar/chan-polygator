@@ -2,6 +2,14 @@
 /* chan_pg.c                                                                  */
 /******************************************************************************/
 
+#include "autoconfig.h"
+
+#undef PACKAGE_BUGREPORT
+#undef PACKAGE_NAME
+#undef PACKAGE_STRING
+#undef PACKAGE_TARNAME
+#undef PACKAGE_VERSION
+
 #include <asterisk.h>
 
 #include <sys/ioctl.h>
@@ -28,31 +36,99 @@
 
 #include "polygator/polygator-base.h"
 
-struct pg_board {
-	char type[128];
-	char name[128];
+#include "libvinetic.h"
 
+#include "at.h"
+
+enum {
+	PG_VINETIC_STATE_INIT = 1,
+	PG_VINETIC_STATE_IDLE = 2,
+	PG_VINETIC_STATE_RUN = 3,
+};
+
+struct pg_vinetic {
+	// vinetic private lock
+	ast_mutex_t lock;
+
+	pthread_t thread;
+
+	int state;
+
+	struct vinetic_context context;
+
+	// entry for board vinetic list
+	AST_LIST_ENTRY(pg_vinetic) pg_board_vinetic_list_entry;
+};
+
+struct pg_gsm_channel;
+struct pg_board {
 	// board private lock
 	ast_mutex_t lock;
 
-	// entry for polygator board list
-	AST_LIST_ENTRY(pg_board) pg_board_list_entry;
+	char *type;
+	char *name;
+
+	// board channel list
+	AST_LIST_HEAD_NOLOCK(gsm_channel_list, pg_gsm_channel) gsm_channel_list;
+	// board vinetic list
+	AST_LIST_HEAD_NOLOCK(vinetic_list, pg_vinetic) vinetic_list;
+
+
+	// entry for general board list
+	AST_LIST_ENTRY(pg_board) pg_general_board_list_entry;
 };
 
-struct pg_channel {
-
-	size_t pos_on_board;
-
-	char tty_path[PATH_MAX];
-
-	int gsm_module_type;	// type of GSM module ("SIM300", "M10", "SIM900", "SIM5215")
-
+struct pg_gsm_channel {
 	// channel private lock
-	ast_mutex_t pvt_lock;
+	ast_mutex_t lock;
+	pthread_t thread;
+
+	char *name;
+	unsigned int gsm_module_type;	// type of GSM module ("SIM300", "M10", "SIM900", "SIM5215")
+
+	unsigned int pos_on_board;
+	struct pg_board *board;
+	
+	struct pg_gsm_channel_flags {
+		unsigned int enable:1;
+		unsigned int shutdown:1;
+		unsigned int shutdown_now:1;
+		unsigned int restart:1;
+		unsigned int restart_now:1;
+		unsigned int suspend_now:1;
+		unsigned int resume_now:1;
+		unsigned int init:1;
+		unsigned int balance_req:1;
+		unsigned int sim_change:1;
+		unsigned int sim_test:1;
+		unsigned int sim_present:1;
+		unsigned int sim_startup:1;
+		unsigned int pin_required:1;
+		unsigned int puk_required:1;
+		unsigned int pin_accepted:1;
+	} flags;
+
+	// Registration status
+	int reg_stat;
+	int reg_stat_old;
 
 	// entry for board channel list
-	AST_LIST_ENTRY(pg_channel) board_channel_list_entry;
+	AST_LIST_ENTRY(pg_gsm_channel) pg_board_gsm_channel_list_entry;
+	// entry for general channel list
+	AST_LIST_ENTRY(pg_gsm_channel) pg_general_gsm_channel_list_entry;
 };
+
+//------------------------------------------------------------------------------
+// mmax()
+#define mmax(arg0, arg1) ((arg0 > arg1) ? arg0 : arg1)
+// end of mmax()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// mmin()
+#define mmin(arg0, arg1) ((arg0 < arg1) ? arg0 : arg1)
+// end of mmin()
+//------------------------------------------------------------------------------
 
 #if ASTERISK_VERSION_NUM < 10800
 	typedef cli_fn cli_fn_type;
@@ -76,7 +152,6 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch);
 static int pg_gsm_fixup(struct ast_channel *oldchan, struct ast_channel *newchan);
 static int pg_gsm_dtmf_start(struct ast_channel *ast_ch, char digit);
 static int pg_gsm_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int duration);
-
 
 static struct timeval pg_start_time = {0, 0};
 
@@ -119,25 +194,28 @@ struct pg_cli_channel_param {
 
 static char *pg_cli_show_board(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_boards(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_show_gsm_channels(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_modinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 
 static struct ast_cli_entry pg_cli[] = {
 	AST_CLI_DEFINE(pg_cli_show_board, "Show PG board information"),
 	AST_CLI_DEFINE(pg_cli_show_boards, "Show PG boards information summary"),
-	AST_CLI_DEFINE(pg_cli_show_modinfo, "Show PG GSM module information"),
+	AST_CLI_DEFINE(pg_cli_show_gsm_channels, "Show PG GSM channels information summary"),
+	AST_CLI_DEFINE(pg_cli_show_modinfo, "Show PG module information"),
 };
 
 // gsm module types
 struct pg_cli_channel_param pg_gsm_module_types[] = {
-	PG_CLI_CH_PARAM("sim300", POLYGATOR_MODULE_TYPE_SIM300),
-	PG_CLI_CH_PARAM("sim900", POLYGATOR_MODULE_TYPE_SIM900),
-	PG_CLI_CH_PARAM("m10", POLYGATOR_MODULE_TYPE_M10),
-	PG_CLI_CH_PARAM("sim5215", POLYGATOR_MODULE_TYPE_SIM5215),
+	PG_CLI_CH_PARAM("SIM300", POLYGATOR_MODULE_TYPE_SIM300),
+	PG_CLI_CH_PARAM("SIM900", POLYGATOR_MODULE_TYPE_SIM900),
+	PG_CLI_CH_PARAM("M10", POLYGATOR_MODULE_TYPE_M10),
+	PG_CLI_CH_PARAM("SIM5215", POLYGATOR_MODULE_TYPE_SIM5215),
 };
 
 AST_MUTEX_DEFINE_STATIC(pg_lock);
 
-static AST_LIST_HEAD_NOLOCK_STATIC(pg_board_list, pg_board);
+static AST_LIST_HEAD_NOLOCK_STATIC(pg_general_board_list, pg_board);
+static AST_LIST_HEAD_NOLOCK_STATIC(pg_general_gsm_channel_list, pg_gsm_channel);
 
 //------------------------------------------------------------------------------
 // pg_second_to_dhms()
@@ -175,7 +253,7 @@ static char * pg_second_to_dhms(char *buf, time_t sec)
 //------------------------------------------------------------------------------
 // pg_get_gsm_module_type()
 //------------------------------------------------------------------------------
-static int pg_get_gsm_module_type(const char *module_type)
+static unsigned int pg_get_gsm_module_type(const char *module_type)
 {
 	size_t i;
 	int res = POLYGATOR_MODULE_TYPE_UNKNOWN;
@@ -194,7 +272,7 @@ static int pg_get_gsm_module_type(const char *module_type)
 //------------------------------------------------------------------------------
 // pg_gsm_module_type_to_string()
 //------------------------------------------------------------------------------
-static char *pg_gsm_module_type_to_string(int type)
+static char *pg_gsm_module_type_to_string(unsigned int type)
 {
 	size_t i;
 
@@ -343,12 +421,12 @@ static struct pg_board *pg_get_board_by_name(const char *name)
 	if (!(namelen = strlen(name)))
 		return NULL;
 	// check for board list is not empty
-	brd = pg_board_list.first;
+	brd = pg_general_board_list.first;
 	if (!brd)
 		return NULL;
 	// traverse board list for matching entry name
 	brd = NULL;
-	AST_LIST_TRAVERSE(&pg_board_list, brd, pg_board_list_entry)
+	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
 	{
 		// compare name length
 		if (namelen != strlen(brd->name)) continue;
@@ -380,7 +458,7 @@ static char *pg_cli_generate_complete_board_type(const char *begin, int count)
 
 	ast_mutex_lock(&pg_lock);
 
-	AST_LIST_TRAVERSE(&pg_board_list, brd, pg_board_list_entry)
+	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
 	{
 		ast_mutex_lock(&brd->lock);
 		// compare begin of board type
@@ -419,7 +497,7 @@ static char *pg_cli_generate_complete_board_name(const char *begin, int count)
 
 	ast_mutex_lock(&pg_lock);
 
-	AST_LIST_TRAVERSE(&pg_board_list, brd, pg_board_list_entry)
+	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
 	{
 		ast_mutex_lock(&brd->lock);
 		// compare begin of board name
@@ -497,6 +575,11 @@ static char *pg_cli_show_boards(struct ast_cli_entry *e, int cmd, struct ast_cli
 	size_t count;
 	struct pg_board *brd;
 
+	char buf[32];
+	int number_fl;
+	int type_fl;
+	int name_fl;
+
 	switch (cmd)
 	{
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -524,24 +607,38 @@ static char *pg_cli_show_boards(struct ast_cli_entry *e, int cmd, struct ast_cli
 		return CLI_SHOWUSAGE;
 
 	ast_mutex_lock(&pg_lock);
+			// try to generate complete board type
+			if (a->pos == 3)
+				return pg_cli_generate_complete_board_type(a->word, a->n);
+
 
 	if (a->argv[3]) {
 		count = 0;
-		AST_LIST_TRAVERSE(&pg_board_list, brd, pg_board_list_entry)
+		number_fl = strlen("#");
+		name_fl = strlen("Name");
+		AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
 		{
-			if (!strcmp(a->argv[3], brd->type)) count++;
+			ast_mutex_lock(&brd->lock);
+			if (!strcmp(a->argv[3], brd->type)) {
+				number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
+				name_fl = mmax(name_fl, strlen(brd->name));
+				count++;
+			}
+			ast_mutex_unlock(&brd->lock);
 		}
 		if (count) {
-			ast_cli(a->fd, "| %-2.2s | %-20.20s |\n",
-					"#", "Name");
+			ast_cli(a->fd, "| %-*s | %-*s |\n",
+					number_fl, "#",
+					name_fl, "Name");
 			count = 0;
-			AST_LIST_TRAVERSE(&pg_board_list, brd, pg_board_list_entry)
+			AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
 			{
 				// lock board
 				ast_mutex_lock(&brd->lock);
 				if (!strcmp(a->argv[3], brd->type)) {
-					ast_cli(a->fd, "| %-2.2lu | %-20.20s |\n",
-							(unsigned long int)count++, brd->name);
+					ast_cli(a->fd, "| %-*lu | %-*s |\n",
+							number_fl, (unsigned long int)count++,
+							name_fl, brd->name);
 				}
 				// unlock board
 				ast_mutex_unlock(&brd->lock);
@@ -551,17 +648,32 @@ static char *pg_cli_show_boards(struct ast_cli_entry *e, int cmd, struct ast_cli
 			ast_cli(a->fd, "  No boards found\n");
 	} else {
 		count = 0;
-		AST_LIST_TRAVERSE(&pg_board_list, brd, pg_board_list_entry) count++;
+		number_fl = strlen("#");
+		type_fl = strlen("Type");
+		name_fl = strlen("Name");
+		AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
+		{
+			ast_mutex_lock(&brd->lock);
+			number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
+			type_fl = mmax(type_fl, strlen(brd->type));
+			name_fl = mmax(name_fl, strlen(brd->name));
+			count++;
+			ast_mutex_unlock(&brd->lock);
+		}
 		if (count) {
-			ast_cli(a->fd, "| %-2.2s | %-10.10s | %-20.20s |\n",
-					"#", "Type", "Name");
+			ast_cli(a->fd, "| %-*s | %-*s | %-*s |\n",
+					number_fl, "#",
+					type_fl, "Type",
+					name_fl, "Name");
 			count = 0;
-			AST_LIST_TRAVERSE(&pg_board_list, brd, pg_board_list_entry)
+			AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
 			{
 				// lock board
 				ast_mutex_lock(&brd->lock);
-				ast_cli(a->fd, "| %-2.2lu | %-10.10s | %-20.20s |\n",
-						(unsigned long int)count++, brd->type, brd->name);
+				ast_cli(a->fd, "| %-*lu | %-*s | %-*s |\n",
+						number_fl, (unsigned long int)count++,
+						type_fl, brd->type,
+						name_fl, brd->name);
 				// unlock board
 				ast_mutex_unlock(&brd->lock);
 			}
@@ -576,6 +688,100 @@ static char *pg_cli_show_boards(struct ast_cli_entry *e, int cmd, struct ast_cli
 }
 //------------------------------------------------------------------------------
 // end of pg_cli_show_boards()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_show_gsm_channels()
+//------------------------------------------------------------------------------
+static char *pg_cli_show_gsm_channels(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	size_t count;
+	struct pg_gsm_channel *ch;
+
+	char buf[256];
+	int number_fl;
+	int device_fl;
+	int module_fl;
+	int power_fl;
+	int sim_fl;
+	int reg_fl;
+
+	switch (cmd)
+	{
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_INIT:
+			e->command = "pg show gsm channels";
+			e->usage = "Usage: pg show gsm channels\n";
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_GENERATE:
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_HANDLER:
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		default:
+			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
+			return CLI_FAILURE;
+	}
+
+	if (a->argc < 4)
+		return CLI_SHOWUSAGE;
+
+	ast_mutex_lock(&pg_lock);
+
+	count = 0;
+	number_fl = strlen("#");
+	device_fl = strlen("Device");
+	module_fl = strlen("Module");
+	power_fl = strlen("Power");
+	sim_fl = strlen("SIM");
+	reg_fl = strlen("Registered");
+	AST_LIST_TRAVERSE(&pg_general_gsm_channel_list, ch, pg_general_gsm_channel_list_entry)
+	{
+		ast_mutex_lock(&ch->lock);
+		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
+		device_fl = mmax(device_fl, snprintf(buf, sizeof(buf), "%s:%u", ch->board->name, ch->pos_on_board));
+		module_fl = mmax(module_fl, strlen(pg_gsm_module_type_to_string(ch->gsm_module_type)));
+		power_fl = mmax(power_fl, strlen(AST_CLI_ONOFF(ch->flags.enable)));
+		sim_fl = mmax(sim_fl, snprintf(buf, sizeof(buf), "%s", (ch->flags.sim_present)?("inserted"):("")));
+		reg_fl = mmax(reg_fl, strlen(reg_status_print_short(ch->reg_stat)));
+		count++;
+		ast_mutex_unlock(&ch->lock);
+	}
+	if (count) {
+		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+				number_fl, "#",
+				device_fl, "Device",
+				module_fl, "Module",
+				power_fl, "Power",
+				sim_fl, "SIM",
+				reg_fl, "Registered");
+		count = 0;
+		AST_LIST_TRAVERSE(&pg_general_gsm_channel_list, ch, pg_general_gsm_channel_list_entry)
+		{
+			ast_mutex_lock(&ch->lock);
+
+			snprintf(buf, sizeof(buf), "%s:%u", ch->board->name, ch->pos_on_board);
+			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+					number_fl, (unsigned long int)count++,
+					device_fl, buf,
+					module_fl, pg_gsm_module_type_to_string(ch->gsm_module_type),
+					power_fl, AST_CLI_ONOFF(ch->flags.enable),
+					sim_fl, (ch->flags.sim_present)?("inserted"):(""),
+					reg_fl, reg_status_print_short(ch->reg_stat));
+			ast_mutex_unlock(&ch->lock);
+		}
+		ast_cli(a->fd, "  Total %lu channel%s\n", (unsigned long int)count, ESS(count));
+	} else 
+		ast_cli(a->fd, "  No channels found\n");
+
+	ast_mutex_unlock(&pg_lock);
+
+	return CLI_SUCCESS;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_show_gsm_channels()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -611,7 +817,7 @@ static char *pg_cli_show_modinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 	// -- module info
 	ast_cli(a->fd, "  PG GSM module Info:\n");
 	// show eggsm module version
-	ast_cli(a->fd, "  -- module version: %s\n", "x.x.x");
+	ast_cli(a->fd, "  -- module version: %s\n", VERSION);
 	// show eggsm asterisk version
 	ast_cli(a->fd, "  -- asterisk version: %s\n", ASTERISK_VERSION);
 	// show eggsm module uptime
@@ -645,14 +851,22 @@ void pg_atexit(void)
 static int pg_load(void)
 {
 	FILE *fp;
-	char buff[512];
-	char type[128];
-	char name[128];
+	char buf[256];
+	char type[64];
+	char name[64];
+
+	unsigned int pos;
+	unsigned int vio;
+
+	char path[PATH_MAX];
+	
 	struct pg_board *brd;
+	struct pg_gsm_channel *ch;
+	struct pg_vinetic *vin;
 
 	ast_mutex_lock(&pg_lock);
 
-	ast_verbose("PG: module \"%s\" loading...\n", "x.x.x");
+	ast_verbose("PG: module \"%s\" loading...\n", VERSION);
 
 	gettimeofday(&pg_start_time, NULL);
 
@@ -671,13 +885,14 @@ static int pg_load(void)
 #endif
 
 	// scan polygator subsystem
-	if (!(fp = fopen("/dev/polygator/subsystem", "r"))) {
+	snprintf(path, PATH_MAX, "/dev/polygator/%s", "subsystem");
+	if (!(fp = fopen(path, "r"))) {
 		ast_log(LOG_ERROR, "unable to scan Polygator subsystem: %s\n", strerror(errno));
 		goto pg_load_error;
 	}
-	while (fgets(buff, sizeof(buff), fp))
+	while (fgets(buf, sizeof(buf), fp))
 	{
-		if (sscanf(buff, "%[0-9a-z-] %[0-9a-z-]", (char *)&type, (char *)&name) == 2) {
+		if (sscanf(buf, "%[0-9a-z-] %[0-9a-z-]", type, name) == 2) {
 			ast_verbose("PG: found board type=\"%s\" name=\"%s\"\n", type, name);
 			if (!(brd = ast_calloc(1, sizeof(struct pg_board)))) {
 				ast_log(LOG_ERROR, "can't get memory for struct pg_board\n");
@@ -685,13 +900,61 @@ static int pg_load(void)
 			}
 			// init board
 			ast_mutex_init(&brd->lock);
-			ast_copy_string(brd->type, type, sizeof(brd->type));
-			ast_copy_string(brd->name, name, sizeof(brd->name));
-			// add board into board list
-			AST_LIST_INSERT_TAIL(&pg_board_list, brd, pg_board_list_entry);
+			brd->type = ast_strdup(type);
+			brd->name = ast_strdup(name);
+			// add board into general board list
+			AST_LIST_INSERT_TAIL(&pg_general_board_list, brd, pg_general_board_list_entry);
 		}
 	}
 	fclose(fp);
+
+	// scan polygator board
+	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
+	{
+		snprintf(path, PATH_MAX, "/dev/polygator/%s", brd->name);
+		if (!(fp = fopen(path, "r"))) {
+			ast_log(LOG_ERROR, "unable to scan Polygator board \"%s\": %s\n", brd->name, strerror(errno));
+			goto pg_load_error;
+		}
+		while (fgets(buf, sizeof(buf), fp))
+		{
+			if (sscanf(buf, "AT%u %[0-9A-Za-z-] %[0-9A-Za-z-] VIO=%u", &pos, name, type, &vio) == 4) {
+
+				if (!(ch = ast_calloc(1, sizeof(struct pg_gsm_channel)))) {
+					ast_log(LOG_ERROR, "can't get memory for struct pg_gsm_channel\n");
+					goto pg_load_error;
+				}
+				// init channel
+				ast_mutex_init(&ch->lock);
+				ch->thread = AST_PTHREADT_NULL;
+				ch->pos_on_board = pos;
+				ch->board = brd;
+				ch->name = ast_strdup(name);
+				ch->gsm_module_type = pg_get_gsm_module_type(type);
+				// add channel into board channel list
+				AST_LIST_INSERT_TAIL(&brd->gsm_channel_list, ch, pg_board_gsm_channel_list_entry);
+				// add channel into general channel list
+				AST_LIST_INSERT_TAIL(&pg_general_gsm_channel_list, ch, pg_general_gsm_channel_list_entry);
+
+			} else if (sscanf(buf, "VIN%u %[0-9A-Za-z-]", &pos, name) == 2) {
+
+				if (!(vin = ast_calloc(1, sizeof(struct pg_vinetic)))) {
+					ast_log(LOG_ERROR, "can't get memory for struct pg_vinetic\n");
+					goto pg_load_error;
+				}
+				// init vinetic
+				ast_mutex_init(&vin->lock);
+				vin->thread = AST_PTHREADT_NULL;
+				vin->state = PG_VINETIC_STATE_INIT;
+				// add vinetic into board vinetic list
+				AST_LIST_INSERT_TAIL(&brd->vinetic_list, vin, pg_board_vinetic_list_entry);
+
+			} else {
+				ast_verbose("%s\n", buf);
+			}
+		}
+		fclose(fp);
+	}
 
 #if ASTERISK_VERSION_NUM >= 100000
 	struct ast_format tmpfmt;
@@ -732,6 +995,7 @@ pg_load_error:
 static int pg_unload(void)
 {
 	struct pg_board *brd;
+	struct pg_gsm_channel *ch;
 
 	ast_mutex_lock(&pg_lock);
 
@@ -747,9 +1011,23 @@ static int pg_unload(void)
 	pg_gsm_tech.capabilities = ast_format_cap_destroy(pg_gsm_tech.capabilities);
 #endif
 
+	// destroy general channel list
+	while ((ch = AST_LIST_REMOVE_HEAD(&pg_general_gsm_channel_list, pg_general_gsm_channel_list_entry)));
+
 	// destroy board list
-	while ((brd = AST_LIST_REMOVE_HEAD(&pg_board_list, pg_board_list_entry)))
+	while ((brd = AST_LIST_REMOVE_HEAD(&pg_general_board_list, pg_general_board_list_entry)))
+	{
+		// destroy general channel list
+		while ((ch = AST_LIST_REMOVE_HEAD(&brd->gsm_channel_list, pg_board_gsm_channel_list_entry)))
+		{
+			ast_free(ch->name);
+			ast_free(ch);
+		}
+		// free dynamic allocated memory
+		ast_free(brd->name);
+		ast_free(brd->type);
 		ast_free(brd);
+	}
 
 	// unregister atexit function
 	ast_unregister_atexit(pg_atexit);
@@ -757,7 +1035,7 @@ static int pg_unload(void)
 	ast_verbose("PG: module unloaded successfull\n");
 	ast_mutex_unlock(&pg_lock);
 	return 0;
-	}
+}
 //------------------------------------------------------------------------------
 // end of pg_unload()
 //------------------------------------------------------------------------------
