@@ -6,7 +6,7 @@ chan_pg_la_SOURCES = \
 		chan_pg.c \
 		at.c
 chan_pg_la_CFLAGS = $(AM_CFLAGS) -Wall
-chan_pg_la_LDFLAGS = -module -lsqlite3 -lvinetic
+chan_pg_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic
 
 firmwaredir = $(astdatadir)/polygator
 dist_firmware_DATA = \
