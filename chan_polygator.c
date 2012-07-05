@@ -40,7 +40,7 @@
 #include "libvinetic.h"
 
 #include "at.h"
-
+#include "strutil.h"
 
 enum {
 	PG_VINETIC_STATE_INIT = 1,
@@ -115,14 +115,24 @@ struct pg_gsm_channel {
 	ast_mutex_t lock;
 	pthread_t thread;
 
-	char *name;
+	char *device;
+	char *tty_path;
 	unsigned int gsm_module_type;	// type of GSM module ("SIM300", "M10", "SIM900", "SIM5215")
 
 	unsigned int pos_on_board;
 	struct pg_board *board;
 	
 	char *alias;
-	
+
+	// configuration
+	struct pg_gsm_channel_config {
+		unsigned int enable:1;
+		int baudrate;
+		char language[MAX_LANGUAGE];
+		char mohinterpret[MAX_MUSICCLASS];
+	} config;
+
+	// runtime flags
 	struct pg_gsm_channel_flags {
 		unsigned int enable:1;
 		unsigned int shutdown:1;
@@ -420,9 +430,201 @@ static inline struct pg_vinetic *pg_get_vinetic_from_board(struct pg_board *brd,
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_build_config_file()
+// pg_vinetic_workthread()
 //------------------------------------------------------------------------------
-static int pg_build_config_file(char *filename)
+static void *pg_vinetic_workthread(void *data)
+{
+	size_t i;
+	struct pg_vinetic *vin = (struct pg_vinetic *)data;
+
+	ast_debug(4, "vinetic=\"%s\": thread start\n", vin->name);
+
+	while (vin->run)
+	{
+		ast_mutex_lock(&vin->lock);
+
+		switch (vin->state)
+		{
+			case PG_VINETIC_STATE_INIT:
+				ast_debug(3, "vinetic=\"%s\": init\n", vin->name);
+
+				vin_init(&vin->context, "/dev/polygator/%s", vin->name);
+				vin_set_dev_name(&vin->context, vin->name);
+				vin_set_pram(&vin->context, "%s/polygator/edspPRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware);
+				vin_set_dram(&vin->context, "%s/polygator/edspDRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware);
+				vin_set_alm_dsp_ab(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->almab);
+				vin_set_alm_dsp_cd(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->almcd);
+				vin_set_cram(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->cram);
+				// open
+				if (vin_open(&vin->context) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_open(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+
+				vin->state = PG_VINETIC_STATE_IDLE;
+				break;
+			case PG_VINETIC_STATE_IDLE:
+				ast_debug(3, "vinetic=\"%s\": idle\n", vin->name);
+				ast_verb(3, "vinetic=\"%s\": start downloading firmware\n", vin->name);
+				// disable polling
+				if (vin_poll_disable(&vin->context) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_poll_disable(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				// reset
+				if (vin_reset(&vin->context) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_reset(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				// reset rdyq
+				if (vin_reset_rdyq(&vin->context) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_reset_rdyq(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				// check rdyq status
+				for (i=0; i<5000; i++)
+				{
+					if (!vin_is_not_ready(&vin->context)) break;
+					usleep(1000);
+				}
+				if (i == 5000) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": not ready\n", vin->name);
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				// disable all interrupt
+				if (vin_phi_disable_interrupt(&vin->context) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_phi_disable_interrupt(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				// revision
+				if (!vin_phi_revision(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_phi_revision(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				ast_verb(3, "vinetic=\"%s\": revision %s\n", vin->name, vin_revision_str(&vin->context));
+				// download EDSP firmware
+				if (vin_download_edsp_firmware(&vin->context) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_edsp_firmware(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_edsp_firmware(): line %d\n", vin->name, vin->context.errorline);
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				// enable polling
+				if (vin_poll_enable(&vin->context) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_poll_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				// firmware version
+				if (vin_read_fw_version(&vin->context) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_read_fw_version(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				ast_verb(3, "vinetic=\"%s\": EDSP firmware version %u.%u.%u\n", vin->name,
+					(vin->context.edsp_sw_version_register.mv << 13) +
+					(vin->context.edsp_sw_version_register.prt << 12) +
+					(vin->context.edsp_sw_version_register.features << 0),
+					vin->context.edsp_sw_version_register.main_version,
+					vin->context.edsp_sw_version_register.release);
+				// download ALM DSP AB firmware
+				if (vin_download_alm_dsp(&vin->context, vin->context.alm_dsp_ab_path) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(AB): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(AB): line %d\n", vin->name, vin->context.errorline);
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				if (vin_jump_alm_dsp(&vin->context, 0) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(AB): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(AB): line %d\n", vin->name, vin->context.errorline);
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				// download ALM DSP CD firmware...", vin_dev_name(&vin)); 
+				if (vin_download_alm_dsp(&vin->context, vin->context.alm_dsp_cd_path) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(CD): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(CD): line %d\n", vin->name, vin->context.errorline);
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				if (vin_jump_alm_dsp(&vin->context, 2) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(CD): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(CD): line %d\n", vin->name, vin->context.errorline);
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				// download CRAM
+				for (i=0; i<4; i++)
+				{
+					if (vin_download_cram(&vin->context, i, vin->context.cram_path) < 0) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_cram(): %s\n", vin->name, vin_error_str(&vin->context));
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_cram(): line %d\n", vin->name, vin->context.errorline);
+						ast_mutex_unlock(&vin->lock);
+						goto pg_vinetic_workthread_end;
+					}
+					if (vin_alm_channel_test_set(&vin->context, i, 1) < 0) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_alm_channel_test_set(): %s\n", vin->name, vin_error_str(&vin->context));
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_alm_channel_test_set(): line %d\n", vin->name, vin->context.errorline);
+						ast_mutex_unlock(&vin->lock);
+						goto pg_vinetic_workthread_end;
+					}
+					if (vin_alm_channel_dcctl_pram_set(&vin->context, i, 0) < 0) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_alm_channel_dcctl_pram_set(): %s\n", vin->name, vin_error_str(&vin->context));
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_alm_channel_dcctl_pram_set(): line %d\n", vin->name, vin->context.errorline);
+						ast_mutex_unlock(&vin->lock);
+						goto pg_vinetic_workthread_end;
+					}
+				}
+				// switch to little endian mode
+				if (vin_set_little_endian_mode(&vin->context) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_little_endian_mode(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				ast_verb(3, "vinetic=\"%s\": firmware downloading succeeded\n", vin->name);
+				vin->state = PG_VINETIC_STATE_RUN;
+				ast_debug(3, "vinetic=\"%s\": run\n", vin->name);
+				break;
+			case PG_VINETIC_STATE_RUN:
+				ast_mutex_unlock(&vin->lock);
+				if (vin_get_status(&vin->context) < 0)
+					ast_verbose("vinetic=\"%s\": status error\n", vin->name);
+				else
+					ast_verbose("vinetic=\"%s\": status ok\n", vin->name);
+				ast_mutex_lock(&vin->lock);
+				break;
+			default:
+				ast_log(LOG_ERROR, "vinetic=\"%s\": unknown state=%d\n", vin->name, vin->state);
+				vin->state = PG_VINETIC_STATE_IDLE;
+				break;
+		}
+		ast_mutex_unlock(&vin->lock);
+	}
+
+pg_vinetic_workthread_end:
+	ast_mutex_lock(&vin->lock);
+	vin_poll_disable(&vin->context);
+	vin_close(&vin->context);
+	ast_mutex_unlock(&vin->lock);
+	ast_debug(4, "vinetic=\"%s\": thread stop\n", vin->name);
+	vin->thread = AST_PTHREADT_NULL;
+	return NULL;
+}
+//------------------------------------------------------------------------------
+// end of pg_vinetic_workthread()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_config_file_build()
+//------------------------------------------------------------------------------
+static int pg_config_file_build(char *filename)
 {
 	FILE *fp;
 	char path[PATH_MAX];
@@ -435,10 +637,11 @@ static int pg_build_config_file(char *filename)
 
 	sprintf(path, "%s/%s", ast_config_AST_CONFIG_DIR, filename);
 	if (!(fp = fopen(path, "w"))) {
-		ast_log(LOG_ERROR, "fopen(%s): %s\n", path, strerror(errno));
+		ast_log(LOG_ERROR, "fopen(%s): %s\n", filename, strerror(errno));
 		return -1;
 	}
 
+#undef FORMAT_SEPARATOR_LINE
 #define FORMAT_SEPARATOR_LINE \
 ";-------------------------------------------------------------------------------\n"
 
@@ -495,7 +698,7 @@ static int pg_build_config_file(char *filename)
 		{
 			ast_mutex_lock(&gsm_ch->lock);
 			// GSM channel category
-			len += fprintf(fp, "[%s:gsm%u]\n", gsm_ch->board->name, gsm_ch->pos_on_board);
+			len += fprintf(fp, "[%s-gsm%u]\n", gsm_ch->board->name, gsm_ch->pos_on_board);
 			// alias
 			if (gsm_ch->alias)
 				len += fprintf(fp, "alias=%s\n", gsm_ch->alias);
@@ -515,7 +718,64 @@ static int pg_build_config_file(char *filename)
 	return len;
 }
 //------------------------------------------------------------------------------
-// end of pg_build_config_file()
+// end of pg_config_file_build()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_config_file_copy()
+//------------------------------------------------------------------------------
+static int pg_config_file_copy(char *dst, char *src)
+{
+	FILE *src_fp;
+	FILE *dst_fp;
+	char src_path[PATH_MAX];
+	char dst_path[PATH_MAX];
+
+	struct timeval curtime;
+
+	char buf[256];
+
+	// check source/destination path collision
+	if (!strcmp(src, dst)) {
+		ast_log(LOG_ERROR, "source=\"%s\" equal destination=\"%s\"\n", src, dst);
+		return -1;
+	}
+	// open source file
+	sprintf(src_path, "%s/%s", ast_config_AST_CONFIG_DIR, src);
+	if (!(src_fp = fopen(src_path, "r"))) {
+		ast_log(LOG_ERROR, "fopen(%s): %s\n", src, strerror(errno));
+		return -1;
+	}
+	// open destination file
+	sprintf(dst_path, "%s/%s", ast_config_AST_CONFIG_DIR, dst);
+	if (!(dst_fp = fopen(dst_path, "w"))) {
+		ast_log(LOG_ERROR, "fopen(%s): %s\n", dst, strerror(errno));
+		return -1;
+	}
+
+#undef FORMAT_SEPARATOR_LINE
+#define FORMAT_SEPARATOR_LINE \
+";-------------------------------------------------------------------------------\n"
+
+	ast_mutex_lock(&pg_lock);
+
+	// build copying header
+	fprintf(dst_fp, FORMAT_SEPARATOR_LINE);
+	gettimeofday(&curtime, NULL);
+	fprintf(dst_fp, "; %s copyed from file: %s at %s", dst, src, ctime(&curtime.tv_sec));
+
+	// copying source file to destination file
+	while (fgets(buf, sizeof(buf), src_fp))
+		fprintf(dst_fp, "%s", buf);
+
+	ast_mutex_unlock(&pg_lock);
+
+	fclose(src_fp);
+	fclose(dst_fp);
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_config_file_copy()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -956,7 +1216,7 @@ static char *pg_cli_show_channels(struct ast_cli_entry *e, int cmd, struct ast_c
 	size_t count;
 	struct pg_gsm_channel *gsm_ch;
 
-	char buf[256];
+	char buf[4];
 	char alias[64];
 	int number_fl;
 	int alias_fl;
@@ -1003,7 +1263,7 @@ static char *pg_cli_show_channels(struct ast_cli_entry *e, int cmd, struct ast_c
 		ast_mutex_lock(&gsm_ch->lock);
 		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
 		alias_fl = mmax(alias_fl, (gsm_ch->alias?strlen(gsm_ch->alias):snprintf(alias, sizeof(alias), "chan-%lu", (unsigned long int)count)));
-		device_fl = mmax(device_fl, snprintf(buf, sizeof(buf), "%s:%u", gsm_ch->board->name, gsm_ch->pos_on_board));
+		device_fl = mmax(device_fl, strlen(gsm_ch->device));
 		module_fl = mmax(module_fl, strlen(pg_gsm_module_type_to_string(gsm_ch->gsm_module_type)));
 		power_fl = mmax(power_fl, strlen(AST_CLI_ONOFF(gsm_ch->flags.enable)));
 		sim_fl = mmax(sim_fl, snprintf(buf, sizeof(buf), "%s", (gsm_ch->flags.sim_present)?("inserted"):("")));
@@ -1026,12 +1286,11 @@ static char *pg_cli_show_channels(struct ast_cli_entry *e, int cmd, struct ast_c
 		{
 			ast_mutex_lock(&gsm_ch->lock);
 
-			snprintf(buf, sizeof(buf), "%s:%u", gsm_ch->board->name, gsm_ch->pos_on_board);
 			snprintf(alias, sizeof(alias), "chan-%lu", (unsigned long int)count);
 			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
 					number_fl, (unsigned long int)count++,
 					alias_fl, (gsm_ch->alias?gsm_ch->alias:alias),
-					device_fl, buf,
+					device_fl, gsm_ch->device,
 					module_fl, pg_gsm_module_type_to_string(gsm_ch->gsm_module_type),
 					power_fl, AST_CLI_ONOFF(gsm_ch->flags.enable),
 					sim_fl, (gsm_ch->flags.sim_present)?("inserted"):(""),
@@ -1105,9 +1364,10 @@ static char *pg_cli_show_modinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 //------------------------------------------------------------------------------
 static char *pg_cli_config_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
-	char dstfn[64];
-	char newfile[PATH_MAX];
-	char oldfile[PATH_MAX];
+	char src_fn[64];
+	char dst_fn[64];
+	char src_path[PATH_MAX];
+	char dst_path[PATH_MAX];
 	int sz;
 
 	char *gline;
@@ -1119,7 +1379,7 @@ static char *pg_cli_config_actions(struct ast_cli_entry *e, int cmd, struct ast_
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator config [save|copy|delete]";
-			sprintf(pg_cli_config_actions_usage, "Usage: polygator config <operation>=\"save\"|\"copy\"|\"load\"|\"delete\"\n");
+			sprintf(pg_cli_config_actions_usage, "Usage: polygator config <operation>=\"save\"|\"copy\"|\"delete\"\n");
 			e->usage = pg_cli_config_actions_usage;
 			return NULL;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1140,255 +1400,92 @@ static char *pg_cli_config_actions(struct ast_cli_entry *e, int cmd, struct ast_
 	}
 
 	if (a->argc <= 2) {
-		sprintf(pg_cli_config_actions_usage, "Usage: polygator config <operation>=\"save\"|\"copy\"|\"load\"|\"delete\"\n");
+		sprintf(pg_cli_config_actions_usage, "Usage: polygator config <operation>=\"save\"|\"copy\"|\"delete\"\n");
 		return CLI_SHOWUSAGE;
 	}
 
-	
 	if (!strcasecmp(a->argv[2], "save")) {
 		// save config file
-		// get filename for store configuration
+		// get filename for configuration storage
 		if (a->argv[3]) {
 			// check for file name leaded "polygator"
 			if (!strncasecmp(a->argv[3], "polygator", strlen("polygator")))
-				sprintf(dstfn, "%s", a->argv[3]);
+				sprintf(dst_fn, "%s", a->argv[3]);
 			else {
-				ast_cli(a->fd, "  -- bad file name \"%s\" - must begin \"polygator\"\n", a->argv[3]);
+				ast_cli(a->fd, "  -- bad file name \"%s\" - must begin by \"polygator\"\n", a->argv[3]);
 				return CLI_SUCCESS;
 			}
 		} else
 			// use default filename "polygator.conf"
-			sprintf(dstfn, "%s", pg_config_file);
-		// build full path file name
+			sprintf(dst_fn, "%s", pg_config_file);
+		// build full path filename
 		// new file -- file to create
+		sprintf(dst_path, "%s/%s", ast_config_AST_CONFIG_DIR, dst_fn);
 		// old file -- file to backup
-		sprintf(newfile, "%s/%s", ast_config_AST_CONFIG_DIR, dstfn);
-		sprintf(oldfile, "%s/%s.bak", ast_config_AST_CONFIG_DIR, dstfn);
+		sprintf(src_path, "%s/%s.bak", ast_config_AST_CONFIG_DIR, dst_fn);
 		// if new file is existing file store as backup file
-		if (!rename(newfile, oldfile))
-			ast_cli(a->fd, "  -- file \"%s\" exist - stored as \"%s.bak\"\n", dstfn, dstfn);
+		if (!rename(dst_path, src_path))
+			ast_cli(a->fd, "  -- file \"%s\" exist - stored as \"%s.bak\"\n", dst_fn, dst_fn);
 		// build new configuration file
-		if((sz = pg_build_config_file(dstfn)) > 0)
-			ast_cli(a->fd, "  -- configuration saved to \"%s\" - %d bytes\n", dstfn, sz);
+		if ((sz = pg_config_file_build(dst_fn)) > 0)
+			ast_cli(a->fd, "  -- configuration saved to \"%s\" - %d bytes\n", dst_fn, sz);
 		else
-			ast_cli(a->fd, "  -- can't build \"%s\" file\n", dstfn);
-	} else if(!strcasecmp(a->argv[2], "copy")) {
+			ast_cli(a->fd, "  -- can't build \"%s\" file\n", dst_fn);
+	} else if (!strcasecmp(a->argv[2], "copy")) {
 		// copy config file
-		ast_cli(a->fd, "  -- operation not implemented\n");
+		// get destination filename
+		if (a->argv[3]) {
+			// check for file name leaded "polygator"
+			if (!strncasecmp(a->argv[3], "polygator", strlen("polygator")))
+				sprintf(dst_fn, "%s", a->argv[3]);
+			else {
+				ast_cli(a->fd, "  -- bad destination file name \"%s\" - must begin by \"polygator\"\n", a->argv[3]);
+				return CLI_SUCCESS;
+			}
+		} else {
+			sprintf(pg_cli_config_actions_usage, "Usage: polygator config copy <dst> [<src>]\ndefault src=%s\n", pg_config_file);
+			return CLI_SHOWUSAGE;
+		}
+		// get source filename - optional
+		if (a->argv[4]) {
+			// check for file name leaded "polygator"
+			if (!strncasecmp(a->argv[4], "polygator", strlen("polygator")))
+				sprintf(src_fn, "%s", a->argv[4]);
+			else {
+				ast_cli(a->fd, "  -- bad source file name \"%s\" - must begin by \"polygator\"\n", a->argv[4]);
+				return CLI_SUCCESS;
+			}
+		} else 
+			// use default filename "polygator.conf"
+			sprintf(src_fn, "%s", pg_config_file);
+		// copy configuration file
+		if (!pg_config_file_copy(dst_fn, src_fn))
+			ast_cli(a->fd, "  -- configuration copying from \"%s\" to \"%s\" succeeded\n", src_fn, dst_fn);
+		else
+			ast_cli(a->fd, "  -- can't copy configuration from \"%s\" to \"%s\"\n", src_fn, dst_fn);
 	} else if(!strcasecmp(a->argv[2], "delete")) {
 		// delete config file
 		// get filename for deleting
-		if (!a->argv[3]) {
-			sprintf(pg_cli_config_actions_usage, "Usage: polygator config delete <file>\n");
-			return CLI_SHOWUSAGE;
-		}
-		if (!strcmp(a->argv[3], pg_config_file)) {
-			sprintf(pg_cli_config_actions_usage, "Usage: polygator config delete <file>\n");
-			ast_cli(a->fd, "  -- file \"%s\" - cannot be deleted\n", pg_config_file);
-			return CLI_SUCCESS;
-		}
-		// build full path name for deleting file
-		sprintf(oldfile, "%s/%s", ast_config_AST_CONFIG_DIR, a->argv[3]);
+		if (a->argv[3])
+			snprintf(dst_fn, sizeof(dst_fn), "%s", a->argv[3]);
+		else
+			snprintf(dst_fn, sizeof(dst_fn), "%s", pg_config_file);
+		// build full path filename
+		sprintf(dst_path, "%s/%s", ast_config_AST_CONFIG_DIR, dst_fn);
 		// remove file from filesystem
-		if (unlink(oldfile) < 0)
-			ast_cli(a->fd, "  -- can't delete file \"%s\": %s\n", a->argv[3], strerror(errno));
-		ast_cli(a->fd, "  -- file \"%s\" deleted\n", a->argv[3]);
+		if (unlink(dst_path) < 0)
+			ast_cli(a->fd, "  -- can't delete file \"%s\": %s\n", dst_fn, strerror(errno));
+		else
+			ast_cli(a->fd, "  -- file \"%s\" deleted\n", dst_fn);
 	} else {
 		ast_cli(a->fd, "  -- unknown operation - %s\n", a->argv[2]);
-		sprintf(pg_cli_config_actions_usage, "Usage: polygator config <operation>=\"save\"|\"copy\"|\"load\"|\"delete\"\n");
+		sprintf(pg_cli_config_actions_usage, "Usage: polygator config <operation>=\"save\"|\"copy\"|\"delete\"\n");
 		return CLI_SHOWUSAGE;
 	}
 	return CLI_SUCCESS;
 }
 //------------------------------------------------------------------------------
 // end of pg_cli_config_actions()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_vinetic_workthread()
-//------------------------------------------------------------------------------
-static void *pg_vinetic_workthread(void *data)
-{
-	size_t i;
-	struct pg_vinetic *vin = (struct pg_vinetic *)data;
-
-	ast_debug(4, "vinetic=\"%s\": thread start\n", vin->name);
-
-	while (vin->run)
-	{
-		ast_mutex_lock(&vin->lock);
-
-		switch (vin->state)
-		{
-			case PG_VINETIC_STATE_INIT:
-				ast_debug(3, "vinetic=\"%s\": init\n", vin->name);
-
-				vin_init(&vin->context, "/dev/polygator/%s", vin->name);
-				vin_set_pram(&vin->context, "%s/polygator/edspPRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware);
-				vin_set_dram(&vin->context, "%s/polygator/edspDRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware);
-				vin_set_alm_dsp_ab(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->almab);
-				vin_set_alm_dsp_cd(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->almcd);
-				vin_set_cram(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->cram);
-
-				vin->state = PG_VINETIC_STATE_IDLE;
-				break;
-			case PG_VINETIC_STATE_IDLE:
-				ast_debug(3, "vinetic=\"%s\": idle\n", vin->name);
-				// open
-				if (vin_open(&vin->context) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_open(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// disable polling
-				if (vin_poll_set(&vin->context, 0) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_poll_set(0): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// reset
-				if (vin_reset(&vin->context) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_reset(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// reset rdyq
-				if (vin_reset_rdyq(&vin->context) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_reset_rdyq(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// check rdyq status
-				for (i=0; i<5000; i++)
-				{
-					if (!vin_is_not_ready(&vin->context)) break;
-					usleep(1000);
-				}
-				if (i == 5000) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": not ready\n", vin->name);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// disable all interrupt
-				if (vin_phi_disable_interrupt(&vin->context) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_phi_disable_interrupt(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// revision
-				if (!vin_phi_revision(&vin->context)) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_phi_revision(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				ast_verb(3, "vinetic=\"%s\": revision %s\n", vin->name, vin_revision_str(&vin->context));
-				// download EDSP firmware
-				if (vin_download_edsp_firmware(&vin->context) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_edsp_firmware(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_edsp_firmware(): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// enable polling
-				if (vin_poll_set(&vin->context, 1) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_poll_set(1): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// firmware version
-				if (vin_read_fw_version(&vin->context) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_read_fw_version(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				ast_verb(3, "vinetic=\"%s\": EDSP firmware version %u.%u.%u\n", vin->name,
-					(vin->context.edsp_sw_version_register.mv << 13) +
-					(vin->context.edsp_sw_version_register.prt << 12) +
-					(vin->context.edsp_sw_version_register.features << 0),
-					vin->context.edsp_sw_version_register.main_version,
-					vin->context.edsp_sw_version_register.release);
-				// download ALM DSP AB firmware
-				if (vin_download_alm_dsp(&vin->context, vin->context.alm_dsp_ab_path) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(AB): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(AB): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				if (vin_jump_alm_dsp(&vin->context, 0) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(AB): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(AB): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// download ALM DSP CD firmware...", vin_dev_name(&vin)); 
-				if (vin_download_alm_dsp(&vin->context, vin->context.alm_dsp_cd_path) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(CD): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(CD): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				if (vin_jump_alm_dsp(&vin->context, 2) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(CD): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(CD): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-				// download CRAM
-				for (i=0; i<4; i++)
-				{
-					if (vin_download_cram(&vin->context, i, vin->context.cram_path) < 0) {
-						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_cram(): %s\n", vin->name, vin_error_str(&vin->context));
-						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_cram(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
-					}
-					if (vin_alm_channel_test_set(&vin->context, i, 1) < 0) {
-						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_alm_channel_test_set(): %s\n", vin->name, vin_error_str(&vin->context));
-						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_alm_channel_test_set(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
-					}
-					if (vin_alm_channel_dcctl_pram_set(&vin->context, i, 0) < 0) {
-						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_alm_channel_dcctl_pram_set(): %s\n", vin->name, vin_error_str(&vin->context));
-						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_alm_channel_dcctl_pram_set(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
-					}
-				}
-				// switch to little endian mode
-				if (vin_set_little_endian_mode(&vin->context) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_little_endian_mode(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
-				}
-
-				vin->state = PG_VINETIC_STATE_RUN;
-				ast_debug(3, "vinetic=\"%s\": run\n", vin->name);
-				break;
-			case PG_VINETIC_STATE_RUN:
-				ast_mutex_unlock(&vin->lock);
-				sleep(1);
-				ast_mutex_lock(&vin->lock);
-				break;
-			default:
-				ast_log(LOG_ERROR, "vinetic=\"%s\": unknown state=%d\n", vin->name, vin->state);
-				vin->state = PG_VINETIC_STATE_IDLE;
-				break;
-		}
-		ast_mutex_unlock(&vin->lock);
-	}
-
-pg_vinetic_workthread_end:
-	ast_mutex_lock(&vin->lock);
-	vin_poll_set(&vin->context, 0);
-	vin_close(&vin->context);
-	ast_mutex_unlock(&vin->lock);
-	ast_debug(4, "vinetic=\"%s\": thread stop\n", vin->name);
-	vin->thread = AST_PTHREADT_NULL;
-	return NULL;
-}
-//------------------------------------------------------------------------------
-// end of pg_vinetic_workthread()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -1400,6 +1497,27 @@ static void pg_atexit(void)
 }
 //------------------------------------------------------------------------------
 // end of pg_atexit()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_get_config_variable()
+//------------------------------------------------------------------------------
+static const char *pg_get_config_variable(struct ast_config *ast_cfg, const char *category, const char *variable)
+{
+	const char *res = NULL;
+	char *cat = NULL;
+	
+	if (ast_cfg) {
+		while ((cat = ast_category_browse(ast_cfg, cat)))
+		{
+			if (!strcasecmp(cat, category))
+				res = ast_variable_retrieve(ast_cfg, cat, variable);
+		}
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_config_variable()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -1425,6 +1543,7 @@ static int pg_load(void)
 
 	struct ast_config *ast_cfg;
 	struct ast_flags ast_cfg_flags;
+	const char *cvar;
 
 	int is_wait;
 
@@ -1436,10 +1555,7 @@ static int pg_load(void)
 
 	// retrieve configuration from file
 	ast_cfg_flags.flags = 0;
-	if (!(ast_cfg = ast_config_load(pg_config_file, ast_cfg_flags))) {
-		ast_log(LOG_ERROR, "ast_config_load(%s): failed\n", pg_config_file);
-		goto pg_load_error;
-	}
+	ast_cfg = ast_config_load(pg_config_file, ast_cfg_flags);
 
 	// register atexit function
 	if (ast_register_atexit(pg_atexit) < 0) {
@@ -1490,8 +1606,9 @@ static int pg_load(void)
 		}
 		while (fgets(buf, sizeof(buf), fp))
 		{
-			if (sscanf(buf, "AT%u %[0-9A-Za-z-] %[0-9A-Za-z-] VIO=%u", &pos, name, type, &vio) == 4) {
-				ast_verbose("  found GSM channel=\"%s\"\n", name);
+			if (sscanf(buf, "GSM%u %[0-9A-Za-z-] %[0-9A-Za-z-] VIO=%u", &pos, name, type, &vio) == 4) {
+				snprintf(buf, sizeof(buf), "%s-gsm%u", brd->name, pos);
+				ast_verbose("  found GSM channel=\"%s\"\n", buf);
 				if (!(gsm_ch = ast_calloc(1, sizeof(struct pg_gsm_channel)))) {
 					ast_log(LOG_ERROR, "can't get memory for struct pg_gsm_channel\n");
 					goto pg_load_error;
@@ -1506,8 +1623,22 @@ static int pg_load(void)
 				gsm_ch->thread = AST_PTHREADT_NULL;
 				gsm_ch->pos_on_board = pos;
 				gsm_ch->board = brd;
-				gsm_ch->name = ast_strdup(name);
+				gsm_ch->device = ast_strdup(buf);
+				snprintf(path, sizeof(path), "/dev/polygator/%s", name);
+				gsm_ch->tty_path = ast_strdup(path);
 				gsm_ch->gsm_module_type = pg_get_gsm_module_type(type);
+				// get config variables
+				// enable
+				gsm_ch->config.enable = 0;
+				if ((cvar = pg_get_config_variable(ast_cfg, gsm_ch->device, "enable")))
+					gsm_ch->config.enable = -ast_true(cvar);
+				// baudrate
+				gsm_ch->config.baudrate = 115200;
+				if ((cvar = ast_variable_retrieve(ast_cfg, gsm_ch->device, "baudrate"))) {
+					if (is_str_digit(cvar))
+						gsm_ch->config.baudrate = atoi(cvar);
+				}
+
 			} else if (sscanf(buf, "VIN%uRTP%u %[0-9A-Za-z-]", &index, &pos, name) == 3) {
 				ast_verbose("  found RTP channel=\"%s\"\n", name);
 				if ((vin = pg_get_vinetic_from_board(brd, index))) {
@@ -1570,8 +1701,8 @@ static int pg_load(void)
 	ast_cli_register_multiple(pg_cli, sizeof(pg_cli)/sizeof(pg_cli[0]));
 	ast_verbose("Polygator: CLI registered\n");
 
-	// destroy configuration environment
-	ast_config_destroy(ast_cfg);
+	// destroy configuration environments
+	if (ast_cfg) ast_config_destroy(ast_cfg);
 
 	ast_verbose("Polygator: module loaded successfull\n");
 	ast_mutex_unlock(&pg_lock);
@@ -1621,7 +1752,8 @@ pg_load_error:
 		// destroy board GSM channel list
 		while ((gsm_ch = AST_LIST_REMOVE_HEAD(&brd->gsm_channel_list, pg_board_gsm_channel_list_entry)))
 		{
-			if (gsm_ch->name) ast_free(gsm_ch->name);
+			if (gsm_ch->device) ast_free(gsm_ch->device);
+			if (gsm_ch->tty_path) ast_free(gsm_ch->tty_path);
 			if (gsm_ch->alias) ast_free(gsm_ch->alias);
 			ast_free(gsm_ch);
 		}
@@ -1689,6 +1821,7 @@ static int pg_unload(void)
 				ast_mutex_lock(&vin->lock);
 				// clean run flag
 				vin->run = 0;
+				vin_reset_status(&vin->context);
 				// wait for thread is done
 				if (vin->thread != AST_PTHREADT_NULL) {
 					ast_mutex_unlock(&vin->lock);
@@ -1715,7 +1848,8 @@ static int pg_unload(void)
 		// destroy board GSM channel list
 		while ((gsm_ch = AST_LIST_REMOVE_HEAD(&brd->gsm_channel_list, pg_board_gsm_channel_list_entry)))
 		{
-			if (gsm_ch->name) ast_free(gsm_ch->name);
+			if (gsm_ch->device) ast_free(gsm_ch->device);
+			if (gsm_ch->tty_path) ast_free(gsm_ch->tty_path);
 			if (gsm_ch->alias) ast_free(gsm_ch->alias);
 			ast_free(gsm_ch);
 		}

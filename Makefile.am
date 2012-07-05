@@ -1,12 +1,13 @@
 
 ACLOCAL_AMFLAGS = -I m4 --install
 
-nobase_astmod_LTLIBRARIES = chan_pg.la
-chan_pg_la_SOURCES = \
-		chan_pg.c \
-		at.c
-chan_pg_la_CFLAGS = $(AM_CFLAGS) -Wall
-chan_pg_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic
+nobase_astmod_LTLIBRARIES = chan_polygator.la
+chan_polygator_la_SOURCES = \
+		chan_polygator.c \
+		at.c \
+		strutil.c
+chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
+chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic
 
 firmwaredir = $(astdatadir)/polygator
 dist_firmware_DATA = \
@@ -27,8 +28,8 @@ dist_firmware_DATA = \
 CLEANFILES = *~
 
 install-data-hook:
-	rm $(astmoddir)/chan_pg.so
-	mv $(astmoddir)/chan_pg.so.0.0.0 $(astmoddir)/chan_pg.so
-	rm $(astmoddir)/chan_pg.so.0
-	rm $(astmoddir)/chan_pg.a
-	rm $(astmoddir)/chan_pg.la
+	rm $(astmoddir)/chan_polygator.so
+	mv $(astmoddir)/chan_polygator.so.0.0.0 $(astmoddir)/chan_polygator.so
+	rm $(astmoddir)/chan_polygator.so.0
+	rm $(astmoddir)/chan_polygator.a
+	rm $(astmoddir)/chan_polygator.la

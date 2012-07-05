@@ -4,7 +4,7 @@
 AC_PREREQ([2.60])
 
 # set project attribute
-AC_INIT([chan-pg], [0.1.0])
+AC_INIT([chan-polygator], [0.1.0])
 
 AM_INIT_AUTOMAKE([-Wall -Werror])
 
@@ -21,7 +21,7 @@ AC_CANONICAL_HOST
 
 AC_CONFIG_MACRO_DIR([m4])
 
-AC_CONFIG_SRCDIR([chan_pg.c])
+AC_CONFIG_SRCDIR([chan_polygator.c])
 
 AC_COPYRIGHT("Polygator")
 AC_REVISION(0.1.0)
