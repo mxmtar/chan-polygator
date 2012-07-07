@@ -4,6 +4,7 @@ ACLOCAL_AMFLAGS = -I m4 --install
 nobase_astmod_LTLIBRARIES = chan_polygator.la
 chan_polygator_la_SOURCES = \
 		chan_polygator.c \
+		address.c \
 		at.c \
 		strutil.c
 chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
