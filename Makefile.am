@@ -5,8 +5,13 @@ nobase_astmod_LTLIBRARIES = chan_polygator.la
 chan_polygator_la_SOURCES = \
 		chan_polygator.c \
 		address.c \
+		sms.c \
+		strutil.c \
 		at.c \
-		strutil.c
+		m10.c \
+		sim300.c \
+		sim900.c
+
 chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
 chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic
 
