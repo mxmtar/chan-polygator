@@ -34,8 +34,8 @@ dist_firmware_DATA = \
 CLEANFILES = *~
 
 install-data-hook:
-	rm $(astmoddir)/chan_polygator.so
-	mv $(astmoddir)/chan_polygator.so.0.0.0 $(astmoddir)/chan_polygator.so
-	rm $(astmoddir)/chan_polygator.so.0
-	rm $(astmoddir)/chan_polygator.a
-	rm $(astmoddir)/chan_polygator.la
+	rm $(lt_sysroot)$(astmoddir)/chan_polygator.so
+	mv $(lt_sysroot)$(astmoddir)/chan_polygator.so.0.0.0 $(lt_sysroot)$(astmoddir)/chan_polygator.so
+	rm $(lt_sysroot)$(astmoddir)/chan_polygator.so.0
+	rm $(lt_sysroot)$(astmoddir)/chan_polygator.a
+	rm $(lt_sysroot)$(astmoddir)/chan_polygator.la
