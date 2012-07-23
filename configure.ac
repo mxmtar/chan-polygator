@@ -8,6 +8,8 @@ AC_INIT([chan-polygator], [0.1.0])
 
 AM_INIT_AUTOMAKE([-Wall -Werror])
 
+AM_PROG_AR
+
 # generating version string
 if test -f version ; then
 	PACKAGE_VERSION=`cat version`
