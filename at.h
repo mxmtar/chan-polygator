@@ -421,8 +421,6 @@ struct at_gen_clip_unsol{
 	int cli_validity;	// information of CLI validity
 	};
 //------------------------------------------------------------------------------
-// extern
-extern const char ctrlz;
 // prototype
 extern struct at_command *get_at_com_by_id(int id, const struct at_command *list, int maxnum);
 extern int is_at_com_done(const char *response);

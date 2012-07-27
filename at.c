@@ -9,8 +9,7 @@
 #include <string.h>
 
 #include "at.h"
-//------------------------------------------------------------------------------
-const char ctrlz = 0x1a;
+
 //------------------------------------------------------------------------------
 const struct at_command_operation at_com_oper_list[AT_OPER_COUNT] = {
 	{AT_OPER_EXEC, ""},

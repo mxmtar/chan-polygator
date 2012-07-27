@@ -179,7 +179,10 @@ struct sms{
 	};
 #endif
 //------------------------------------------------------------------------------
-
+// extern
+extern const char char_cr;
+extern const char char_lf;
+extern const char char_ctrlz;
 // prototypes
 extern int is_str_digit(const char *buf);
 extern int is_str_xdigit(const char *buf);

@@ -13,6 +13,11 @@
 #include <string.h>
 
 #include "strutil.h"
+
+const char char_lf = 0x0a;
+const char char_cr = 0x0d;
+const char char_ctrlz = 0x1a;
+
 //------------------------------------------------------------------------------
 #define UCS2_UNKNOWN_SYMBOL 0x3F00
 //------------------------------------------------------------------------------
