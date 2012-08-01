@@ -192,6 +192,17 @@ extern int str_bin_to_hex(char **instr, int *inlen, char **outstr, int *outlen);
 extern int str_hex_to_bin(char **instr, int *inlen, char **outstr, int *outlen);
 extern int from_ucs2_to_specset(char *specset, char **instr, int *inlen, char **outstr, int *outlen);
 
+#define is_str_begin_by(_str, _bgn) \
+	({ \
+		int __res; \
+		if (strncasecmp(_str, _bgn, strlen(_bgn))) \
+			__res = 0; \
+		else \
+			__res = 1; \
+		__res; \
+	})
+
+
 #endif //__STRUTIL_H__
 
 /******************************************************************************/
