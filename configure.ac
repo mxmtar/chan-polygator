@@ -8,7 +8,7 @@ AC_INIT([chan-polygator], [0.1.0])
 
 AM_INIT_AUTOMAKE([-Wall -Werror])
 
-AM_PROG_AR
+m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
 
 # generating version string
 if test -f version ; then
@@ -63,6 +63,13 @@ AC_PROG_GREP
 AC_PROG_INSTALL
 AC_PROG_SED
 AC_PROG_LIBTOOL
+
+CPPFLAGS="${CPPFLAGS} -I$lt_sysroot$prefix/include"
+if test -d "$lt_sysroot$astprefix/lib64" ; then
+	LIBS="${LIBS} -L$lt_sysroot$prefix/lib64"
+else
+	LIBS="${LIBS} -L$lt_sysroot$prefix/lib"
+fi
 
 # Checks for header files.
 AC_CHECK_HEADER([polygator/polygator-base.h], [], [echo "Polygator kernel module not installed" ; exit 1])

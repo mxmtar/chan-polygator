@@ -437,7 +437,7 @@ struct pg_channel_gsm {
 	int baudrate;
 	int baudrate_test;
 	AST_LIST_HEAD_NOLOCK(cmd_queue, pg_at_cmd) cmd_queue; /* AT-command queue */
-	int cmd_queue_length; /* AT-command queue */
+	struct pg_at_cmd *at_cmd; /* AT-command queue */
 	int cmd_done; /* AT-command queue */
 	int pdu_len;
 	int pdu_send_id;
@@ -2559,6 +2559,29 @@ static char pg_event_to_char(int event)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_atcommand_insert_spacer()
+//------------------------------------------------------------------------------
+static int pg_atcommand_insert_spacer(struct pg_channel_gsm* ch_gsm, int timeout)
+{
+	struct pg_at_cmd *cmd;
+
+	// creating command container
+	if (!(cmd = ast_calloc(1, sizeof(struct pg_at_cmd))))
+		return -1;
+	// set command data
+	cmd->id = -1; // spacer
+	cmd->timeout = timeout;
+
+	// append to head of queue
+	AST_LIST_INSERT_HEAD(&ch_gsm->cmd_queue, cmd, entry);
+
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_atcommand_insert_spacer()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_atcommand_queue_prepend()
 //------------------------------------------------------------------------------
 static int pg_atcommand_queue_prepend(struct pg_channel_gsm* ch_gsm,
@@ -2567,8 +2590,8 @@ static int pg_atcommand_queue_prepend(struct pg_channel_gsm* ch_gsm,
 										int subcmd,
 										int timeout,
 										int show,
-										const char *fmt, ...){
-
+										const char *fmt, ...)
+{
 	struct pg_at_cmd *cmd;
 	struct at_command *at;
 	char *opstr;
@@ -2626,11 +2649,11 @@ static int pg_atcommand_queue_prepend(struct pg_channel_gsm* ch_gsm,
 		cmd->cmd_len += sprintf(cmd->cmd_buf + cmd->cmd_len, "\r");
 	} else
 		cmd->cmd_len = sprintf(cmd->cmd_buf, "%s%s\r", cmd->at->name, opstr);
+
 	// append to head of queue
 	AST_LIST_INSERT_HEAD(&ch_gsm->cmd_queue, cmd, entry);
-	ch_gsm->cmd_queue_length++;
 
-	return ch_gsm->cmd_queue_length;
+	return 0;
 }
 //------------------------------------------------------------------------------
 // end of pg_atcommand_queue_prepend()
@@ -2645,8 +2668,8 @@ static int pg_atcommand_queue_append(struct pg_channel_gsm* ch_gsm,
 										int subcmd,
 										int timeout,
 										int show,
-										const char *fmt, ...){
-
+										const char *fmt, ...)
+{
 	struct pg_at_cmd *cmd;
 	struct at_command *at;
 	char *opstr;
@@ -2704,11 +2727,11 @@ static int pg_atcommand_queue_append(struct pg_channel_gsm* ch_gsm,
 		cmd->cmd_len += sprintf(cmd->cmd_buf + cmd->cmd_len, "\r");
 	} else
 		cmd->cmd_len = sprintf(cmd->cmd_buf, "%s%s\r", cmd->at->name, opstr);
+
 	// append to tail of queue
 	AST_LIST_INSERT_TAIL(&ch_gsm->cmd_queue, cmd, entry);
-	ch_gsm->cmd_queue_length++;
 
-	return ch_gsm->cmd_queue_length;
+	return 0;
 }
 //------------------------------------------------------------------------------
 // end of pg_atcommand_queue_append()
@@ -2725,73 +2748,84 @@ static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 	//
 	res = 0;
 	// check access to queue
-	if ((ch_gsm->cmd_queue.first) && (ch_gsm->cmd_done)) {
-		if (write(ch_gsm->tty_fd, ch_gsm->cmd_queue.first->cmd_buf, ch_gsm->cmd_queue.first->cmd_len) < 0) {
-			if (errno != EAGAIN) {
-				ast_log(LOG_ERROR, "GSM channel=\"%s\": write: %s\n", ch_gsm->alias, strerror(errno));
-				ch_gsm->cmd_done = 1;
-				res = -1;
+	if ((ch_gsm->cmd_done) && (ch_gsm->at_cmd = AST_LIST_REMOVE_HEAD(&ch_gsm->cmd_queue, entry))) {
+		// check for spacer
+		if (ch_gsm->at_cmd->id > -1) {
+			if (write(ch_gsm->tty_fd, ch_gsm->at_cmd->cmd_buf, ch_gsm->at_cmd->cmd_len) < 0) {
+				if (errno != EAGAIN) {
+					ast_log(LOG_ERROR, "GSM channel=\"%s\": write: %s\n", ch_gsm->alias, strerror(errno));
+					ast_free(ch_gsm->at_cmd);
+					ch_gsm->at_cmd = NULL;
+					ch_gsm->cmd_done = 1;
+					res = -1;
+				}
+			} else {
+				gettimeofday(&time_data, NULL);
+				timer.tv_sec = ch_gsm->at_cmd->timeout;
+				timer.tv_usec = 0;
+				x_timer_set(ch_gsm->at_cmd->timer, timer);
+				if (ch_gsm->at_cmd->show) {
+					write(ch_gsm->at_pipe[1], ch_gsm->at_cmd->cmd_buf, ch_gsm->at_cmd->cmd_len - 1);
+					write(ch_gsm->at_pipe[1], &char_lf, 1);
+				}
+				if (ch_gsm->debug.receiver) {
+					ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
+					if (ch_gsm->debug.receiver_debug_fp) {
+						if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
+							fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
+													time_ptr->tm_year + 1900,
+													time_ptr->tm_mon+1,
+													time_ptr->tm_mday,
+													time_ptr->tm_hour,
+													time_ptr->tm_min,
+													time_ptr->tm_sec,
+													time_data.tv_usec,
+													ch_gsm->at_cmd->cmd_len - 1,
+													ch_gsm->at_cmd->cmd_buf);
+						else
+							fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%ld.%06ld] AT send [%.*s]\n",
+													time_data.tv_sec,
+													time_data.tv_usec,
+													ch_gsm->at_cmd->cmd_len - 1,
+													ch_gsm->at_cmd->cmd_buf);
+						fflush(ch_gsm->debug.receiver_debug_fp);
+						fclose(ch_gsm->debug.receiver_debug_fp);
+						ch_gsm->debug.receiver_debug_fp = NULL;
+					}
+				}
+				if (ch_gsm->debug.at) {
+					ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
+					if (ch_gsm->debug.at_debug_fp) {
+						if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
+							fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
+													time_ptr->tm_year + 1900,
+													time_ptr->tm_mon+1,
+													time_ptr->tm_mday,
+													time_ptr->tm_hour,
+													time_ptr->tm_min,
+													time_ptr->tm_sec,
+													time_data.tv_usec,
+													ch_gsm->at_cmd->cmd_len - 1,
+													ch_gsm->at_cmd->cmd_buf);
+						else
+							fprintf(ch_gsm->debug.at_debug_fp, "[%ld.%06ld] AT send [%.*s]\n",
+													time_data.tv_sec,
+													time_data.tv_usec,
+													ch_gsm->at_cmd->cmd_len - 1,
+													ch_gsm->at_cmd->cmd_buf);
+						fflush(ch_gsm->debug.at_debug_fp);
+						fclose(ch_gsm->debug.at_debug_fp);
+						ch_gsm->debug.at_debug_fp = NULL;
+					}
+				}
 			}
+			ch_gsm->cmd_done = 0;
 		} else {
+			// spacer
 			gettimeofday(&time_data, NULL);
-			//
-			timer.tv_sec = ch_gsm->cmd_queue.first->timeout;
+			timer.tv_sec = ch_gsm->at_cmd->timeout;
 			timer.tv_usec = 0;
-			x_timer_set(ch_gsm->cmd_queue.first->timer, timer);
-			if (ch_gsm->cmd_queue.first->show) {
-				write(ch_gsm->at_pipe[1], ch_gsm->cmd_queue.first->cmd_buf, ch_gsm->cmd_queue.first->cmd_len - 1);
-				write(ch_gsm->at_pipe[1], &char_lf, 1);
-			}
-			if (ch_gsm->debug.receiver) {
-				ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
-				if (ch_gsm->debug.receiver_debug_fp) {
-					if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-						fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
-												time_ptr->tm_year + 1900,
-												time_ptr->tm_mon+1,
-												time_ptr->tm_mday,
-												time_ptr->tm_hour,
-												time_ptr->tm_min,
-												time_ptr->tm_sec,
-												time_data.tv_usec,
-												ch_gsm->cmd_queue.first->cmd_len - 1,
-												ch_gsm->cmd_queue.first->cmd_buf);
-					else
-						fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%ld.%06ld] AT send [%.*s]\n",
-												time_data.tv_sec,
-												time_data.tv_usec,
-												ch_gsm->cmd_queue.first->cmd_len - 1,
-												ch_gsm->cmd_queue.first->cmd_buf);
-					fflush(ch_gsm->debug.receiver_debug_fp);
-					fclose(ch_gsm->debug.receiver_debug_fp);
-					ch_gsm->debug.receiver_debug_fp = NULL;
-				}
-			}
-			if (ch_gsm->debug.at) {
-				ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
-				if (ch_gsm->debug.at_debug_fp) {
-					if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-						fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
-												time_ptr->tm_year + 1900,
-												time_ptr->tm_mon+1,
-												time_ptr->tm_mday,
-												time_ptr->tm_hour,
-												time_ptr->tm_min,
-												time_ptr->tm_sec,
-												time_data.tv_usec,
-												ch_gsm->cmd_queue.first->cmd_len - 1,
-												ch_gsm->cmd_queue.first->cmd_buf);
-					else
-						fprintf(ch_gsm->debug.at_debug_fp, "[%ld.%06ld] AT send [%.*s]\n",
-												time_data.tv_sec,
-												time_data.tv_usec,
-												ch_gsm->cmd_queue.first->cmd_len - 1,
-												ch_gsm->cmd_queue.first->cmd_buf);
-					fflush(ch_gsm->debug.at_debug_fp);
-					fclose(ch_gsm->debug.at_debug_fp);
-					ch_gsm->debug.at_debug_fp = NULL;
-				}
-			}
+			x_timer_set(ch_gsm->at_cmd->timer, timer);
 			ch_gsm->cmd_done = 0;
 		}
 	} // end od data to send is ready
@@ -2802,28 +2836,14 @@ static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_atcommand_queue_free()
-//------------------------------------------------------------------------------
-static inline void pg_atcommand_queue_free(struct pg_channel_gsm* ch_gsm, struct pg_at_cmd *cmd)
-{
-	if (cmd) {
-		ast_free(cmd);
-		ch_gsm->cmd_queue_length--;
-	}
-}
-//------------------------------------------------------------------------------
-// end of pg_atcommand_queue_free()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
 // pg_atcommand_queue_flush()
 //------------------------------------------------------------------------------
 static inline void pg_atcommand_queue_flush(struct pg_channel_gsm* ch_gsm)
 {
-	struct pg_at_cmd *cmd;
+	struct pg_at_cmd *at_cmd;
 	
-	while ((cmd = AST_LIST_REMOVE_HEAD(&ch_gsm->cmd_queue, entry)))
-		pg_atcommand_queue_free(ch_gsm, cmd);
+	while ((at_cmd = AST_LIST_REMOVE_HEAD(&ch_gsm->cmd_queue, entry)))
+		ast_free(at_cmd);
 }
 //------------------------------------------------------------------------------
 // end of pg_atcommand_queue_flush()
@@ -3060,6 +3080,13 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_enable(): line %d\n", vin->name, vin->context.errorline);
 				goto pg_channel_gsm_call_incoming_end;
 			}
+			// set coder configuration RTP
+			vin_coder_config_rtp_set_timestamp(vin->context, 0);
+			if ((res = vin_coder_config_rtp(vin->context)) < 0) {
+				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
+				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): line %d\n", vin->name, vin->context.errorline);
+				goto pg_channel_gsm_call_incoming_end;
+			}
 		}
 		// set coder channel RTP
 		vin_coder_channel_config_rtp_set_ssrc(vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);
@@ -3191,12 +3218,13 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 			if (call->state == PG_GSM_CALL_STATE_NULL) {
 				// Set GSM module audio channel
 				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
-					pg_atcommand_queue_prepend(ch_gsm, AT_SIM300_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+					pg_atcommand_queue_append(ch_gsm, AT_SIM300_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
 				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-					pg_atcommand_queue_prepend(ch_gsm, AT_SIM900_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+					pg_atcommand_queue_append(ch_gsm, AT_SIM900_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
 				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
-					pg_atcommand_queue_prepend(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
+					pg_atcommand_queue_append(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 				// Send ATD
+				pg_atcommand_insert_spacer(ch_gsm, 1);
 				if (pg_atcommand_queue_prepend(ch_gsm, AT_D, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "%s%s;", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value) < 0) {
 					while (ast_channel_trylock(call->owner))
 					{
@@ -3240,12 +3268,12 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 		case PG_GSM_CALL_MSG_RELEASE_REQ:
 			if (call->state != PG_GSM_CALL_STATE_RELEASE_INDICATION) {
 				if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
-					pg_atcommand_queue_append(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
+					pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 				} else {
 					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-						pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+						pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 					else
-						pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+						pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				}
 			}
 			pg_channel_gsm_put_call(ch_gsm, call);
@@ -3455,12 +3483,12 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 					ast_verb(2, "GSM channel=\"%s\": call line=%d: call from \"%s%s\" denied\n", ch_gsm->alias, call->line, (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
 					// hangup
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
-						pg_atcommand_queue_append(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
+						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
 						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-							pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						else
-							pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					}
 					pg_channel_gsm_put_call(ch_gsm, call);
 					res = 0;
@@ -3470,12 +3498,12 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 					ast_verb(2, "GSM channel=\"%s\": call line=%d: unknown type of incoming call\n", ch_gsm->alias, call->line);
 					// hangup
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
-						pg_atcommand_queue_append(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
+						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
 						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-							pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						else
-							pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					}
 					pg_channel_gsm_put_call(ch_gsm, call);
 					break;
@@ -3484,12 +3512,12 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 				if (pg_channel_gsm_call_incoming(ch_gsm, call) < 0) {
 					// error - hangup
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
-						pg_atcommand_queue_append(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
+						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
 						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-							pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						else
-							pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					}
 					pg_channel_gsm_put_call(ch_gsm, call);
 					break;
@@ -3526,9 +3554,9 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 // 				gettimeofday(&call->call_billing_start_time, NULL);
 				// send ANSWER command to GSM module
 				if (pg_channel_gsm_get_calls_count(ch_gsm) > 1)
-					pg_atcommand_queue_append(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "2");
+					pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "2");
 				else
-					pg_atcommand_queue_append(ch_gsm, AT_A, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+					pg_atcommand_queue_prepend(ch_gsm, AT_A, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				// set new state
 				ast_setstate(call->owner, AST_STATE_UP);
 				call->state = PG_GSM_CALL_STATE_ACTIVE;
@@ -3640,8 +3668,6 @@ static void *pg_channel_gsm_workthread(void *data)
 	char tmpbuf[512];
 	struct pdu *pdu, *curr;
 
-	struct pg_at_cmd *rm_cmd;
-
 	struct pg_gsm_call *call;
 
 	struct ast_channel *ast_ch_tmp = NULL;
@@ -3676,9 +3702,6 @@ static void *pg_channel_gsm_workthread(void *data)
 	}
 
 	// init command queue
-	ch_gsm->cmd_queue.first = NULL;
-	ch_gsm->cmd_queue.last = NULL;
-	ch_gsm->cmd_queue_length = 0;
 	ch_gsm->cmd_done = 1;
 
 	ch_gsm->pdu_cmt_wait = 0;
@@ -3863,117 +3886,123 @@ static void *pg_channel_gsm_workthread(void *data)
 		ast_mutex_lock(&ch_gsm->lock);
 
 		// check for command timeout expired
-		if (ch_gsm->cmd_queue.first) {
+		if (ch_gsm->at_cmd) {
 			// check command timeout
-			if (is_x_timer_enable(ch_gsm->cmd_queue.first->timer)) {
+			if (is_x_timer_enable(ch_gsm->at_cmd->timer)) {
 				// time is out
-				if (is_x_timer_fired(ch_gsm->cmd_queue.first->timer)) {
+				if (is_x_timer_fired(ch_gsm->at_cmd->timer)) {
 					// stop command timer
-					x_timer_stop(ch_gsm->cmd_queue.first->timer);
+					x_timer_stop(ch_gsm->at_cmd->timer);
 					ch_gsm->cmd_done = 1;
-					ast_debug(5, "GSM channel=\"%s\": AT [%.*s] attempt %lu\n", ch_gsm->alias, ch_gsm->cmd_queue.first->cmd_len - 1, ch_gsm->cmd_queue.first->cmd_buf, (unsigned long int)ch_gsm->cmd_queue.first->attempt);
-					if (ch_gsm->debug.receiver) {
-						ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
-						if (ch_gsm->debug.receiver_debug_fp) {
-							if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
-								fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT [%.*s] timeout attempt %lu\n",
-														tm_ptr->tm_year + 1900,
-														tm_ptr->tm_mon+1,
-														tm_ptr->tm_mday,
-														tm_ptr->tm_hour,
-														tm_ptr->tm_min,
-														tm_ptr->tm_sec,
-														curr_tv.tv_usec,
-														ch_gsm->cmd_queue.first->cmd_len - 1,
-				 										ch_gsm->cmd_queue.first->cmd_buf,
-				 										(unsigned long int)ch_gsm->cmd_queue.first->attempt);
-							else
-								fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%ld.%06ld] AT [%.*s] timeout attempt %lu\n",
-														curr_tv.tv_sec,
-														curr_tv.tv_usec,
-														ch_gsm->cmd_queue.first->cmd_len - 1,
-				 										ch_gsm->cmd_queue.first->cmd_buf,
-				 										(unsigned long int)ch_gsm->cmd_queue.first->attempt);
-							fflush(ch_gsm->debug.receiver_debug_fp);
-							fclose(ch_gsm->debug.receiver_debug_fp);
-							ch_gsm->debug.receiver_debug_fp = NULL;
-						}
-					}
-					if (ch_gsm->debug.at) {
-						ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
-						if (ch_gsm->debug.at_debug_fp) {
-							if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
-								fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT [%.*s] timeout attempt %lu\n",
-														tm_ptr->tm_year + 1900,
-														tm_ptr->tm_mon+1,
-														tm_ptr->tm_mday,
-														tm_ptr->tm_hour,
-														tm_ptr->tm_min,
-														tm_ptr->tm_sec,
-														curr_tv.tv_usec,
-														ch_gsm->cmd_queue.first->cmd_len - 1,
-				 										ch_gsm->cmd_queue.first->cmd_buf,
-				 										(unsigned long int)ch_gsm->cmd_queue.first->attempt);
-							else
-								fprintf(ch_gsm->debug.at_debug_fp, "[%ld.%06ld] AT [%.*s] timeout attempt %lu\n",
-														curr_tv.tv_sec,
-														curr_tv.tv_usec,
-														ch_gsm->cmd_queue.first->cmd_len - 1,
-				 										ch_gsm->cmd_queue.first->cmd_buf,
-				 										(unsigned long int)ch_gsm->cmd_queue.first->attempt);
-							fflush(ch_gsm->debug.at_debug_fp);
-							fclose(ch_gsm->debug.at_debug_fp);
-							ch_gsm->debug.at_debug_fp = NULL;
-						}
-					}
-					//
-					if (ch_gsm->cmd_queue.first->attempt) {
-						ch_gsm->cmd_queue.first->attempt--;
-						r_buf[0] = '\0';
-						r_cptr = r_buf;
-						r_buf_len = 0;
-						r_buf_valid = 0;
-						r_buf_active = 0;
-						pg_atcommand_trysend(ch_gsm);
+					// check for spacer
+					if (ch_gsm->at_cmd->id < 0) {
+						ast_free(ch_gsm->at_cmd);
+						ch_gsm->at_cmd = NULL;
 					} else {
-						if (!ch_gsm->flags.func_test_run) {
-							// stop all timers
-							memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-							// select AT command id
-							if (ch_gsm->cmd_queue.first->at->id == AT_D)
-								ast_log(LOG_NOTICE, "GSM channel=\"%s\": dialing failed\n", ch_gsm->alias);
-							else if (ch_gsm->cmd_queue.first->at->id == AT_H)
-								ast_log(LOG_NOTICE, "GSM channel=\"%s\": hangup - permission denied\n", ch_gsm->alias);
-							else {
-								ast_log(LOG_WARNING, "GSM channel=\"%s\": command [%.*s] timeout expired!!!\n",
-												ch_gsm->alias, ch_gsm->cmd_queue.first->cmd_len - 1, ch_gsm->cmd_queue.first->cmd_buf);
-								ast_verb(4, "GSM channel=\"%s\": run functionality test\n", ch_gsm->alias);
+						ast_debug(5, "GSM channel=\"%s\": AT [%.*s] attempt %lu\n", ch_gsm->alias, ch_gsm->at_cmd->cmd_len - 1, ch_gsm->at_cmd->cmd_buf, (unsigned long int)ch_gsm->at_cmd->attempt);
+						if (ch_gsm->debug.receiver) {
+							ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
+							if (ch_gsm->debug.receiver_debug_fp) {
+								if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
+									fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT [%.*s] timeout attempt %lu\n",
+															tm_ptr->tm_year + 1900,
+															tm_ptr->tm_mon+1,
+															tm_ptr->tm_mday,
+															tm_ptr->tm_hour,
+															tm_ptr->tm_min,
+															tm_ptr->tm_sec,
+															curr_tv.tv_usec,
+															ch_gsm->at_cmd->cmd_len - 1,
+				 											ch_gsm->at_cmd->cmd_buf,
+					 										(unsigned long int)ch_gsm->at_cmd->attempt);
+								else
+									fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%ld.%06ld] AT [%.*s] timeout attempt %lu\n",
+															curr_tv.tv_sec,
+															curr_tv.tv_usec,
+															ch_gsm->at_cmd->cmd_len - 1,
+				 											ch_gsm->at_cmd->cmd_buf,
+				 											(unsigned long int)ch_gsm->at_cmd->attempt);
+								fflush(ch_gsm->debug.receiver_debug_fp);
+								fclose(ch_gsm->debug.receiver_debug_fp);
+								ch_gsm->debug.receiver_debug_fp = NULL;
 							}
-							// hangup active call
-							AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-								pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
-							// run functionality test
-							ch_gsm->flags.func_test_run = 1;
-							ch_gsm->flags.func_test_done = 0;
-							ch_gsm->baudrate_test = ch_gsm->baudrate;
-							ch_gsm->baudrate = 0;
-							ch_gsm->state = PG_CHANNEL_GSM_STATE_TEST_FUN;
-							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-							// flush at command queue
-							pg_atcommand_queue_flush(ch_gsm);
-							// run testfun timer
-							x_timer_set(ch_gsm->timers.testfun, testfun_timeout);
-							// run testfunsend timer
-							x_timer_set(ch_gsm->timers.testfunsend, testfunsend_timeout);
-							// reset sms send operation
-							ch_gsm->pdu_send_id = 0;
 						}
-						// init at command buffer
-						r_buf[0] = '\0';
-						r_cptr = r_buf;
-						r_buf_len = 0;
-						r_buf_valid = 0;
-						r_buf_active = 0;
+						if (ch_gsm->debug.at) {
+							ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
+							if (ch_gsm->debug.at_debug_fp) {
+								if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
+									fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT [%.*s] timeout attempt %lu\n",
+															tm_ptr->tm_year + 1900,
+															tm_ptr->tm_mon+1,
+															tm_ptr->tm_mday,
+															tm_ptr->tm_hour,
+															tm_ptr->tm_min,
+															tm_ptr->tm_sec,
+															curr_tv.tv_usec,
+															ch_gsm->at_cmd->cmd_len - 1,
+				 											ch_gsm->at_cmd->cmd_buf,
+				 											(unsigned long int)ch_gsm->at_cmd->attempt);
+								else
+									fprintf(ch_gsm->debug.at_debug_fp, "[%ld.%06ld] AT [%.*s] timeout attempt %lu\n",
+															curr_tv.tv_sec,
+															curr_tv.tv_usec,
+															ch_gsm->at_cmd->cmd_len - 1,
+				 											ch_gsm->at_cmd->cmd_buf,
+					 										(unsigned long int)ch_gsm->at_cmd->attempt);
+								fflush(ch_gsm->debug.at_debug_fp);
+								fclose(ch_gsm->debug.at_debug_fp);
+								ch_gsm->debug.at_debug_fp = NULL;
+							}
+						}
+						//
+						if (ch_gsm->at_cmd->attempt) {
+							ch_gsm->at_cmd->attempt--;
+							r_buf[0] = '\0';
+							r_cptr = r_buf;
+							r_buf_len = 0;
+							r_buf_valid = 0;
+							r_buf_active = 0;
+							pg_atcommand_trysend(ch_gsm);
+						} else {
+							if (!ch_gsm->flags.func_test_run) {
+								// stop all timers
+								memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
+								// select AT command id
+								if (ch_gsm->at_cmd->at->id == AT_D)
+									ast_log(LOG_NOTICE, "GSM channel=\"%s\": dialing failed\n", ch_gsm->alias);
+								else if (ch_gsm->at_cmd->at->id == AT_H)
+									ast_log(LOG_NOTICE, "GSM channel=\"%s\": hangup - permission denied\n", ch_gsm->alias);
+								else {
+									ast_log(LOG_WARNING, "GSM channel=\"%s\": command [%.*s] timeout expired!!!\n",
+													ch_gsm->alias, ch_gsm->at_cmd->cmd_len - 1, ch_gsm->at_cmd->cmd_buf);
+									ast_verb(4, "GSM channel=\"%s\": run functionality test\n", ch_gsm->alias);
+								}
+								// hangup active call
+								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
+									pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+								// run functionality test
+								ch_gsm->flags.func_test_run = 1;
+								ch_gsm->flags.func_test_done = 0;
+								ch_gsm->baudrate_test = ch_gsm->baudrate;
+								ch_gsm->baudrate = 0;
+								ch_gsm->state = PG_CHANNEL_GSM_STATE_TEST_FUN;
+								ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+								// flush at command queue
+								pg_atcommand_queue_flush(ch_gsm);
+								// run testfun timer
+								x_timer_set(ch_gsm->timers.testfun, testfun_timeout);
+								// run testfunsend timer
+								x_timer_set(ch_gsm->timers.testfunsend, testfunsend_timeout);
+								// reset sms send operation
+								ch_gsm->pdu_send_id = 0;
+							}
+							// init at command buffer
+							r_buf[0] = '\0';
+							r_cptr = r_buf;
+							r_buf_len = 0;
+							r_buf_valid = 0;
+							r_buf_active = 0;
+						}
 					}
 				} // end of timer fired
 			} // end of timer run
@@ -3981,8 +4010,8 @@ static void *pg_channel_gsm_workthread(void *data)
 
 		if (r_buf_valid) {
 			// is response from module
-			if ((ch_gsm->cmd_queue.first) && (is_at_com_response(ch_gsm->cmd_queue.first->at, r_buf))) {
-				if (ch_gsm->cmd_queue.first->show) {
+			if ((ch_gsm->at_cmd) && (is_at_com_response(ch_gsm->at_cmd->at, r_buf))) {
+				if (ch_gsm->at_cmd->show) {
 					write(ch_gsm->at_pipe[1], r_buf, r_buf_len);
 					write(ch_gsm->at_pipe[1], &char_lf, 1);
 				}
@@ -3998,15 +4027,15 @@ static void *pg_channel_gsm_workthread(void *data)
 													tm_ptr->tm_min,
 													tm_ptr->tm_sec,
 													curr_tv.tv_usec,
-													ch_gsm->cmd_queue.first->cmd_len - 1,
-													ch_gsm->cmd_queue.first->cmd_buf,
+													ch_gsm->at_cmd->cmd_len - 1,
+													ch_gsm->at_cmd->cmd_buf,
 													r_buf);
 						else
 							fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%ld.%06ld] AT recv [%.*s] - [%s] - ",
 													curr_tv.tv_sec,
 													curr_tv.tv_usec,
-													ch_gsm->cmd_queue.first->cmd_len - 1,
-													ch_gsm->cmd_queue.first->cmd_buf,
+													ch_gsm->at_cmd->cmd_len - 1,
+													ch_gsm->at_cmd->cmd_buf,
 													r_buf);
 						fflush(ch_gsm->debug.receiver_debug_fp);
 						fclose(ch_gsm->debug.receiver_debug_fp);
@@ -4025,15 +4054,15 @@ static void *pg_channel_gsm_workthread(void *data)
 													tm_ptr->tm_min,
 													tm_ptr->tm_sec,
 													curr_tv.tv_usec,
-													ch_gsm->cmd_queue.first->cmd_len - 1,
-													ch_gsm->cmd_queue.first->cmd_buf,
+													ch_gsm->at_cmd->cmd_len - 1,
+													ch_gsm->at_cmd->cmd_buf,
 													r_buf);
 						else
 							fprintf(ch_gsm->debug.at_debug_fp, "[%ld.%06ld] AT recv [%.*s] - [%s] - ",
 													curr_tv.tv_sec,
 													curr_tv.tv_usec,
-													ch_gsm->cmd_queue.first->cmd_len - 1,
-													ch_gsm->cmd_queue.first->cmd_buf,
+													ch_gsm->at_cmd->cmd_len - 1,
+													ch_gsm->at_cmd->cmd_buf,
 													r_buf);
 						fflush(ch_gsm->debug.at_debug_fp);
 						fclose(ch_gsm->debug.at_debug_fp);
@@ -4042,7 +4071,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				}					
 				// test for command done
 				if (is_at_com_done(r_buf)) {
-					if (ch_gsm->cmd_queue.first->show)
+					if (ch_gsm->at_cmd->show)
 						close(ch_gsm->at_pipe[1]);
 					if (ch_gsm->debug.receiver) {
 						ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
@@ -4085,20 +4114,20 @@ static void *pg_channel_gsm_workthread(void *data)
 				}
 				// general AT commands
 				// select by operation
-				if (ch_gsm->cmd_queue.first->oper == AT_OPER_EXEC) {
+				if (ch_gsm->at_cmd->oper == AT_OPER_EXEC) {
 					// EXEC operations
-					switch (ch_gsm->cmd_queue.first->id)
+					switch (ch_gsm->at_cmd->id)
 					{
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_D:
 						case AT_A:
 						case AT_H:
 							if (is_str_begin_by(r_buf, "ERROR")) {
-								if (ch_gsm->cmd_queue.first->attempt) {
-									ch_gsm->cmd_queue.first->attempt--;
+								if (ch_gsm->at_cmd->attempt) {
+									ch_gsm->at_cmd->attempt--;
 									pg_atcommand_trysend(ch_gsm);
 								} else {
-									ast_log(LOG_WARNING, "GSM channel=\"%s\": command [%.*s] attempts count fired!!!\n", ch_gsm->alias, ch_gsm->cmd_queue.first->cmd_len - 1, ch_gsm->cmd_queue.first->cmd_buf);
+									ast_log(LOG_WARNING, "GSM channel=\"%s\": command [%.*s] attempts count fired!!!\n", ch_gsm->alias, ch_gsm->at_cmd->cmd_len - 1, ch_gsm->at_cmd->cmd_buf);
 									// hangup unconfirmed call
 									AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
 									{
@@ -4305,18 +4334,18 @@ static void *pg_channel_gsm_workthread(void *data)
 							break;
 						}
 					} // end of EXEC operations
-				else if (ch_gsm->cmd_queue.first->oper == AT_OPER_TEST) {
+				else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
 					// TEST operations
-					switch (ch_gsm->cmd_queue.first->id)
+					switch (ch_gsm->at_cmd->id)
 					{
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						default:
 							break;
 					}
 				} // end of TEST operations
-				else if (ch_gsm->cmd_queue.first->oper == AT_OPER_READ) {
+				else if (ch_gsm->at_cmd->oper == AT_OPER_READ) {
 					// READ operations
-					switch (ch_gsm->cmd_queue.first->id)
+					switch (ch_gsm->at_cmd->id)
 					{
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CLIR:
@@ -4413,9 +4442,9 @@ static void *pg_channel_gsm_workthread(void *data)
 											if (chnl->owner) {
 												// hangup - GSM
 												if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-													pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+													pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 												else
-													pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+													pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 												// hangup - asterisk core call
 // 												eggsm_call_sm(chnl, CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
 											}
@@ -4700,9 +4729,9 @@ static void *pg_channel_gsm_workthread(void *data)
 							break;
 						}
 					} // end of READ operations
-				else if (ch_gsm->cmd_queue.first->oper == AT_OPER_WRITE) {
+				else if (ch_gsm->at_cmd->oper == AT_OPER_WRITE) {
 					// WRITE operations
-					switch (ch_gsm->cmd_queue.first->id)
+					switch (ch_gsm->at_cmd->id)
 					{
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CCWA:
@@ -4732,7 +4761,7 @@ static void *pg_channel_gsm_workthread(void *data)
 									}
 								}
 							} else if (strstr(r_buf, "OK")) {
-								if (ch_gsm->cmd_queue.first->sub_cmd == PG_AT_SUBCMD_CCWA_SET)
+								if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CCWA_SET)
 									ch_gsm->callwait = ch_gsm->config.callwait;
 								if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SERVICE) {
 									ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
@@ -4847,7 +4876,7 @@ static void *pg_channel_gsm_workthread(void *data)
 									ast_log(LOG_ERROR, "GSM channel=\"%s\": at_gen_cusd_write_parse(%.*s) error\n", ch_gsm->alias, r_buf_len, r_buf);
 									if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
 									ch_gsm->ussd = ast_strdup("USSD response parsing error");
-									if (ch_gsm->cmd_queue.first->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+									if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 										if (ch_gsm->balance) ast_free(ch_gsm->balance);
 										ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 									}
@@ -4858,7 +4887,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										if ((str0 =  get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs))) {
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
 											ch_gsm->ussd = ast_strdup(str0);
-											if (ch_gsm->cmd_queue.first->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
@@ -4868,7 +4897,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										} else {
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
 											ch_gsm->ussd = ast_strdup("bad response");
-											if (ch_gsm->cmd_queue.first->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
@@ -4879,7 +4908,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										if (parser_ptrs.cusd_wr->n == 0) {
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
 											ch_gsm->ussd = ast_strdup("empty response");
-											if (ch_gsm->cmd_queue.first->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
@@ -4889,7 +4918,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										else if (parser_ptrs.cusd_wr->n == 1) {
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
 											ch_gsm->ussd = ast_strdup("response can't be presented");
-											if (ch_gsm->cmd_queue.first->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
@@ -4899,7 +4928,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										else if (parser_ptrs.cusd_wr->n == 2) {
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
 											ch_gsm->ussd = ast_strdup("bad request");
-											if (ch_gsm->cmd_queue.first->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
@@ -4918,7 +4947,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							else if (strstr(r_buf, "ERROR")) {
 								if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
 								ch_gsm->ussd = ast_strdup("AT command error");
-								if (ch_gsm->cmd_queue.first->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+								if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 									if (ch_gsm->balance) ast_free(ch_gsm->balance);
 									ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 								}
@@ -4933,7 +4962,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CMGR:
 #if 0
-							if (ch_gsm->cmd_queue.first->sub_cmd == PG_AT_SUBCMD_CMGR_USER) {
+							if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CMGR_USER) {
 								if(strstr(r_buf, "+CMGR:")){
 									parser_ptrs.cmgr_wr = (struct at_gen_cmgr_write *)tmpbuf;
 									if(at_gen_cmgr_write_parse(r_buf, r_buf_len, chnl->parser_ptrs.cmgr_wr) < 0){
@@ -5621,16 +5650,16 @@ static void *pg_channel_gsm_workthread(void *data)
 				else
 					ast_log(LOG_ERROR, "GSM channel=\"%s\": general AT command [%.*s] with unknown [%0X] operation\n",
 							ch_gsm->alias,
-							ch_gsm->cmd_queue.first->cmd_len - 1,
-							ch_gsm->cmd_queue.first->cmd_buf,
-							ch_gsm->cmd_queue.first->oper);
+							ch_gsm->at_cmd->cmd_len - 1,
+							ch_gsm->at_cmd->cmd_buf,
+							ch_gsm->at_cmd->oper);
 
 				// SIM300 AT commands
 				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
 					// select by operation
-					if (ch_gsm->cmd_queue.first->oper == AT_OPER_EXEC) {
+					if (ch_gsm->at_cmd->oper == AT_OPER_EXEC) {
 						// EXEC operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM300_CCID:
@@ -5678,18 +5707,18 @@ static void *pg_channel_gsm_workthread(void *data)
 								break;
 						}
 					}
-					else if (ch_gsm->cmd_queue.first->oper == AT_OPER_TEST) {
+					else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
 						// TEST operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							default:
 								break;
 						}
 					}
-					else if(ch_gsm->cmd_queue.first->oper == AT_OPER_READ){
+					else if(ch_gsm->at_cmd->oper == AT_OPER_READ){
 						// READ operations
-						switch(ch_gsm->cmd_queue.first->id){
+						switch(ch_gsm->at_cmd->id){
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM300_CMIC:
 								if (strstr(r_buf, "+CMIC:")) {
@@ -5779,9 +5808,9 @@ static void *pg_channel_gsm_workthread(void *data)
 							default:
 								break;
 						}
-					} else if (ch_gsm->cmd_queue.first->oper == AT_OPER_WRITE) {
+					} else if (ch_gsm->at_cmd->oper == AT_OPER_WRITE) {
 						// WRITE operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM300_CMIC:
@@ -5800,9 +5829,9 @@ static void *pg_channel_gsm_workthread(void *data)
 				// SIM900 AT commands
 				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 					// select by operation
-					if (ch_gsm->cmd_queue.first->oper == AT_OPER_EXEC) {
+					if (ch_gsm->at_cmd->oper == AT_OPER_EXEC) {
 						// EXEC operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM900_CCID:
@@ -5849,17 +5878,17 @@ static void *pg_channel_gsm_workthread(void *data)
 							default:
 								break;
 							}
-					} else if (ch_gsm->cmd_queue.first->oper == AT_OPER_TEST) {
+					} else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
 						// TEST operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							default:
 								break;
 						}
-					} else if(ch_gsm->cmd_queue.first->oper == AT_OPER_READ) {
+					} else if(ch_gsm->at_cmd->oper == AT_OPER_READ) {
 						// READ operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM900_CMIC:
@@ -5955,9 +5984,9 @@ static void *pg_channel_gsm_workthread(void *data)
 							default:
 								break;
 						}
-					} else if (ch_gsm->cmd_queue.first->oper == AT_OPER_WRITE) {
+					} else if (ch_gsm->at_cmd->oper == AT_OPER_WRITE) {
 						// WRITE operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM900_CMIC:
@@ -5976,9 +6005,9 @@ static void *pg_channel_gsm_workthread(void *data)
 				// M10 AT commands
 				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 					// select by operation
-					if (ch_gsm->cmd_queue.first->oper == AT_OPER_EXEC) {
+					if (ch_gsm->at_cmd->oper == AT_OPER_EXEC) {
 						// EXEC operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_M10_QCCID:
@@ -6026,18 +6055,18 @@ static void *pg_channel_gsm_workthread(void *data)
 								break;
 						}
 					}
-					else if (ch_gsm->cmd_queue.first->oper == AT_OPER_TEST) {
+					else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
 						// TEST operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							default:
 								break;
 						}
 					}
-					else if (ch_gsm->cmd_queue.first->oper == AT_OPER_READ) {
+					else if (ch_gsm->at_cmd->oper == AT_OPER_READ) {
 						// READ operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_M10_QMIC:
@@ -6127,9 +6156,9 @@ static void *pg_channel_gsm_workthread(void *data)
 							default:
 								break;
 						}
-					} else if (ch_gsm->cmd_queue.first->oper == AT_OPER_WRITE) {
+					} else if (ch_gsm->at_cmd->oper == AT_OPER_WRITE) {
 						// WRITE operations
-						switch (ch_gsm->cmd_queue.first->id)
+						switch (ch_gsm->at_cmd->id)
 						{
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_M10_QMIC:
@@ -6147,8 +6176,8 @@ static void *pg_channel_gsm_workthread(void *data)
 				// test for command done
 				if (ch_gsm->cmd_done) {
 					// if done -> remove from queue
-					rm_cmd = AST_LIST_REMOVE_HEAD(&ch_gsm->cmd_queue, entry);
-					pg_atcommand_queue_free(ch_gsm, rm_cmd);
+					ast_free(ch_gsm->at_cmd);
+					ch_gsm->at_cmd = NULL;
 					r_buf_active = 0;
 				}
 				r_buf[0] = '\0';
@@ -6273,7 +6302,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					{
 						if (call->state == PG_GSM_CALL_STATE_CALL_RECEIVED)
 							pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, 0);
-						else if (call->state == PG_GSM_CALL_STATE_CALL_DELIVERED)
+						else if ((call->state == PG_GSM_CALL_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_GSM_CALL_STATE_CALL_DELIVERED))
 							pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NO_ANSWER);
 						else if (call->state == PG_GSM_CALL_STATE_ACTIVE)
 							pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
@@ -7304,12 +7333,12 @@ static void *pg_channel_gsm_workthread(void *data)
 					pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NO_ANSWER);
 					// hangup gsm channel
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
-						pg_atcommand_queue_append(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
+						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
 						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-							pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						else
-							pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					}
 					// stop dial timer
 					x_timer_stop(call->timers.dial);
@@ -7874,9 +7903,9 @@ static void *pg_channel_gsm_workthread(void *data)
 			if(ch_gsm->owner){
 				// hangup - GSM
 				if(ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-					pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+					pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 				else
-					pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+					pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				// hangup - asterisk core call
 				eggsm_call_sm(chnl, CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
 			}
@@ -7943,9 +7972,9 @@ static void *pg_channel_gsm_workthread(void *data)
 			if(ch_gsm->owner){
 				// hangup - GSM
 				if(ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-					pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+					pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 				else
-					pg_atcommand_queue_append(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+					pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				// hangup - asterisk core call
 				eggsm_call_sm(chnl, CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
 				}
@@ -9369,6 +9398,13 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_enable(): line %d\n", vin->name, vin->context.errorline);
 				goto pg_gsm_requester_vinetic_end;
 			}
+			// set coder configuration RTP
+			vin_coder_config_rtp_set_timestamp(vin->context, 0);
+			if ((res = vin_coder_config_rtp(vin->context)) < 0) {
+				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
+				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): line %d\n", vin->name, vin->context.errorline);
+				goto pg_gsm_requester_vinetic_end;
+			}
 		}
 		// set coder channel RTP
 		vin_coder_channel_config_rtp_set_ssrc(vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);
@@ -10103,7 +10139,7 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 	if (rtp_hdr_ptr->payload_type == rtp->event_payload_type) {
 		// check sequence number for monotonic increasing
 		seq_num = ntohs(rtp_hdr_ptr->sequence_number);
-		if ((seq_num <= rtp->recv_seq_num) && (!seq_num) && (rtp->recv_seq_num !=0xffff)) {
+		if ((seq_num) && (seq_num <= rtp->recv_seq_num)) {
 			ast_verb(4, "RTP Channel=\"%s\": sequence number=%u is less then or equal previous received=%u\n", rtp->name, seq_num, rtp->recv_seq_num);
 			ast_mutex_unlock(&rtp->lock);
 			return &ast_null_frame;
@@ -10157,7 +10193,6 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 			ast_mutex_unlock(&rtp->lock);
 			return &rtp->frame;
 		}
-
 		// check for stop event
 		if ((rtp->event_is_now_recv) && (event_ptr->end)) {
 			// now event end
@@ -10173,7 +10208,6 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 		ast_mutex_unlock(&rtp->lock);
 		return &ast_null_frame;
 	}
-
 	// check sequence number for monotonic increasing
 	seq_num = ntohs(rtp_hdr_ptr->sequence_number);
 	// if rtp session just started
@@ -10183,13 +10217,11 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 		rtp->recv_seq_num = seq_num - 1;
 		
 	}
-	if ((seq_num <= rtp->recv_seq_num) && (!seq_num) && (rtp->recv_seq_num !=0xffff)) {
-		ast_verb(4, "RTP Channel=\"%s\": sequence number=%u is less then or equal previous received=%u\n",
-				 rtp->name, seq_num, rtp->recv_seq_num);
+	if ((seq_num) && (seq_num <= rtp->recv_seq_num)) {
+		ast_verb(4, "RTP Channel=\"%s\": sequence number=%u is less then or equal previous received=%u\n", rtp->name, seq_num, rtp->recv_seq_num);
 		ast_mutex_unlock(&rtp->lock);
 		return &ast_null_frame;
 	}
-
 	// check timestamp value
 	timestamp = ntohl(rtp_hdr_ptr->timestamp);
 	// if rtp session just started
@@ -10198,7 +10230,6 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 		ast_verb(4, "RTP Channel=\"%s\": starting timestamp=%u\n", rtp->name, timestamp);
 		rtp->recv_timestamp = timestamp - 160;
 	}
-
 	// check ssrc value
 	ssrc = ntohl(rtp_hdr_ptr->ssrc);
 	// if rtp session just started
@@ -10221,11 +10252,9 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 		}
 */
 	samples = timestamp - rtp->recv_timestamp;
-
 	// check for missed packet
 	if ((seq_num - rtp->recv_seq_num) > 1)
 		ast_verb(4, "RTP Channel=\"%s\": missed %u packet - %u samples\n", rtp->name, seq_num - rtp->recv_seq_num, samples);
-
 	// store sequence number and timestamp
 	rtp->recv_seq_num = seq_num;
 	rtp->recv_timestamp  = timestamp;
@@ -10239,9 +10268,7 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 */
 		samples = 160;
 	}
-
 // 	ast_log(LOG_DEBUG, "<%s>: read %d bytes - %d samples\n", chnl->name, data_len, samples);
-
 // 	memset(&chnl->frame, 0x00, sizeof(struct ast_frame));
 	rtp->frame.frametype = AST_FRAME_VOICE;
 #if ASTERISK_VERSION_NUM >= 100000
