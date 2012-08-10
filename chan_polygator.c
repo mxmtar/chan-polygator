@@ -294,6 +294,8 @@ struct pg_gsm_call {
 		struct x_timer dial;
 		struct x_timer proceeding;
 	} timers;
+	struct timeval start_time;
+	struct timeval answer_time;
 	AST_LIST_ENTRY(pg_gsm_call) entry;
 };
 
@@ -341,6 +343,7 @@ struct pg_channel_gsm {
 		char gsm_call_context[AST_MAX_CONTEXT];
 		char gsm_call_extension[AST_MAX_EXTENSION];
 		int trunkonly;
+		int conference_allowed;
 		time_t dcrttl;
 		int progress;
 		char language[MAX_LANGUAGE];
@@ -403,6 +406,7 @@ struct pg_channel_gsm {
 		unsigned int func_test_done:1;
 		unsigned int func_test_run:1;
 		unsigned int sms_table_needed:1;
+		unsigned int dcr_table_needed:1;
 	} flags;
 
 	// timers
@@ -480,6 +484,11 @@ struct pg_channel_gsm {
 	char *pin;
 	char *puk;
 	int dtmf_is_started;
+
+	time_t last_call_time_incoming;
+	time_t last_call_time_outgoing;
+	time_t total_call_time_incoming;
+	time_t total_call_time_outgoing;
 
 	AST_LIST_HEAD_NOLOCK(call_list, pg_gsm_call) call_list;
 	struct pg_channel_rtp *channel_rtp;
@@ -597,21 +606,26 @@ static struct ast_cli_entry pg_cli[] = {
 // polygator CLI GSM channel actions
 static char *pg_cli_channel_gsm_action_power(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_channel_gsm_action_suspend_resume(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_debug(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_at(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static struct pg_cli_action pg_cli_channel_gsm_action_handlers[] = {
 	PG_CLI_ACTION("power", pg_cli_channel_gsm_action_power),
 	PG_CLI_ACTION("enable", pg_cli_channel_gsm_action_enable_disable),
 	PG_CLI_ACTION("disable", pg_cli_channel_gsm_action_enable_disable),
 	PG_CLI_ACTION("restart", pg_cli_channel_gsm_action_enable_disable),
+	PG_CLI_ACTION("suspend", pg_cli_channel_gsm_action_suspend_resume),
+	PG_CLI_ACTION("resume", pg_cli_channel_gsm_action_suspend_resume),
 	PG_CLI_ACTION("get", pg_cli_channel_gsm_action_param),
 	PG_CLI_ACTION("set", pg_cli_channel_gsm_action_param),
 	PG_CLI_ACTION("query", pg_cli_channel_gsm_action_param),
 	PG_CLI_ACTION("debug", pg_cli_channel_gsm_action_debug),
 	PG_CLI_ACTION("ussd", pg_cli_channel_gsm_action_ussd),
 	PG_CLI_ACTION("at", pg_cli_channel_gsm_action_at),
+	PG_CLI_ACTION("dcr", pg_cli_channel_gsm_action_dcr),
 };
 
 enum {
@@ -1815,6 +1829,367 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_dcr_table_create()
+//------------------------------------------------------------------------------
+static void pg_dcr_table_create(const char *iccid, ast_mutex_t *lock)
+{
+	char *str0, *str1;
+	int res;
+	int row;
+	sqlite3_stmt *sql0, *sql1;
+
+	// create table for dynamic CLIP routing
+	str0 = sqlite3_mprintf("SELECT COUNT(id) FROM '%q-dcr';", iccid);
+	while (1)
+	{
+		res = sqlite3_prepare_fun(pg_gen_db, str0, strlen(str0), &sql0, NULL);
+		if (res == SQLITE_OK) {
+			row = 0;
+			while (1)
+			{
+				res = sqlite3_step(sql0);
+				if (res == SQLITE_ROW)
+					row++;
+				else if (res == SQLITE_DONE)
+					break;
+				else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_finalize(sql0);
+			break;
+		} else if (res == SQLITE_BUSY) {
+			if (lock) ast_mutex_unlock(lock);
+			usleep(1000);
+			if (lock) ast_mutex_lock(lock);
+			continue;
+		} else if ((res == SQLITE_ERROR) && (strstr(sqlite3_errmsg(pg_gen_db), "no such table"))) {
+			str1 = sqlite3_mprintf("CREATE TABLE '%q-dcr' ("
+										"id INTEGER PRIMARY KEY, "
+										"fromtype INTEGER, "
+										"fromname TEXT, "
+										"totype INTEGER, "
+										"toname TEXT, "
+										"timestamp INTEGER);", iccid);
+			while (1)
+			{
+				res = sqlite3_prepare_fun(pg_gen_db, str1, strlen(str1), &sql1, NULL);
+				if (res == SQLITE_OK) {
+					row = 0;
+					while (1)
+					{
+						res = sqlite3_step(sql1);
+						if (res == SQLITE_ROW)
+							row++;
+						else if (res == SQLITE_DONE)
+							break;
+						else if (res == SQLITE_BUSY) {
+							if (lock) ast_mutex_unlock(lock);
+							usleep(1000);
+							if (lock) ast_mutex_lock(lock);
+							continue;
+						} else {
+							ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+							break;
+						}
+					}
+					sqlite3_finalize(sql1);
+					break;
+				} else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_free(str1);
+			break;
+		} else {
+			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+			break;
+		}
+	}
+	sqlite3_free(str0);
+}
+//------------------------------------------------------------------------------
+// end of pg_dcr_table_create()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_dcr_table_update()
+//------------------------------------------------------------------------------
+static void pg_dcr_table_update(const char *iccid, struct address *from, struct address *to, ast_mutex_t *lock)
+{
+	char *str;
+	int res;
+	int row;
+	sqlite3_stmt *sql;
+	struct timeval tv;
+
+	// update dynamic clip routing table
+	// delete entry with the same called name = from
+	str = sqlite3_mprintf("DELETE FROM '%q-dcr' WHERE fromtype=%d AND fromname='%q';", iccid, from->type.full, from->value);
+	while (1)
+	{
+		res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
+		if (res == SQLITE_OK) {
+			row = 0;
+			while (1)
+			{
+				res = sqlite3_step(sql);
+				if (res == SQLITE_ROW)
+					row++;
+				else if (res == SQLITE_DONE)
+					break;
+				else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_finalize(sql);
+			break;
+		} else if (res == SQLITE_BUSY) {
+			if (lock) ast_mutex_unlock(lock);
+			usleep(1000);
+			if (lock) ast_mutex_lock(lock);
+			continue;
+		} else {
+			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+			break;
+		}
+	}
+	sqlite3_free(str);
+	// insert new entry
+	gettimeofday(&tv, NULL);
+	str = sqlite3_mprintf("INSERT INTO '%q-dcr' (fromtype, fromname, totype, toname, timestamp) VALUES (%d,'%q',%d,'%q',%ld);",
+							iccid, from->type.full, from->value,
+							to->type.full, to->value, tv.tv_sec);
+	while (1)
+	{
+		res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
+		if (res == SQLITE_OK) {
+			row = 0;
+			while (1)
+			{
+				res = sqlite3_step(sql);
+				if (res == SQLITE_ROW)
+					row++;
+				else if (res == SQLITE_DONE)
+					break;
+				else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_finalize(sql);
+			break;
+		} else if(res == SQLITE_BUSY) {
+			if (lock) ast_mutex_unlock(lock);
+			usleep(1000);
+			if (lock) ast_mutex_lock(lock);
+			continue;
+		} else {
+			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+			break;
+		}
+	}
+	sqlite3_free(str);
+}
+//------------------------------------------------------------------------------
+// end of pg_dcr_table_update()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_dcr_table_get_match_record()
+//------------------------------------------------------------------------------
+static struct address *pg_dcr_table_get_match_record(const char *iccid, struct address *from, time_t ttl, struct address *to, ast_mutex_t *lock)
+{
+	char *str0, *str1;
+	int res;
+	int row;
+	sqlite3_stmt *sql0, *sql1;
+	struct timeval tv;
+	struct address testaddr;
+	struct address *resaddr = NULL;
+
+	gettimeofday(&tv, NULL);
+	str0 = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM '%q-dcr' WHERE timestamp>%ld ORDER BY timestamp DESC;", iccid, (long int)(tv.tv_sec - ttl));
+	res = sqlite3_prepare_fun(pg_gen_db, str0, strlen(str0), &sql0, NULL);
+	if (res == SQLITE_OK) {
+		row = 0;
+		while (1)
+		{
+			res = sqlite3_step(sql0);
+			if (res == SQLITE_ROW) {
+				row++;
+				testaddr.type.full = sqlite3_column_int(sql0, 0);
+				ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql0, 1), MAX_ADDRESS_LENGTH);
+				if (is_address_equal(&testaddr, from)) {
+					to->type.full = sqlite3_column_int(sql0, 2);
+					ast_copy_string(to->value, (char *)sqlite3_column_text(sql0, 3), MAX_ADDRESS_LENGTH);
+					resaddr = to;
+					break;
+				}
+			} else if (res == SQLITE_DONE)
+				break;
+			else if(res == SQLITE_BUSY) {
+				if (lock) ast_mutex_unlock(lock);
+				usleep(1000);
+				if (lock) ast_mutex_lock(lock);
+				continue;
+			} else {
+				ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+				break;
+			}
+		}
+		sqlite3_finalize(sql0);
+		if (row) {
+			// update timestamp
+			str1 = sqlite3_mprintf("UPDATE '%q-dcr' SET timestamp=%ld WHERE fromtype=%d AND fromname='%q';", iccid, tv.tv_sec, from->type.full, from->value);
+			res = sqlite3_prepare_fun(pg_gen_db, str1, strlen(str1), &sql1, NULL);
+			if (res == SQLITE_OK) {
+				row = 0;
+				while (1)
+				{
+					res = sqlite3_step(sql1);
+					if (res == SQLITE_ROW) {
+						row++;
+					} else if (res == SQLITE_DONE)
+						break;
+					else if (res == SQLITE_BUSY) {
+						if (lock) ast_mutex_unlock(lock);
+						usleep(1000);
+						if (lock) ast_mutex_lock(lock);
+						continue;
+					} else {
+						ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+						break;
+					}
+				}
+				sqlite3_finalize(sql1);
+			} else
+				ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+			sqlite3_free(str1);
+		}
+	} else
+		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+	sqlite3_free(str0);
+#if 0
+	if (!resaddr) {
+		// search in permanent routing table
+		str0 = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM 'permanent-dcr';", iccid);
+		res = sqlite3_prepare_fun(gendb, str0, strlen(str0), &sql0, NULL);
+		sqlite3_free(str);
+		if (res == SQLITE_OK) {
+			row = 0;
+			while (1)
+			{
+				res = sqlite3_step(sql0);
+				if (res == SQLITE_ROW) {
+					row++;
+					testaddr.type.full = sqlite3_column_int(sql0, 0);
+					ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql, 1), MAX_ADDRESS_LENGTH);
+					if (is_address_equal(&testaddr, from)) {
+						to->type.full = sqlite3_column_int(sql0, 2);
+						ast_copy_string(to->value, (char *)sqlite3_column_text(sql0, 3), MAX_ADDRESS_LENGTH);
+						resaddr = to;
+						break;
+					}
+				} else if (res == SQLITE_DONE)
+					break;
+				else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_finalize(sql0);
+		} else
+			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+		sqlite3_free(str0);
+
+	}
+#endif
+	return resaddr;
+}
+//------------------------------------------------------------------------------
+// end of pg_dcr_table_get_match_record()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_get_board_by_name()
+//------------------------------------------------------------------------------
+static struct pg_board *pg_get_board_by_name(const char *name)
+{
+	struct pg_board *brd = NULL;
+	// check for name present
+	if (name) {
+		// check for board list is not empty
+		if ((brd = pg_general_board_list.first)) {
+			// traverse board list for matching entry name
+			brd = NULL;
+			AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
+			{
+				// compare name strings
+				if (!strcmp(name, brd->name)) break;
+			}
+		}
+	}
+	return brd;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_board_by_name()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_get_channel_gsm_by_name()
+//------------------------------------------------------------------------------
+static struct pg_channel_gsm *pg_get_channel_gsm_by_name(const char *name)
+{
+	struct pg_channel_gsm *ch_gsm = NULL;
+	// check for name present
+	if (name) {
+		// check for board list is not empty
+		if ((ch_gsm = pg_general_channel_gsm_list.first)) {
+			// traverse board list for matching entry name
+			ch_gsm = NULL;
+			AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
+			{
+				// compare name strings
+				if (!strcmp(name, ch_gsm->alias)) break;
+			}
+		}
+	}
+	return ch_gsm;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_channel_gsm_by_name()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_gsm_module_type_get()
 //------------------------------------------------------------------------------
 static int pg_gsm_module_type_get(const char *module_type)
@@ -2370,6 +2745,57 @@ static inline void pg_put_channel_rtp(struct pg_channel_rtp *rtp)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cahnnel_gsm_call_state_to_string()
+//------------------------------------------------------------------------------
+static char *pg_cahnnel_gsm_call_state_to_string(int state)
+{
+	switch (state)
+	{
+		case PG_GSM_CALL_STATE_NULL: return "null";
+		case PG_GSM_CALL_STATE_OUTGOING_CALL_PROCEEDING: return "outgoing call proceeding";
+		case PG_GSM_CALL_STATE_CALL_DELIVERED: return "call delivered";
+		case PG_GSM_CALL_STATE_CALL_PRESENT: return "call present";
+		case PG_GSM_CALL_STATE_CALL_RECEIVED: return "call received";
+		case PG_GSM_CALL_STATE_ACTIVE: return "active";
+		case PG_GSM_CALL_STATE_LOCAL_HOLD: return "local hold";
+		case PG_GSM_CALL_STATE_REMOTE_HOLD: return "remote hold";
+		case PG_GSM_CALL_STATE_RELEASE_INDICATION: return "release indication";
+		case PG_GSM_CALL_STATE_OVERLAP_RECEIVING: return "overlap receiving";
+		default: return "unknown";
+	}
+}
+//------------------------------------------------------------------------------
+// end of pg_cahnnel_gsm_call_state_to_string()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cahnnel_gsm_call_message_to_string()
+//------------------------------------------------------------------------------
+static char *pg_cahnnel_gsm_call_message_to_string(int message)
+{
+	switch (message)
+	{
+		case PG_GSM_CALL_MSG_SETUP_REQ: return "SETUP_REQ";
+		case PG_GSM_CALL_MSG_PROCEEDING_IND: return "PROCEEDING_IND";
+		case PG_GSM_CALL_MSG_ALERTING_IND: return "ALERTING_IND";
+		case PG_GSM_CALL_MSG_SETUP_CONFIRM: return "SETUP_CONFIRM";
+		case PG_GSM_CALL_MSG_RELEASE_REQ: return "RELEASE_REQ";
+		case PG_GSM_CALL_MSG_RELEASE_IND: return "RELEASE_IND";
+		case PG_GSM_CALL_MSG_SETUP_IND: return "SETUP_IND";
+		case PG_GSM_CALL_MSG_INFO_IND: return "INFO_IND";
+		case PG_GSM_CALL_MSG_SETUP_RESPONSE: return "SETUP_RESPONSE";
+		case PG_GSM_CALL_MSG_HOLD_REQ: return "HOLD_REQ";
+		case PG_GSM_CALL_MSG_UNHOLD_REQ: return "UNHOLD_REQ";
+		case PG_GSM_CALL_MSG_HOLD_IND: return "HOLD_IND";
+		case PG_GSM_CALL_MSG_UNHOLD_IND: return "UNHOLD_IND";
+		default: return "unknown";
+	}
+}
+//------------------------------------------------------------------------------
+// end of pg_cahnnel_gsm_call_message_to_string()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_is_channel_gsm_has_calls()
 //------------------------------------------------------------------------------
 static inline int pg_is_channel_gsm_has_calls(struct pg_channel_gsm *ch_gsm)
@@ -2410,6 +2836,41 @@ static inline int pg_is_channel_gsm_has_active_calls(struct pg_channel_gsm *ch_g
 }
 //------------------------------------------------------------------------------
 // end of pg_is_channel_gsm_has_active_calls()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_is_channel_gsm_has_same_requestor()
+//------------------------------------------------------------------------------
+static inline int pg_is_channel_gsm_has_same_requestor(struct pg_channel_gsm *ch_gsm, char *requestor)
+{
+	int res = 0;
+	struct pg_gsm_call *call;
+	struct address addr;
+
+	if (ch_gsm && requestor && strlen(requestor)) {
+		address_classify(requestor, &addr);
+		res = 1;
+		ast_mutex_lock(&ch_gsm->lock);
+		AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
+		{
+			if (call->direction == PG_GSM_CALL_DIRECTION_OUTGOING) {
+				if (!is_address_equal(&addr, &call->calling_name)) {
+					res = 0;
+					break;
+				}
+			} else {
+				if (!is_address_equal(&addr, &call->called_name)) {
+					res = 0;
+					break;
+				}
+			}
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_is_channel_gsm_has_same_requestor()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -2464,12 +2925,13 @@ static inline int pg_channel_gsm_get_calls_count(struct pg_channel_gsm *ch_gsm)
 //------------------------------------------------------------------------------
 static inline struct pg_gsm_call *pg_channel_gsm_get_new_call(struct pg_channel_gsm *ch_gsm)
 {
-	struct pg_gsm_call *call;
+	struct pg_gsm_call *call = NULL;
 	if (ch_gsm) {
 		ast_mutex_lock(&ch_gsm->lock);
 		if ((call = ast_calloc(1, sizeof(struct pg_gsm_call)))) {
 			call->channel_gsm = ch_gsm;
 			call->state = PG_GSM_CALL_STATE_NULL;
+			gettimeofday(&call->start_time, NULL);
 			AST_LIST_INSERT_TAIL(&ch_gsm->call_list, call, entry);
 		}
 		ast_mutex_unlock(&ch_gsm->lock);
@@ -2512,57 +2974,6 @@ static inline struct pg_gsm_call *pg_channel_gsm_get_call(struct pg_channel_gsm 
 }
 //------------------------------------------------------------------------------
 // end of pg_channel_gsm_get_call()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_cahnnel_gsm_call_state_to_string()
-//------------------------------------------------------------------------------
-static char *pg_cahnnel_gsm_call_state_to_string(int state)
-{
-	switch (state)
-	{
-		case PG_GSM_CALL_STATE_NULL: return "null";
-		case PG_GSM_CALL_STATE_OUTGOING_CALL_PROCEEDING: return "outgoing call proceeding";
-		case PG_GSM_CALL_STATE_CALL_DELIVERED: return "call delivered";
-		case PG_GSM_CALL_STATE_CALL_PRESENT: return "call present";
-		case PG_GSM_CALL_STATE_CALL_RECEIVED: return "call received";
-		case PG_GSM_CALL_STATE_ACTIVE: return "active";
-		case PG_GSM_CALL_STATE_LOCAL_HOLD: return "local hold";
-		case PG_GSM_CALL_STATE_REMOTE_HOLD: return "remote hold";
-		case PG_GSM_CALL_STATE_RELEASE_INDICATION: return "release indication";
-		case PG_GSM_CALL_STATE_OVERLAP_RECEIVING: return "overlap receiving";
-		default: return "unknown";
-	}
-}
-//------------------------------------------------------------------------------
-// end of pg_cahnnel_gsm_call_state_to_string()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_cahnnel_gsm_call_message_to_string()
-//------------------------------------------------------------------------------
-static char *pg_cahnnel_gsm_call_message_to_string(int message)
-{
-	switch (message)
-	{
-		case PG_GSM_CALL_MSG_SETUP_REQ: return "SETUP_REQ";
-		case PG_GSM_CALL_MSG_PROCEEDING_IND: return "PROCEEDING_IND";
-		case PG_GSM_CALL_MSG_ALERTING_IND: return "ALERTING_IND";
-		case PG_GSM_CALL_MSG_SETUP_CONFIRM: return "SETUP_CONFIRM";
-		case PG_GSM_CALL_MSG_RELEASE_REQ: return "RELEASE_REQ";
-		case PG_GSM_CALL_MSG_RELEASE_IND: return "RELEASE_IND";
-		case PG_GSM_CALL_MSG_SETUP_IND: return "SETUP_IND";
-		case PG_GSM_CALL_MSG_INFO_IND: return "INFO_IND";
-		case PG_GSM_CALL_MSG_SETUP_RESPONSE: return "SETUP_RESPONSE";
-		case PG_GSM_CALL_MSG_HOLD_REQ: return "HOLD_REQ";
-		case PG_GSM_CALL_MSG_UNHOLD_REQ: return "UNHOLD_REQ";
-		case PG_GSM_CALL_MSG_HOLD_IND: return "HOLD_IND";
-		case PG_GSM_CALL_MSG_UNHOLD_IND: return "UNHOLD_IND";
-		default: return "unknown";
-	}
-}
-//------------------------------------------------------------------------------
-// end of pg_cahnnel_gsm_call_message_to_string()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -3095,9 +3506,9 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 			goto pg_channel_gsm_call_incoming_end;
 		}
 		// set DTMF receiver
-		vin_coder_channel_set_as(vin->context, rtp->position_on_vinetic, VIN_OFF);
-		vin_coder_channel_set_is(vin->context, rtp->position_on_vinetic, VIN_IS_SIGINA);
-		vin_coder_channel_set_et(vin->context, rtp->position_on_vinetic, VIN_ACTIVE);
+		vin_dtmf_receiver_set_as(vin->context, rtp->position_on_vinetic, VIN_OFF);
+		vin_dtmf_receiver_set_is(vin->context, rtp->position_on_vinetic, VIN_IS_SIGINA);
+		vin_dtmf_receiver_set_et(vin->context, rtp->position_on_vinetic, VIN_ACTIVE);
 		if ((res = vin_dtmf_receiver_enable(vin->context, rtp->position_on_vinetic)) < 0) {
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_enable(): line %d\n", vin->name, vin->context.errorline);
@@ -3242,6 +3653,7 @@ pg_channel_gsm_call_incoming_end:
 //------------------------------------------------------------------------------
 static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cause)
 {
+	struct timeval curr_tv;
 	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
 	int res = -1;
 	
@@ -3315,6 +3727,17 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 						pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				}
 			}
+			if (call->answer_time.tv_sec) {
+				gettimeofday(&curr_tv, NULL);
+				if (call->direction == PG_GSM_CALL_DIRECTION_OUTGOING) {
+					ch_gsm->last_call_time_outgoing = curr_tv.tv_sec - call->answer_time.tv_sec;
+					ch_gsm->total_call_time_outgoing += ch_gsm->last_call_time_outgoing;
+				} else if (call->direction == PG_GSM_CALL_DIRECTION_INCOMING) {
+					ch_gsm->last_call_time_incoming = curr_tv.tv_sec - call->answer_time.tv_sec;
+					ch_gsm->total_call_time_incoming += ch_gsm->last_call_time_incoming;
+				}
+			}
+
 			pg_channel_gsm_put_call(ch_gsm, call);
 			res = 0;
 			break;
@@ -3374,149 +3797,24 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 			ast_mutex_lock(&ch_gsm->lock);
 
 			ast_channel_unlock(call->owner);
+			gettimeofday(&call->answer_time, NULL);
 			call->state = PG_GSM_CALL_STATE_ACTIVE;
 			res = 0;
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_GSM_CALL_MSG_INFO_IND:
 			if (call->state == PG_GSM_CALL_STATE_OVERLAP_RECEIVING) {
-				// get called extension
-				address_classify("s", &call->called_name);
 				// check incoming type
 				if (ch_gsm->config.incoming_type == PG_GSM_CALL_INCOMING_TYPE_SPEC) {
 					// route incoming call to specified extension
 					address_classify(ch_gsm->config.gsm_call_extension, &call->called_name);
-#if 0
-				} else if(chnl->incoming_type == PG_GSM_CALL_INCOMING_TYPE_DYN) {
+				} else if (ch_gsm->config.incoming_type == PG_GSM_CALL_INCOMING_TYPE_DTMF) {
+					// route incoming call to default extension
+					address_classify("s", &call->called_name);
+				} else if(ch_gsm->config.incoming_type == PG_GSM_CALL_INCOMING_TYPE_DYN) {
 					// incoming call dynamic routed
-						gettimeofday(&time_mark, NULL);
-						str = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM '%q-rt' WHERE timestamp>%ld ORDER BY timestamp DESC;",
-												chnl->name, (long int)(time_mark.tv_sec - chnl->dynclipttl));
-						res = sqlite3_prepare_fun(gendb, str, strlen(str), &sql, NULL);
-						sqlite3_free(str);
-						if(res == SQLITE_OK){
-							row = 0;
-							while(1){
-								res = sqlite3_step(sql);
-								if(res == SQLITE_ROW){
-									row++;
-									testaddr.type.full = sqlite3_column_int(sql, 0);
-									ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql, 1), MAX_ADDRESS_LENGTH);
-									if(is_address_equal(&testaddr, &chnl->calling_name)){
-										chnl->called_name.type.full = sqlite3_column_int(sql, 2);
-										ast_copy_string(chnl->called_name.value, (char *)sqlite3_column_text(sql, 3), MAX_ADDRESS_LENGTH);
-										break;
-										}
-									}
-								else if(res == SQLITE_DONE)
-									break;
-								else if(res == SQLITE_BUSY){
-									// unlock eggsm subsystem
-									ast_mutex_unlock(&chnl->pvt_lock);
-									// unlock eggsm subsystem
-									ast_mutex_unlock(&eggsm_lock);
-									//
-									usleep(1);
-									// lock eggsm subsystem
-									ast_mutex_lock(&eggsm_lock);
-									// lock eggsm subsystem
-									ast_mutex_lock(&chnl->pvt_lock);
-									continue;
-									}
-								else{
-									ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(gendb));
-									break;
-									}
-								}
-							sqlite3_finalize(sql);
-							//
-							if(row){ // update timestamp
-								str = sqlite3_mprintf("UPDATE '%q-rt' SET timestamp=%ld WHERE fromtype=%d AND fromname='%q';",
-														chnl->name, time_mark.tv_sec, chnl->calling_name.type.full, chnl->calling_name.value);
-								res = sqlite3_prepare_fun(gendb, str, strlen(str), &sql, NULL);
-								sqlite3_free(str);
-								if(res == SQLITE_OK){
-									row = 0;
-									while(1){
-										res = sqlite3_step(sql);
-										if(res == SQLITE_ROW){
-											row++;
-											}
-										else if(res == SQLITE_DONE)
-											break;
-										else if(res == SQLITE_BUSY){
-											// unlock eggsm subsystem
-											ast_mutex_unlock(&chnl->pvt_lock);
-											// unlock eggsm subsystem
-											ast_mutex_unlock(&eggsm_lock);
-											//
-											usleep(1);
-											// lock eggsm subsystem
-											ast_mutex_lock(&eggsm_lock);
-											// lock eggsm subsystem
-											ast_mutex_lock(&chnl->pvt_lock);
-											continue;
-											}
-										else{
-											ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(gendb));
-											break;
-											}
-										}
-									sqlite3_finalize(sql);
-									}
-								else
-									ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(gendb));
-								} // end of update timestamp
-							else{ // search in permanent routing table
-								str = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM '%q-rt';", chnl->name);
-								res = sqlite3_prepare_fun(gendb, str, strlen(str), &sql, NULL);
-								sqlite3_free(str);
-								if(res == SQLITE_OK){
-									row = 0;
-									while(1){
-										res = sqlite3_step(sql);
-										if(res == SQLITE_ROW){
-											row++;
-											testaddr.type.full = sqlite3_column_int(sql, 0);
-											ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql, 1), MAX_ADDRESS_LENGTH);
-											if(is_address_equal(&testaddr, &chnl->calling_name)){
-												chnl->called_name.type.full = sqlite3_column_int(sql, 2);
-												ast_copy_string(chnl->called_name.value, (char *)sqlite3_column_text(sql, 3), MAX_ADDRESS_LENGTH);
-												break;
-												}
-											}
-										else if(res == SQLITE_DONE)
-											break;
-										else if(res == SQLITE_BUSY){
-											// unlock eggsm subsystem
-											ast_mutex_unlock(&chnl->pvt_lock);
-											// unlock eggsm subsystem
-											ast_mutex_unlock(&eggsm_lock);
-											//
-											usleep(1);
-											// lock eggsm subsystem
-											ast_mutex_lock(&eggsm_lock);
-											// lock eggsm subsystem
-											ast_mutex_lock(&chnl->pvt_lock);
-											continue;
-											}
-										else{
-											ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(gendb));
-											break;
-											}
-										}
-									sqlite3_finalize(sql);
-									//
-									if(!row)
-									  	address_classify("s", &chnl->called_name);
-									}
-								else
-									ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(gendb));
-								} // end of search in permanent routing table
-							}
-						else
-							ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(gendb));
-#endif
+					if (!pg_dcr_table_get_match_record(ch_gsm->iccid, &call->calling_name, ch_gsm->config.dcrttl, &call->called_name, &ch_gsm->lock))
+						address_classify("s", &call->called_name);
 				} else if (ch_gsm->config.incoming_type == PG_GSM_CALL_INCOMING_TYPE_DENY) {
 					// incoming call denied
 					ast_verb(2, "GSM channel=\"%s\": call line=%d: call from \"%s%s\" denied\n", ch_gsm->alias, call->line, (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
@@ -3589,13 +3887,12 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_GSM_CALL_MSG_SETUP_RESPONSE:
 			if (call->state == PG_GSM_CALL_STATE_CALL_RECEIVED) {
-				// get call billing start time
-// 				gettimeofday(&call->billing_start_time, NULL);
 				// send ANSWER command to GSM module
 				if (pg_channel_gsm_get_calls_count(ch_gsm) == 1)
 					pg_atcommand_queue_prepend(ch_gsm, AT_A, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				// set new state
 				ast_setstate(call->owner, AST_STATE_UP);
+				gettimeofday(&call->answer_time, NULL);
 				call->state = PG_GSM_CALL_STATE_ACTIVE;
 				ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n",
 									ch_gsm->alias, call->line,
@@ -3618,14 +3915,11 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 									ch_gsm->alias, call->line,
 									pg_cahnnel_gsm_call_state_to_string(call->state));
 				res = 0;
-			}
-/*
-			else
+			} else if (call->state != PG_GSM_CALL_STATE_REMOTE_HOLD)
 				ast_log(LOG_WARNING, "GSM channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
 									ch_gsm->alias, call->line,
 									pg_cahnnel_gsm_call_message_to_string(message),
 									pg_cahnnel_gsm_call_state_to_string(call->state));
-*/
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_GSM_CALL_MSG_UNHOLD_REQ:
@@ -3636,14 +3930,11 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 									ch_gsm->alias, call->line,
 									pg_cahnnel_gsm_call_state_to_string(call->state));
 				res = 0;
-			}
-/*
-			else
+			} else if (call->state != PG_GSM_CALL_STATE_REMOTE_HOLD)
 				ast_log(LOG_WARNING, "GSM channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
 									ch_gsm->alias, call->line,
 									pg_cahnnel_gsm_call_message_to_string(message),
 									pg_cahnnel_gsm_call_state_to_string(call->state));
-*/
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_GSM_CALL_MSG_HOLD_IND:
@@ -3662,14 +3953,11 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 				ast_channel_unlock(call->owner);
 				call->state = PG_GSM_CALL_STATE_REMOTE_HOLD;
 				res = 0;
-			}
-/*
-			else
+			} else if (call->state != PG_GSM_CALL_STATE_LOCAL_HOLD)
 				ast_log(LOG_WARNING, "GSM channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
 									ch_gsm->alias, call->line,
 									pg_cahnnel_gsm_call_message_to_string(message),
 									pg_cahnnel_gsm_call_state_to_string(call->state));
-*/
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_GSM_CALL_MSG_UNHOLD_IND:
@@ -3688,14 +3976,11 @@ static int pg_channel_gsm_call_sm(struct pg_gsm_call* call, int message, int cau
 				ast_channel_unlock(call->owner);
 				call->state = PG_GSM_CALL_STATE_ACTIVE;
 				res = 0;
-			}
-/*
-			else
+			} else if (call->state != PG_GSM_CALL_STATE_LOCAL_HOLD)
 				ast_log(LOG_WARNING, "GSM channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
 									ch_gsm->alias, call->line,
 									pg_cahnnel_gsm_call_message_to_string(message),
 									pg_cahnnel_gsm_call_state_to_string(call->state));
-*/
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_GSM_CALL_MSG_RELEASE_IND:
@@ -3864,6 +4149,7 @@ static void *pg_channel_gsm_workthread(void *data)
 	ch_gsm->flags.puk_required = 0;
 	ch_gsm->flags.pin_accepted = 0;
 	ch_gsm->flags.sms_table_needed = 1;
+	ch_gsm->flags.dcr_table_needed = 1;
 
 	ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
 
@@ -4113,9 +4399,15 @@ static void *pg_channel_gsm_workthread(void *data)
 								ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
 								// stop all timers
 								memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-								// hangup active call
+								// hangup active calls
 								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
 									pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+								while (ch_gsm->call_list.first)
+								{
+									ast_mutex_unlock(&ch_gsm->lock);
+									usleep(1000);
+									ast_mutex_lock(&ch_gsm->lock);
+								}
 								// run functionality test
 								ch_gsm->flags.func_test_run = 1;
 								ch_gsm->flags.func_test_done = 0;
@@ -4472,7 +4764,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								// perform line contest
 								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
 								{
-									if (call->contest > 2)
+									if (call->contest > 0)
 										pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
 								}
 							}
@@ -4635,18 +4927,17 @@ static void *pg_channel_gsm_workthread(void *data)
 											x_timer_stop(ch_gsm->timers.smssend);
 											// stop runvifesecond timer
 											x_timer_stop(ch_gsm->timers.runfivesecond);
-#if 0
 											// hangup active call
-											if (chnl->owner) {
+											AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
+											{
 												// hangup - GSM
 												if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
 													pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 												else
 													pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 												// hangup - asterisk core call
-// 												eggsm_call_sm(chnl, CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+												pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
 											}
-#endif
 											if (ch_gsm->flags.sim_present) {
 												// decrement attempt counter
 												if (ch_gsm->reg_try_count > 0)
@@ -4805,6 +5096,8 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->flags.sms_table_needed = 1;
 											x_timer_stop(ch_gsm->timers.smssend);
 
+											ch_gsm->flags.dcr_table_needed = 1;
+
 											ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 											ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
 
@@ -4913,7 +5206,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										// stop waitsuspend timer
 										x_timer_stop(ch_gsm->timers.waitsuspend);
 										//
-										ast_verbose("GSM channel=\"%s\": module switched to suspend state\n", ch_gsm->alias);
+										ast_verbose("GSM channel=\"%s\": module switch to suspend state\n", ch_gsm->alias);
 										//
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -5869,6 +6162,10 @@ static void *pg_channel_gsm_workthread(void *data)
 										// start smssend timer
 										x_timer_set(ch_gsm->timers.smssend, onesec_timeout);
 									}
+									if (ch_gsm->flags.dcr_table_needed) {
+										pg_dcr_table_create(ch_gsm->iccid, &ch_gsm->lock);
+										ch_gsm->flags.dcr_table_needed = 0;
+									}
 									if (ch_gsm->flags.sim_change) {
 										if (ch_gsm->iccid && ch_gsm->iccid_ban && strcmp(ch_gsm->iccid, ch_gsm->iccid_ban)) {
 											// new SIM
@@ -5986,6 +6283,8 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->flags.sms_table_needed = 1;
 												x_timer_stop(ch_gsm->timers.smssend);
 
+												ch_gsm->flags.dcr_table_needed = 1;
+
 												ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
 												ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 												ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
@@ -6040,6 +6339,10 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->flags.sms_table_needed = 0;
 										// start smssend timer
 										x_timer_set(ch_gsm->timers.smssend, onesec_timeout);
+									}
+									if (ch_gsm->flags.dcr_table_needed) {
+										pg_dcr_table_create(ch_gsm->iccid, &ch_gsm->lock);
+										ch_gsm->flags.dcr_table_needed = 0;
 									}
 									if (ch_gsm->flags.sim_change) {
 										if (ch_gsm->iccid && ch_gsm->iccid_ban && strcmp(ch_gsm->iccid, ch_gsm->iccid_ban)) {
@@ -6162,6 +6465,8 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->flags.sms_table_needed = 1;
 												x_timer_stop(ch_gsm->timers.smssend);
 
+												ch_gsm->flags.dcr_table_needed = 1;
+
 												ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
 												ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 												ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
@@ -6216,6 +6521,10 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->flags.sms_table_needed = 0;
 										// start smssend timer
 										x_timer_set(ch_gsm->timers.smssend, onesec_timeout);
+									}
+									if (ch_gsm->flags.dcr_table_needed) {
+										pg_dcr_table_create(ch_gsm->iccid, &ch_gsm->lock);
+										ch_gsm->flags.dcr_table_needed = 0;
 									}
 									if (ch_gsm->flags.sim_change) {
 										if (ch_gsm->iccid && ch_gsm->iccid_ban && strcmp(ch_gsm->iccid, ch_gsm->iccid_ban)) {
@@ -6333,6 +6642,8 @@ static void *pg_channel_gsm_workthread(void *data)
 
 												ch_gsm->flags.sms_table_needed = 1;
 												x_timer_stop(ch_gsm->timers.smssend);
+
+												ch_gsm->flags.dcr_table_needed = 1;
 
 												ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
 												ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
@@ -6687,6 +6998,8 @@ static void *pg_channel_gsm_workthread(void *data)
 							ch_gsm->flags.sms_table_needed = 1;
 							x_timer_stop(ch_gsm->timers.smssend);
 
+							ch_gsm->flags.dcr_table_needed = 1;
+
 							ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 							ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
 							ast_verbose("Polygator: GSM channel=\"%s\": SIM removed\n", ch_gsm->alias);
@@ -6761,8 +7074,13 @@ static void *pg_channel_gsm_workthread(void *data)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-						else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
-							pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+						else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
+							// M10 can't got iccid
+							if (ch_gsm->pin)
+								pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\"", ch_gsm->pin);
+							else
+								ast_verbose("Polygator: GSM channel=\"%s\": PIN required\n", ch_gsm->alias);
+						}
 					} else if (!strcasecmp(r_buf, "+CPIN: SIM PUK")) {
 						// - PUK is required
 						if (!ch_gsm->flags.sim_present)
@@ -6793,7 +7111,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (!strcasecmp(r_buf, "+CPIN: NOT READY")) {
 						// stop waitsuspend timer
 						x_timer_stop(ch_gsm->timers.waitsuspend);
-						ast_verbose("Polygator: GSM channel=\"%s\": module switched to suspend state\n", ch_gsm->alias);
+						ast_verbose("Polygator: GSM channel=\"%s\": module switch to suspend state\n", ch_gsm->alias);
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 						ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
@@ -7308,6 +7626,10 @@ static void *pg_channel_gsm_workthread(void *data)
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_TEST_FUN;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 				// flush at command queue
+				if (ch_gsm->at_cmd) {
+					ast_free(ch_gsm->at_cmd);
+					ch_gsm->at_cmd = NULL;
+				}
 				pg_atcommand_queue_flush(ch_gsm);
 				// run testfun timer
 				x_timer_set(ch_gsm->timers.testfun, testfun_timeout);
@@ -7585,7 +7907,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				x_timer_stop(ch_gsm->timers.simpoll);
 				//
 				if (ch_gsm->flags.resume_now) {
-					ast_verbose("GSM channel=\"%s\": module returned from suspend state\n", ch_gsm->alias);
+					ast_verbose("GSM channel=\"%s\": module return from suspend state\n", ch_gsm->alias);
 					ch_gsm->flags.resume_now = 0;
 				}
 				// check is sim present
@@ -7627,7 +7949,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				if (ch_gsm->flags.suspend_now) {
 					// stop all timers
 					memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-					ast_verbose("GSM channel=\"%s\": module switched to suspend state\n", ch_gsm->alias);
+					ast_verbose("GSM channel=\"%s\": module switch to suspend state\n", ch_gsm->alias);
 					ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 					ch_gsm->flags.suspend_now = 0;
@@ -8130,37 +8452,17 @@ static void *pg_channel_gsm_workthread(void *data)
 			// reset restart flag
 			ch_gsm->flags.restart = 0;
 			ch_gsm->flags.restart_now = 0;
-#if 0
-			if(ch_gsm->owner){
-				// hangup - GSM
-				if(ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-					pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
-				else
-					pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-				// hangup - asterisk core call
-				eggsm_call_sm(chnl, CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+			// hangup active calls
+			AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
+				pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+			while (ch_gsm->call_list.first)
+			{
+				ast_mutex_unlock(&ch_gsm->lock);
+				usleep(1000);
+				ast_mutex_lock(&ch_gsm->lock);
 			}
-			do{
-				is_wait = 0;
-				//
-				if(ch_gsm->owner){
-					// unlock eggsm channel pvt
-					ast_mutex_unlock(&ch_gsm->pvt_lock);
-					// unlock eggsm subsystem
-					ast_mutex_unlock(&eggsm_lock);
-					//
-					usleep(1);
-					is_wait = 1;
-					// lock eggsm subsystem
-					ast_mutex_lock(&eggsm_lock);
-					// lock eggsm channel pvt
-					ast_mutex_lock(&ch_gsm->pvt_lock);
-					}
-			} while(is_wait);
-#endif
 			// stop all timers
 			memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-#if 1
 			// disable GSM module - key press imitation
 			// key press
 			if (pg_channel_gsm_key_press(ch_gsm, 1) < 0) {
@@ -8169,7 +8471,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				goto pg_channel_gsm_workthread_end;
 			}
 			ast_mutex_unlock(&ch_gsm->lock);
-			usleep(999999);
+			usleep(1999999);
 			ast_mutex_lock(&ch_gsm->lock);
 			// key release
 			if (pg_channel_gsm_key_press(ch_gsm, 0) < 0) {
@@ -8177,15 +8479,6 @@ static void *pg_channel_gsm_workthread(void *data)
 				ast_mutex_unlock(&ch_gsm->lock);
 				goto pg_channel_gsm_workthread_end;
 			}
-#else
-			// disable GSM module - by AT-command
-			if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
-				pg_atcommand_queue_append(ch_gsm, AT_SIM300_CPOWD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
-			else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-				pg_atcommand_queue_append(ch_gsm, AT_SIM900_CPOWD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
-			else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
-				pg_atcommand_queue_append(ch_gsm, AT_M10_QPOWD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
-#endif
 			// check power status for complete power down procedure
 			ch_gsm->vio = 1;
 			ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_VIO_DOWN;
@@ -8199,39 +8492,19 @@ static void *pg_channel_gsm_workthread(void *data)
 		if (ch_gsm->flags.restart && !ch_gsm->flags.shutdown_now) {
 			ch_gsm->flags.restart = 0;
 			ast_verb(4, "GSM channel=\"%s\" received restart signal\n", ch_gsm->alias);
-#if 0
-			if(ch_gsm->owner){
-				// hangup - GSM
-				if(ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-					pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
-				else
-					pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-				// hangup - asterisk core call
-				eggsm_call_sm(chnl, CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
-				}
-			do{
-				is_wait = 0;
-				//
-				if(ch_gsm->owner){
-					// unlock eggsm channel pvt
-					ast_mutex_unlock(&ch_gsm->pvt_lock);
-					// unlock eggsm subsystem
-					ast_mutex_unlock(&eggsm_lock);
-					//
-					usleep(1);
-					is_wait = 1;
-					// lock eggsm subsystem
-					ast_mutex_lock(&eggsm_lock);
-					// lock eggsm channel pvt
-					ast_mutex_lock(&ch_gsm->pvt_lock);
-					}
-				}while(is_wait);
-#endif
+			// hangup active calls
+			AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
+				pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+			while (ch_gsm->call_list.first)
+			{
+				ast_mutex_unlock(&ch_gsm->lock);
+				usleep(1000);
+				ast_mutex_lock(&ch_gsm->lock);
+			}
 			// stop all timers
 			memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
 			// set init signal
 			ch_gsm->flags.init = 1;
-#if 1
 			// disable GSM module - key press imitation
 			// key press
 			if (pg_channel_gsm_key_press(ch_gsm, 1) < 0) {
@@ -8240,7 +8513,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				goto pg_channel_gsm_workthread_end;
 			}
 			ast_mutex_unlock(&ch_gsm->lock);
-			usleep(999999);
+			usleep(1999999);
 			ast_mutex_lock(&ch_gsm->lock);
 			// key release
 			if (pg_channel_gsm_key_press(ch_gsm, 0) < 0) {
@@ -8248,15 +8521,6 @@ static void *pg_channel_gsm_workthread(void *data)
 				ast_mutex_unlock(&ch_gsm->lock);
 				goto pg_channel_gsm_workthread_end;
 			}
-#else
-			// disable GSM module - by AT-command
-			if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
-				pg_atcommand_queue_append(ch_gsm, AT_SIM300_CPOWD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
-			else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-				pg_atcommand_queue_append(ch_gsm, AT_SIM900_CPOWD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
-			else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
-				pg_atcommand_queue_append(ch_gsm, AT_M10_QPOWD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
-#endif
 			// check power status for complete power down procedure
 			ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_VIO_DOWN;
 			ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -8299,6 +8563,10 @@ static void *pg_channel_gsm_workthread(void *data)
 					goto pg_channel_gsm_workthread_end;
 				}
 				// flush at command queue
+				if (ch_gsm->at_cmd) {
+					ast_free(ch_gsm->at_cmd);
+					ch_gsm->at_cmd = NULL;
+				}
 				pg_atcommand_queue_flush(ch_gsm);
 				ch_gsm->cmd_done = 1;
 				if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0)
@@ -8320,6 +8588,10 @@ static void *pg_channel_gsm_workthread(void *data)
 					ch_gsm->state = PG_CHANNEL_GSM_STATE_TEST_FUN;
 					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 					// flush at command queue
+					if (ch_gsm->at_cmd) {
+						ast_free(ch_gsm->at_cmd);
+						ch_gsm->at_cmd = NULL;
+					}
 					pg_atcommand_queue_flush(ch_gsm);
 					// run testfun timer
 					x_timer_set(ch_gsm->timers.testfun, testfun_timeout);
@@ -8337,7 +8609,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						goto pg_channel_gsm_workthread_end;
 					}
 					ast_mutex_unlock(&ch_gsm->lock);
-					usleep(999999);
+					usleep(1999999);
 					ast_mutex_lock(&ch_gsm->lock);
 					// key release
 					if (pg_channel_gsm_key_press(ch_gsm, 0) < 0) {
@@ -8585,6 +8857,13 @@ pg_channel_gsm_workthread_end:
 	ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
 	ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 	ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+
+	// flush AT command queue
+	if (ch_gsm->at_cmd) {
+		ast_free(ch_gsm->at_cmd);
+		ch_gsm->at_cmd = NULL;
+	}
+	pg_atcommand_queue_flush(ch_gsm);
 
 	// close TTY device
 	close(ch_gsm->tty_fd);
@@ -9027,6 +9306,9 @@ static int pg_config_file_build(char *filename)
 			len += fprintf(fp, "alias=%s\n", ch_gsm->alias);
 			// enable
 			len += fprintf(fp, "enable=%s\n", ch_gsm->flags.enable ? "yes" : "no");
+			// pin
+			if (ch_gsm->pin)
+				len += fprintf(fp, "pin=%s\n", ch_gsm->pin);
 			// baudrate
 			len += fprintf(fp, "baudrate=%u\n", ch_gsm->config.baudrate);
 			// regattempt
@@ -9172,10 +9454,14 @@ static struct ast_channel *pg_gsm_requester(const char *type, format_t format, c
 static struct ast_channel *pg_gsm_requester(const char *type, int format, void *data, int *cause)
 #endif
 {
-// 	char *device_name;
-// 	char *called_name;
-// 	char *sp;
-// 	char *ep;
+	char *cpd;
+	char trunk[256];
+	char channel[256];
+#if ASTERISK_VERSION_NUM >= 10800
+	char conference[256];
+#endif	
+	char flags[32];
+	char called_name[MAX_ADDRESS_LENGTH];
 // 	struct eggsm_channel_trunk_entry *tren, *tren_start;
 // 	struct eggsm_trunk *trunk;
 #if ASTERISK_VERSION_NUM >= 100000
@@ -9193,15 +9479,179 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 	struct pg_channel_rtp *rtp;
 	u_int32_t ch_id;
 
-	ast_mutex_lock(&pg_lock);
+	ch_gsm = NULL;
+	call = NULL;
+	vin = NULL;
+	rtp = NULL;
 
-#if 0	
-	if(!data) {
+	if (!data) {
 		ast_log(LOG_WARNING, "requester data not present\n");
 		*cause = AST_CAUSE_INCOMPATIBLE_DESTINATION;
 		return NULL;
 	}
-	device_name = ast_strdupa((char *)data);
+
+	cpd = ast_strdupa((char *)data);
+	trunk[0] = '\0';
+	channel[0] = '\0';
+#if ASTERISK_VERSION_NUM >= 10800
+	conference[0] = '\0';
+#endif
+	flags[0] = '\0';
+	if ((sscanf(cpd, "TR[%[0-9A-Za-z-_]]/%[0-9+]", trunk, called_name) != 2) &&
+		(sscanf(cpd, "TR[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", trunk, flags, called_name) != 3) &&
+		(sscanf(cpd, "TRUNK[%[0-9A-Za-z-_]]/%[0-9+]", trunk, called_name) != 2) &&
+		(sscanf(cpd, "TRUNK[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", trunk, flags, called_name) != 3) &&
+			(sscanf(cpd, "CH[%[0-9A-Za-z-_]]/%[0-9+]", channel, called_name) != 2) &&
+			(sscanf(cpd, "CHANNEL[%[0-9A-Za-z-_]]/%[0-9+]", channel, called_name) != 2) &&
+#if ASTERISK_VERSION_NUM >= 10800
+				(sscanf(cpd, "CONF[%[0-9A-Za-z-_]]/%[0-9+]", conference, called_name) != 2) &&
+				(sscanf(cpd, "CONFERENCE[%[0-9A-Za-z-_]]/%[0-9+]", conference, called_name) != 2) &&
+#endif
+					(sscanf(cpd, "%[0-9+]", called_name) != 1) &&
+					(sscanf(cpd, "%[A-Za-z]/%[0-9+]", flags, called_name) != 2)) {
+		ast_log(LOG_WARNING, "can't parse request data=\"%s\"\n", (char *)data);
+		*cause = AST_CAUSE_INCOMPATIBLE_DESTINATION;
+		return NULL;
+	}
+
+	if (strlen(trunk)) {
+		ast_mutex_lock(&pg_lock);
+		ast_mutex_unlock(&pg_lock);
+	} else if (strlen(channel)) {
+		// get requested channel from general channel list
+		if ((ch_gsm = pg_get_channel_gsm_by_name(channel))) {
+			ast_mutex_lock(&ch_gsm->lock);
+			if (
+				(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
+				((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) &&
+				(ch_gsm->config.outgoing_type == PG_GSM_CALL_OUTGOING_TYPE_ALLOW) &&
+				(!ch_gsm->config.trunkonly) &&
+				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
+				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+				(pg_is_vinetic_run(vin)) &&
+				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
+				((rtp = pg_get_channel_rtp(vin))) &&
+				((call = pg_channel_gsm_get_new_call(ch_gsm)))
+			) {
+				call->direction = PG_GSM_CALL_DIRECTION_OUTGOING;
+				call->channel_rtp = rtp;
+				ast_verb(3, "Polygator: got requested GSM channel=\"%s\"\n", ch_gsm->alias);
+			} else {
+				ast_mutex_unlock(&ch_gsm->lock);
+				ch_gsm = NULL;
+				*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+				ast_verb(3, "Polygator: requested GSM channel=\"%s\" busy\n", channel);
+			}
+		} else {
+			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+			ast_verb(3, "Polygator: requested GSM channel=\"%s\" not found\n", channel);
+		}
+#if ASTERISK_VERSION_NUM >= 10800
+	} else if (strlen(conference)) {
+		// get requested conference channel from general channel list
+		if ((ch_gsm = pg_get_channel_gsm_by_name(conference))) {
+			ast_mutex_lock(&ch_gsm->lock);
+			if (
+				(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
+				((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) &&
+				(ch_gsm->config.outgoing_type == PG_GSM_CALL_OUTGOING_TYPE_ALLOW) &&
+				(!ch_gsm->config.trunkonly) &&
+				(ch_gsm->config.conference_allowed) &&
+				(pg_is_channel_gsm_has_same_requestor(ch_gsm, requestor->caller.id.number.str)) &&
+				(!pg_is_channel_gsm_has_active_calls(ch_gsm))
+			) {
+				if (ch_gsm->channel_rtp) {
+					rtp = ch_gsm->channel_rtp;
+					vin = rtp->vinetic;
+				} else if ((!(vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) ||
+						(!pg_is_vinetic_run(vin)) ||
+						(!(joint = ast_format_cap_joint(format, vin->capabilities))) ||
+						(!(rtp = pg_get_channel_rtp(vin)))) {
+					ast_mutex_unlock(&ch_gsm->lock);
+					ch_gsm = NULL;
+					*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+					ast_verb(3, "Polygator: requested conference GSM channel=\"%s\" can't get RTP\n", conference);
+				}
+				if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
+					call->direction = PG_GSM_CALL_DIRECTION_OUTGOING;
+					call->channel_rtp = rtp;
+					ast_verb(3, "Polygator: got requested conference GSM channel=\"%s\"\n", ch_gsm->alias);
+				} else {
+					ast_mutex_unlock(&ch_gsm->lock);
+					ch_gsm = NULL;
+					*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+					ast_verb(3, "Polygator: requested conference GSM channel=\"%s\" can't create outgoing call\n", conference);
+				}
+			} else {
+				ast_mutex_unlock(&ch_gsm->lock);
+				ch_gsm = NULL;
+				*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+				ast_verb(3, "Polygator: requested conference GSM channel=\"%s\" busy\n", conference);
+			}
+		} else {
+			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+			ast_verb(3, "Polygator: requested conference GSM channel=\"%s\" not found\n", conference);
+		}
+#endif
+	} else {
+		ast_mutex_lock(&pg_lock);
+		// search free channel in general channel list
+		ch_gsm_start = NULL;
+		if (pg_channel_gsm_last)
+			ch_gsm_start = pg_channel_gsm_last->pg_general_channel_gsm_list_entry.next;
+		if (!ch_gsm_start)
+			ch_gsm_start = pg_general_channel_gsm_list.first;
+		ch_gsm = ch_gsm_start;
+		// traverse channel list
+		while (ch_gsm)
+		{
+			ast_mutex_lock(&ch_gsm->lock);
+			if (
+				(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
+				((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) &&
+				(ch_gsm->config.outgoing_type == PG_GSM_CALL_OUTGOING_TYPE_ALLOW) &&
+				(!ch_gsm->config.trunkonly) &&
+				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
+				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+				(pg_is_vinetic_run(vin)) &&
+				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
+				((rtp = pg_get_channel_rtp(vin)))
+			) {
+				// set new empty call to prevent missing ownership
+				if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
+					call->direction = PG_GSM_CALL_DIRECTION_OUTGOING;
+					call->channel_rtp = rtp;
+					pg_channel_gsm_last = ch_gsm;
+					ast_verb(3, "Polygator: got GSM channel=\"%s\"\n", ch_gsm->alias);
+					break;
+				}
+			}
+			ast_mutex_unlock(&ch_gsm->lock);
+
+			ch_gsm = ch_gsm->pg_general_channel_gsm_list_entry.next;
+			if (!ch_gsm)
+				ch_gsm = pg_general_channel_gsm_list.first;
+			if (ch_gsm == ch_gsm_start) {
+				ch_gsm = NULL;
+				break;
+			}
+		} // end of traverse channel list
+		ast_mutex_unlock(&pg_lock);
+		// congestion -- free channel not found
+		if (!ch_gsm) {
+			*cause = AST_CAUSE_NORMAL_CIRCUIT_CONGESTION;
+			ast_verb(3, "Polygator: free GSM channel not found\n");
+		}
+	}
+
+	if (!ch_gsm) {
+#if ASTERISK_VERSION_NUM >= 100000
+		ast_format_cap_destroy(joint);
+#endif
+		return NULL;
+	}
+
+#if 0	
 	// search '/' before called name
 	called_name = strchr(device_name, '/');
 	if (called_name) {
@@ -9300,115 +9750,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				return NULL;
 				} // end of trunk not found
 			} // end of trunk section
-		else if(!strncasecmp(device_name, "CH", 2)){
-			// get specified channel
-			if(!(sp = strchr(device_name, '['))){
-				ast_log(LOG_WARNING, "can't get requested channel name\n");
-				*cause = AST_CAUSE_INCOMPATIBLE_DESTINATION;
-				// unlock eggsm subsystem
-				ast_mutex_unlock(&eggsm_lock);
-				return NULL;
-				}
-			sp++;
-			if(!(ep = strchr(sp, ']'))){
-				ast_log(LOG_WARNING, "requested channel has unbalanced name\n");
-				*cause = AST_CAUSE_INCOMPATIBLE_DESTINATION;
-				// unlock eggsm subsystem
-				ast_mutex_unlock(&eggsm_lock);
-				return NULL;
-				}
-			*ep = '\0';
-			ast_verb(3, "eggsm: requested channel name=\"%s\"\n", sp);
-			//
-			chnl_start = NULL;
-			AST_LIST_TRAVERSE(&channels, chnl, entry){
-				//
-				if(!strncmp(sp, chnl->name, ep-sp)){
-					// lock pvt channel
-					ast_mutex_lock(&chnl->pvt_lock);
-					//
-					if((chnl->call_state == CH_CALL_ST_NULL) &&
-							(!chnl->owner) &&
-							((chnl->reg_stat == REG_STAT_REG_HOME_NET) || (chnl->reg_stat == REG_STAT_REG_ROAMING)) &&
-							(chnl->outgoing_type == OUT_CALL_ALLOW) &&
-							(!chnl->trunkonly)){
-						// set owner for prevent missing ownership
-						chnl->owner = &fake_owner;
-						chnl_start = chnl;
-						ast_verb(3, "eggsm: got channel=\"%s\"\n", chnl->name);
-						break;
-						}
-					// unlock pvt channel
-					ast_mutex_unlock(&chnl->pvt_lock);
-					}
-				} // traverse channel list
-			if(!chnl_start){
-				ast_log(LOG_WARNING, "requested channel=\"%s\" not found\n", sp);
-				*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
-				// unlock eggsm subsystem
-				ast_mutex_unlock(&eggsm_lock);
-				return NULL;
-				}
-			chnl = chnl_start;
-			}
-		}
-	else
 #endif
-	{
-		// search free channel in general channel list
-		ch_gsm_start = NULL;
-		if (pg_channel_gsm_last)
-			ch_gsm_start = pg_channel_gsm_last->pg_general_channel_gsm_list_entry.next;
-		if (!ch_gsm_start)
-			ch_gsm_start = pg_general_channel_gsm_list.first;
-		ch_gsm = ch_gsm_start;
-		// traverse channel list
-		while (ch_gsm)
-		{
-			ast_mutex_lock(&ch_gsm->lock);
-			if (
-				(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
-				((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) &&
-				(ch_gsm->config.outgoing_type == PG_GSM_CALL_OUTGOING_TYPE_ALLOW) &&
-				(!ch_gsm->config.trunkonly) &&
-				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
-				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
-				(pg_is_vinetic_run(vin)) &&
-				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
-				((rtp = pg_get_channel_rtp(vin)))
-			) {
-				// set new empty call to prevent missing ownership
-				if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
-					call->direction = PG_GSM_CALL_DIRECTION_OUTGOING;
-					call->channel_rtp = rtp;
-					pg_channel_gsm_last = ch_gsm;
-					ast_verb(3, "Polygator: got GSM channel=\"%s\"\n", ch_gsm->alias);
-					break;
-				}
-			}
-			ast_mutex_unlock(&ch_gsm->lock);
-
-			ch_gsm = ch_gsm->pg_general_channel_gsm_list_entry.next;
-			if (!ch_gsm)
-				ch_gsm = pg_general_channel_gsm_list.first;
-			if (ch_gsm == ch_gsm_start) {
-				ch_gsm = NULL;
-				break;
-			}
-		} // traverse channel list
-	}
-
-	ast_mutex_unlock(&pg_lock);
-
-	// congestion -- no requested or free channel
-	if (!ch_gsm) {
-		ast_verb(3, "Polygator: not free or requested GSM channels\n");
-		*cause = AST_CAUSE_NORMAL_CIRCUIT_CONGESTION;
-#if ASTERISK_VERSION_NUM >= 100000
-		ast_format_cap_destroy(joint);
-#endif
-		return NULL;
-	}
 
 	if (!ch_gsm->channel_rtp_usage) {
 
@@ -9606,9 +9948,9 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 			goto pg_gsm_requester_vinetic_end;
 		}
 		// set DTMF receiver
-		vin_coder_channel_set_as(vin->context, rtp->position_on_vinetic, VIN_OFF);
-		vin_coder_channel_set_is(vin->context, rtp->position_on_vinetic, VIN_IS_SIGINA);
-		vin_coder_channel_set_et(vin->context, rtp->position_on_vinetic, VIN_ACTIVE);
+		vin_dtmf_receiver_set_as(vin->context, rtp->position_on_vinetic, VIN_OFF);
+		vin_dtmf_receiver_set_is(vin->context, rtp->position_on_vinetic, VIN_IS_SIGINA);
+		vin_dtmf_receiver_set_et(vin->context, rtp->position_on_vinetic, VIN_ACTIVE);
 		if ((res = vin_dtmf_receiver_enable(vin->context, rtp->position_on_vinetic)) < 0) {
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_enable(): line %d\n", vin->name, vin->context.errorline);
@@ -9765,7 +10107,8 @@ pg_gsm_requester_vinetic_end:
 static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeout)
 {
 	char *cpd;
-	char device[8];
+	char device[256];
+	char flags[32];
 	char called_name[MAX_ADDRESS_LENGTH];
 	struct timeval dial_timeout;
 	struct pg_gsm_call *call = (struct pg_gsm_call *)ast_ch->tech_pvt;
@@ -9773,9 +10116,16 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeou
 
 	// parse destination
 	cpd = ast_strdupa(destination);
-	if ((sscanf(cpd, "TR[%[0-9A-Za-z-]]/%[0-9+]", device, called_name) != 2) &&
-			(sscanf(cpd, "CH[%[0-9A-Za-z-]]/%[0-9+]", device, called_name) != 2) &&
-				(sscanf(cpd, "%[0-9+]", called_name) != 1)) {
+	if ((sscanf(cpd, "TR[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+		(sscanf(cpd, "TR[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
+		(sscanf(cpd, "TRUNK[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+		(sscanf(cpd, "TRUNK[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
+			(sscanf(cpd, "CH[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+			(sscanf(cpd, "CHANNEL[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+				(sscanf(cpd, "CONF[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+				(sscanf(cpd, "CONFERENCE[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+					(sscanf(cpd, "%[0-9+]", called_name) != 1) &&
+					(sscanf(cpd, "%[A-Za-z]/%[0-9+]", flags, called_name) != 2)) {
 		ast_log(LOG_WARNING, "ast channel=\"%s\" has invalid called name=\"%s\"\n", ast_ch->name, called_name);
 		return -1;
 	}
@@ -9789,7 +10139,7 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeou
 	if (ast_ch->cid.cid_num)
 		address_classify(ast_ch->cid.cid_num, &call->calling_name);
 #else
-	if (ast_ch->caller.id.number.str)
+	if (ast_ch->connected.id.number.str)
 		address_classify(ast_ch->connected.id.number.str, &call->calling_name);
 #endif
 	else
@@ -9799,12 +10149,11 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeou
 		ast_mutex_unlock(&ch_gsm->lock);
 		return -1;
 	}
+	pg_dcr_table_update(ch_gsm->iccid, &call->called_name, &call->calling_name, &ch_gsm->lock);
 	ast_verb(2, "GSM channel=\"%s\": outgoing call \"%s%s\" -> \"%s%s\"\n",
-				ch_gsm->alias,
-				(call->calling_name.type.full == 145)?("+"):(""),
-				call->calling_name.value,
-				(call->called_name.type.full == 145)?("+"):(""),
-				call->called_name.value);
+			 					ch_gsm->alias,
+								(call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value,
+								(call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
 	// set dialing timeout
 	if (timeout > 0) {
 		dial_timeout.tv_sec = timeout;
@@ -10003,7 +10352,7 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_HOLD:
 			ast_verb(4, "GSM channel=\"%s\": call line=%d indicate hold\n", ch_gsm->alias, call->line);
-			if (ch_gsm->config.callwait == PG_CALLWAIT_STATE_ENABLE) {
+			if ((ch_gsm->config.callwait == PG_CALLWAIT_STATE_ENABLE) || (ch_gsm->config.conference_allowed)) {
 				rtp = ch_gsm->channel_rtp;
 				res = pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_HOLD_REQ, 0);
 				ast_channel_set_fd(ast_ch, 0, -1);
@@ -10014,7 +10363,7 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_UNHOLD:
 			ast_verb(4, "GSM channel=\"%s\": call line=%d indicate unhold\n", ch_gsm->alias, call->line);
-			if (ch_gsm->config.callwait == PG_CALLWAIT_STATE_ENABLE) {
+			if ((ch_gsm->config.callwait == PG_CALLWAIT_STATE_ENABLE) || (ch_gsm->config.conference_allowed)) {
 				rtp = ch_gsm->channel_rtp;
 				res = pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_UNHOLD_REQ, 0);
 				ast_channel_set_fd(ast_ch, 0, rtp->fd);
@@ -10441,7 +10790,7 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 		ast_mutex_unlock(&rtp->lock);
 		return &ast_null_frame;
 	} else if (rtp_hdr_ptr->payload_type != rtp->payload_type) {
-		ast_verb(4, "RTP Channel=\"%s\": unknown pt=%u\n", rtp->name, rtp_hdr_ptr->payload_type);
+// 		ast_verb(4, "RTP Channel=\"%s\": unknown pt=%u\n", rtp->name, rtp_hdr_ptr->payload_type);
 		ast_mutex_unlock(&rtp->lock);
 		return &ast_null_frame;
 	}
@@ -10625,56 +10974,6 @@ static int pg_gsm_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int 
 }
 //------------------------------------------------------------------------------
 // end of pg_gsm_dtmf_end()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_get_board_by_name()
-//------------------------------------------------------------------------------
-static struct pg_board *pg_get_board_by_name(const char *name)
-{
-	struct pg_board *brd = NULL;
-	// check for name present
-	if (name) {
-		// check for board list is not empty
-		if ((brd = pg_general_board_list.first)) {
-			// traverse board list for matching entry name
-			brd = NULL;
-			AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
-			{
-				// compare name strings
-				if (!strcmp(name, brd->name)) break;
-			}
-		}
-	}
-	return brd;
-}
-//------------------------------------------------------------------------------
-// end of pg_get_board_by_name()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_get_channel_gsm_by_name()
-//------------------------------------------------------------------------------
-static struct pg_channel_gsm *pg_get_channel_gsm_by_name(const char *name)
-{
-	struct pg_channel_gsm *ch_gsm = NULL;
-	// check for name present
-	if (name) {
-		// check for board list is not empty
-		if ((ch_gsm = pg_general_channel_gsm_list.first)) {
-			// traverse board list for matching entry name
-			ch_gsm = NULL;
-			AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-			{
-				// compare name strings
-				if (!strcmp(name, ch_gsm->alias)) break;
-			}
-		}
-	}
-	return ch_gsm;
-}
-//------------------------------------------------------------------------------
-// end of pg_get_channel_gsm_by_name()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -12000,6 +12299,93 @@ static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, i
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_channel_gsm_action_suspend_resume()
+//------------------------------------------------------------------------------
+static char *pg_cli_channel_gsm_action_suspend_resume(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	struct pg_channel_gsm *ch_gsm;
+	struct pg_gsm_call *call;
+
+	size_t total;
+
+	switch (cmd)
+	{
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_INIT:
+			ast_cli(a->fd, "is ch_act_pwr subhandler -- CLI_INIT unsupported in this context\n");
+			return CLI_FAILURE;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_GENERATE:
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_HANDLER:
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		default:
+			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
+			return CLI_FAILURE;
+	}
+
+	total = 0;
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
+	{
+		ast_mutex_lock(&ch_gsm->lock);
+		if (!strcmp(a->argv[3], "all") || !strcmp(a->argv[3], ch_gsm->alias)) {
+			total++;
+			ast_cli(a->fd, "  GSM channel=\"%s\": ", ch_gsm->alias);
+			if (!strcmp(a->argv[4], "suspend")) {
+				// suspend
+				ast_cli(a->fd, "suspend...\n");
+				if (ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) {
+					// stop all timers
+					memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
+					// hangup active calls
+					AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
+						pg_channel_gsm_call_sm(call, PG_GSM_CALL_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+					while (ch_gsm->call_list.first)
+					{
+						ast_mutex_unlock(&ch_gsm->lock);
+						usleep(1000);
+						ast_mutex_lock(&ch_gsm->lock);
+					}
+					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+					ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
+					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+					x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
+				} else if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SUSPEND) {
+					ast_cli(a->fd, " module switch to suspend state\n");
+				} else if ((ch_gsm->state == PG_CHANNEL_GSM_STATE_CHECK_PIN) || (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_CALL_READY))
+				  	ch_gsm->flags.suspend_now = 1;
+				else
+					ast_cli(a->fd, " switching to suspend state from \"%s\" not allowed\n", pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+			} else {
+				// resume
+				ast_cli(a->fd, "resume...\n");
+				if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SUSPEND) {
+					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
+					pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
+					ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
+					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+					ch_gsm->flags.resume_now = 1;
+					// start simpoll timer
+					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+				} else
+					ast_cli(a->fd, " switching to run state from \"%s\" not allowed\n", pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+			}
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+
+	if (!total)
+		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
+
+	return CLI_SUCCESS;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_channel_gsm_action_suspend_resume()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_channel_gsm_action_param()
 //------------------------------------------------------------------------------
 static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
@@ -13134,6 +13520,7 @@ is_ussd_send_end:
 			close(ch_gsm->ussd_pipe[1]);
 			ch_gsm->ussd_pipe[1] = -1;
 			ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
+			ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 		}
 		ast_mutex_unlock(&ch_gsm->lock);
 	} else
@@ -13288,6 +13675,157 @@ is_at_send_end:
 }
 //------------------------------------------------------------------------------
 // end of pg_cli_channel_gsm_action_at()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_channel_gsm_action_dcr()
+//------------------------------------------------------------------------------
+static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a){
+
+	struct pg_channel_gsm *ch_gsm;
+
+	struct timeval tv;
+	char from[MAX_ADDRESS_LENGTH];
+	char to[MAX_ADDRESS_LENGTH];
+	char *str;
+	sqlite3_stmt *sql;
+	int res;
+	int row;
+
+	char buf[20];
+	char tmbuf[20];
+	int number_fl;
+	int from_fl;
+	int to_fl;
+	int ttl_fl;
+
+	switch(cmd)
+	{
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_INIT:
+			ast_cli(a->fd, "is ch_act_at subhandler -- CLI_INIT unsupported in this context\n");
+			return CLI_FAILURE;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_GENERATE:
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_HANDLER:
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		default:
+			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
+			return CLI_FAILURE;
+	}
+
+	if (a->argc < 5) {
+		sprintf(pg_cli_channel_gsm_actions_usage, "Usage: polygator channel gsm <channel> dcr\n");
+		return CLI_SHOWUSAGE;
+	}
+
+	// check name param for wildcard "all"
+	if (!strcmp(a->argv[3], "all")) {
+		ast_cli(a->fd, "wildcard \"all\" not supported -- use channel name\n");
+		return CLI_SUCCESS;
+	}
+
+	number_fl = strlen("#");
+	from_fl = strlen("From");
+	to_fl = strlen("To");
+	ttl_fl = strlen("TTL");
+
+	if ((ch_gsm = pg_get_channel_gsm_by_name(a->argv[3]))) {
+		ast_mutex_lock(&ch_gsm->lock);
+		if (ch_gsm->config.incoming_type == PG_GSM_CALL_INCOMING_TYPE_DYN) {
+			if (ch_gsm->iccid) {
+				// get dynamic clip routing table
+				gettimeofday(&tv, NULL);
+				str = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname,timestamp FROM '%q-dcr' WHERE timestamp>%ld ORDER BY timestamp DESC;", ch_gsm->iccid, (long int)(tv.tv_sec - ch_gsm->config.dcrttl));
+				while (1)
+				{
+					res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
+					if (res == SQLITE_OK) {
+						row = 0;
+						while (1)
+						{
+							res = sqlite3_step(sql);
+							if (res == SQLITE_ROW) {
+								number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%d", row));
+								from_fl = mmax(from_fl, snprintf(from, sizeof(from), "%s%s", (sqlite3_column_int(sql, 0) == 145)?("+"):(""), sqlite3_column_text(sql, 1)));
+								to_fl = mmax(to_fl, snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3)));
+								ttl_fl = mmax(ttl_fl, snprintf(tmbuf, sizeof(tmbuf), "%ld", (long int)(ch_gsm->config.dcrttl - (tv.tv_sec - (long int)sqlite3_column_int64(sql, 4)))));
+								row++;
+							} else if (res == SQLITE_DONE)
+								break;
+							else if (res == SQLITE_BUSY) {
+								ast_mutex_unlock(&ch_gsm->lock);
+								usleep(1000);
+								ast_mutex_lock(&ch_gsm->lock);
+								continue;
+							} else {
+								ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+								break;
+							}
+						}
+						if ((row) && (sqlite3_reset(sql) == SQLITE_OK)) {
+							ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s |\n",
+									number_fl, "#",
+		  							from_fl, "From",
+									to_fl, "To",
+									ttl_fl, "TTL");
+							row = 0;
+							while (1)
+							{
+								res = sqlite3_step(sql);
+								if (res == SQLITE_ROW) {
+									snprintf(buf, sizeof(buf), "%d", row);
+									snprintf(from, sizeof(from), "%s%s", (sqlite3_column_int(sql, 0) == 145)?("+"):(""), sqlite3_column_text(sql, 1));
+									snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3));
+									snprintf(tmbuf, sizeof(tmbuf), "%ld", (long int)(ch_gsm->config.dcrttl - (tv.tv_sec - (long int)sqlite3_column_int64(sql, 4))));
+									ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s |\n",
+										number_fl, buf,
+			  							from_fl, from,
+										to_fl, to,
+										ttl_fl, tmbuf);
+									row++;
+								} else if (res == SQLITE_DONE)
+									break;
+								else if (res == SQLITE_BUSY) {
+									ast_mutex_unlock(&ch_gsm->lock);
+									usleep(1000);
+									ast_mutex_lock(&ch_gsm->lock);
+									continue;
+								} else {
+									ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+									break;
+								}
+							}
+						} else
+							ast_cli(a->fd, "<%s>: dynamic clip routing table is empty\n", ch_gsm->alias);
+						sqlite3_finalize(sql);
+						break;
+					} else if (res == SQLITE_BUSY) {
+						ast_mutex_unlock(&ch_gsm->lock);
+						usleep(1000);
+						ast_mutex_lock(&ch_gsm->lock);
+						continue;
+					} else {
+						ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+						break;
+					}
+				}
+				sqlite3_free(str);
+			} else
+				ast_cli(a->fd, "<%s>: dynamic clip routing table is empty\n", ch_gsm->alias);
+		} else
+			ast_cli(a->fd, "  GSM channel=\"%s\": this channel not used dynamic clip routing\n", ch_gsm->alias);
+		ast_mutex_unlock(&ch_gsm->lock);
+	} else
+		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
+
+	return CLI_SUCCESS;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_channel_gsm_action_dcr()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -13615,6 +14153,7 @@ static int pg_load(void)
 					ch_gsm->vinetic_pcm_slot = vc_slot;
 				ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 				ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+				ch_gsm->config.conference_allowed = 1; /*:TEST:*/
 				// get config variables
 				// alias
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "alias"))) {
@@ -13625,6 +14164,9 @@ static int pg_load(void)
 				ch_gsm->config.enable = 0;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "enable")))
 					ch_gsm->config.enable = -ast_true(cvar);
+				// pin
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "pin")) && (is_str_digit(cvar)))
+					ch_gsm->pin = ast_strdup(cvar);
 				// baudrate
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "baudrate")) && (is_str_digit(cvar)))
 					ch_gsm->config.baudrate = atoi(cvar);
