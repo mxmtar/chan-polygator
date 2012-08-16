@@ -71,7 +71,7 @@ enum{
 	AT_SIM300_CCFC = AT_CCFC,		// AT+CCFC - Call forwarding number and conditions control
 	AT_SIM300_CCUG = AT_CCUG,		// AT+CCUG - Closed user group control
 	AT_SIM300_CCWA = AT_CCWA,		// AT+CCWA - Call waiting control
-	AT_SIM300_CEER = AT_CERR,		// AT+CEER - Extended error report
+	AT_SIM300_CEER = AT_CEER,		// AT+CEER - Extended error report
 	AT_SIM300_CGMI = AT_CGMI,		// AT+CGMI - Request manufacturer identification
 	AT_SIM300_CGMM = AT_CGMM,		// AT+CGMM - Request model identification
 	AT_SIM300_CGMR = AT_CGMR,		// AT+CGMR - Request TA revision identification of software release

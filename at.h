@@ -66,7 +66,7 @@ enum {
 	AT_CCFC,		// AT+CCFC - Call forwarding number and conditions control
 	AT_CCUG,		// AT+CCUG - Closed user group control
 	AT_CCWA,		// AT+CCWA - Call waiting control
-	AT_CERR,		// AT+CEER - Extended error report
+	AT_CEER,		// AT+CEER - Extended error report
 	AT_CGMI,		// AT+CGMI - Request manufacturer identification
 	AT_CGMM,		// AT+CGMM - Request model identification
 	AT_CGMR,		// AT+CGMR - Request ta revision identification of software release

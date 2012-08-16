@@ -70,7 +70,7 @@ enum{
 	AT_M10_CCFC = AT_CCFC,		// AT+CCFC - Call forwarding number and conditions control
 	AT_M10_CCUG = AT_CCUG,		// AT+CCUG - Closed user group control
 	AT_M10_CCWA = AT_CCWA,		// AT+CCWA - Call waiting control
-	AT_M10_CEER = AT_CERR,		// AT+CEER - Extended error report
+	AT_M10_CEER = AT_CEER,		// AT+CEER - Extended error report
 	AT_M10_CGMI = AT_CGMI,		// AT+CGMI - Request manufacturer identification
 	AT_M10_CGMM = AT_CGMM,		// AT+CGMM - Request model identification
 	AT_M10_CGMR = AT_CGMR,		// AT+CGMR - Request TA revision identification of software release

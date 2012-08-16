@@ -10,9 +10,7 @@ AC_MSG_CHECKING([for sqlite3 version >= $1])
 
 SQLITE3_VERSION=""
 
-test "$prefix" = NONE && prefix=/usr/local
-
-if test -f "$lt_sysroot$prefix/include/sqlite3.h" ; then
+if test -f "$lt_sysroot/usr/include/sqlite3.h" ; then
 	REQ_SQLITE_VERSION=$1
 	[REQ_SQLITE_VERSION_TRIM=`LANG=C printf "$REQ_SQLITE_VERSION" | ${GREP} -e '^[0-9]\{1,2\}\.[0-9]\{1,2\}\.[0-9]\{1,2\}' | ${SED} -e '{s:\(^[0-9]\{1,2\}\.[0-9]\{1,2\}\.[0-9]\{1,2\}\)\(.*\):\1:}'`]
 	if test -z "$REQ_SQLITE_VERSION_TRIM"; then
@@ -26,7 +24,7 @@ if test -f "$lt_sysroot$prefix/include/sqlite3.h" ; then
 	printf "%03d" $PARTS
 	done`
 
-	[TST_SQLITE_VERSION=`cat $lt_sysroot$prefix/include/sqlite3.h | ${GREP} -e '[[:space:]]*#define[[:space:]]*SQLITE_VERSION[[:space:]]*\"\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\".*' | ${SED} -e '{s:[[:space:]]*#define[[:space:]]*SQLITE_VERSION[[:space:]]*\"\(\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\)\".*:\1:}'`]
+	[TST_SQLITE_VERSION=`cat $lt_sysroot/usr/include/sqlite3.h | ${GREP} -e '[[:space:]]*#define[[:space:]]*SQLITE_VERSION[[:space:]]*\"\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\".*' | ${SED} -e '{s:[[:space:]]*#define[[:space:]]*SQLITE_VERSION[[:space:]]*\"\(\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\)\".*:\1:}'`]
 	if test "$TST_SQLITE_VERSION" = ""; then
 		AC_MSG_RESULT(fail)
 		AC_MSG_RESULT([Cannot find SQLITE_VERSION in sqlite3.h header to retrieve sqlite3 version!])

@@ -69,7 +69,7 @@ enum{
 	AT_SIM900_CBST = AT_CBST,		// AT+CBST - Select bearer service type
 	AT_SIM900_CCFC = AT_CCFC,		// AT+CCFC - Call forwarding number and conditions control
 	AT_SIM900_CCWA = AT_CCWA,		// AT+CCWA - Call waiting control
-	AT_SIM900_CEER = AT_CERR,		// AT+CEER - Extended error report
+	AT_SIM900_CEER = AT_CEER,		// AT+CEER - Extended error report
 	AT_SIM900_CGMI = AT_CGMI,		// AT+CGMI - Request manufacturer identification
 	AT_SIM900_CGMM = AT_CGMM,		// AT+CGMM - Request model identification
 	AT_SIM900_CGMR = AT_CGMR,		// AT+CGMR - Request TA revision identification of software release
