@@ -4523,6 +4523,10 @@ static void *pg_channel_gsm_workthread(void *data)
 								ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 								// reset clir state
 								ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+								// reset rssi value
+								ch_gsm->rssi = 99;
+								// reset ber value
+								ch_gsm->ber = 99;
 								// stop all timers
 								memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
 								// hangup active calls
@@ -5381,7 +5385,16 @@ static void *pg_channel_gsm_workthread(void *data)
 										//
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+										// reset registaration status
 										ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+										// reset callwait state
+										ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+										// reset clir state
+										ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+										// reset rssi value
+										ch_gsm->rssi = 99;
+										// reset ber value
+										ch_gsm->ber = 99;
 									}
 								}
 							}
@@ -6452,9 +6465,16 @@ static void *pg_channel_gsm_workthread(void *data)
 
 												ch_gsm->flags.dcr_table_needed = 1;
 
+												// reset registaration status
 												ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+												// reset callwait state
 												ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+												// reset clir state
 												ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+												// reset rssi value
+												ch_gsm->rssi = 99;
+												// reset ber value
+												ch_gsm->ber = 99;
 // 												// reset attempts count
 // 												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
 												if(ch_gsm->flags.sim_change)
@@ -6630,9 +6650,16 @@ static void *pg_channel_gsm_workthread(void *data)
 
 												ch_gsm->flags.dcr_table_needed = 1;
 
+												// reset registaration status
 												ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+												// reset callwait state
 												ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+												// reset clir state
 												ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+												// reset rssi value
+												ch_gsm->rssi = 99;
+												// reset ber value
+												ch_gsm->ber = 99;
 // 												// reset attempts count
 // 												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
 												if(ch_gsm->flags.sim_change)
@@ -6804,9 +6831,16 @@ static void *pg_channel_gsm_workthread(void *data)
 
 												ch_gsm->flags.dcr_table_needed = 1;
 
+												// reset registaration status
 												ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+												// reset callwait state
 												ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+												// reset clir state
 												ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+												// reset rssi value
+												ch_gsm->rssi = 99;
+												// reset ber value
+												ch_gsm->ber = 99;
 // 												// reset attempts count
 // 												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
 												if(ch_gsm->flags.sim_change)
@@ -7282,7 +7316,16 @@ static void *pg_channel_gsm_workthread(void *data)
 						ast_verbose("Polygator: GSM channel=\"%s\": module switch to suspend state\n", ch_gsm->alias);
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+						// reset registaration status
 						ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+						// reset callwait state
+						ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+						// reset clir state
+						ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+						// reset rssi value
+						ch_gsm->rssi = 99;
+						// reset ber value
+						ch_gsm->ber = 99;
 					}
 				}
 			} // end of CPIN
@@ -8700,8 +8743,16 @@ static void *pg_channel_gsm_workthread(void *data)
 		{
 			//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 			case PG_CHANNEL_GSM_STATE_DISABLE:
-				// reset registration status
+				// reset registaration status
 				ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+				// reset callwait state
+				ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+				// reset clir state
+				ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+				// reset rssi value
+				ch_gsm->rssi = 99;
+				// reset ber value
+				ch_gsm->ber = 99;
 				// reset restart_now flag
 				if (ch_gsm->flags.restart_now)
 					ch_gsm->flags.restart_now = 0;
@@ -9026,9 +9077,16 @@ pg_channel_gsm_workthread_end:
 	if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
 	if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
 
+	// reset registaration status
 	ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+	// reset callwait state
 	ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+	// reset clir state
 	ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+	// reset rssi value
+	ch_gsm->rssi = 99;
+	// reset ber value
+	ch_gsm->ber = 99;
 
 	// flush AT command queue
 	if (ch_gsm->at_cmd) {
@@ -9377,6 +9435,115 @@ static void *pg_vinetic_workthread(void *data)
 				ast_verb(3, "vinetic=\"%s\": firmware downloading succeeded\n", vin->name);
 				vin->state = PG_VINETIC_STATE_RUN;
 				ast_debug(3, "vinetic=\"%s\": run\n", vin->name);
+				// set vinetic's module state to previous state - for fallback purpose after reset
+				// ALI module
+				if (is_vin_ali_enabled(vin->context)) {
+					// enable vinetic ALI module
+					if (vin_ali_enable(vin->context) < 0) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_enable(): line %d\n", vin->name, vin->context.errorline);
+						ast_mutex_unlock(&vin->lock);
+						goto pg_vinetic_workthread_end;
+					}
+					for (i=0; i<4 ; i++)
+					{
+						if (is_vin_ali_channel_enabled(vin->context, i)) {
+							// enable vinetic ALI channel
+							if (vin_ali_channel_enable(vin->context, i) < 0) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_channel_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_channel_enable(): line %d\n", vin->name, vin->context.errorline);
+								ast_mutex_unlock(&vin->lock);
+								goto pg_vinetic_workthread_end;
+							}
+							// enable vinetic ALI Near End LEC
+							if (vin_ali_near_end_lec_enable(vin->context, i) < 0) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): line %d\n", vin->name, vin->context.errorline);
+								ast_mutex_unlock(&vin->lock);
+								goto pg_vinetic_workthread_end;
+							}
+							// set ALI channel operation mode ACTIVE_HIGH_VBATH
+							if (vin_set_opmode(&vin->context, i, vin->context.ali_opmode[i]) < 0) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_opmode(): %s\n", vin->name, vin_error_str(&vin->context));
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_opmode(): line %d\n", vin->name, vin->context.errorline);
+								ast_mutex_unlock(&vin->lock);
+								goto pg_vinetic_workthread_end;
+							}
+						}
+					}
+				}
+				// signaling module
+				if (is_vin_signaling_enabled(vin->context)) {
+					// enable coder module
+					if (vin_signaling_enable(vin->context) < 0) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_enable(): line %d\n", vin->name, vin->context.errorline);
+						ast_mutex_unlock(&vin->lock);
+						goto pg_vinetic_workthread_end;
+					}
+					for (i=0; i<4 ; i++)
+					{
+						if (is_vin_signaling_channel_enabled(vin->context, i)) {
+							// enable signaling channel
+							if (vin_signaling_channel_enable(vin->context, i) < 0) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_enable(): line %d\n", vin->name, vin->context.errorline);
+								ast_mutex_unlock(&vin->lock);
+								goto pg_vinetic_workthread_end;
+							}
+							// enable DTMF receiver
+							if (vin_dtmf_receiver_enable(vin->context, i) < 0) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_enable(): line %d\n", vin->name, vin->context.errorline);
+								ast_mutex_unlock(&vin->lock);
+								goto pg_vinetic_workthread_end;
+							}
+							// enable signalling channel RTP
+							if (vin_signaling_channel_config_rtp(vin->context, i) < 0) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_config_rtp(): line %d\n", vin->name, vin->context.errorline);
+								ast_mutex_unlock(&vin->lock);
+								goto pg_vinetic_workthread_end;
+							}
+						}
+					}
+				}
+				// coder module
+				if (is_vin_coder_enabled(vin->context)) {
+					// enable coder module
+					if ((vin_coder_enable(vin->context)) < 0) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_enable(): line %d\n", vin->name, vin->context.errorline);
+						ast_mutex_unlock(&vin->lock);
+						goto pg_vinetic_workthread_end;
+					}
+					// set coder configuration RTP
+					if (vin_coder_config_rtp(vin->context) < 0) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
+						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): line %d\n", vin->name, vin->context.errorline);
+						ast_mutex_unlock(&vin->lock);
+						goto pg_vinetic_workthread_end;
+					}
+					for (i=0; i<4 ; i++)
+					{
+						if (is_vin_coder_channel_enabled(vin->context, i)) {
+							// set coder channel RTP
+							if (vin_coder_channel_config_rtp(vin->context, i) < 0) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_config_rtp(): line %d\n", vin->name, vin->context.errorline);
+								ast_mutex_unlock(&vin->lock);
+								goto pg_vinetic_workthread_end;
+							}
+							// enable coder channel speech compression
+							if (vin_coder_channel_enable(vin->context, i) < 0) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_enable(): line %d\n", vin->name, vin->context.errorline);
+								ast_mutex_unlock(&vin->lock);
+								goto pg_vinetic_workthread_end;
+							}
+						}
+					}
+				}
 				break;
 			case PG_VINETIC_STATE_RUN:
 				ast_mutex_unlock(&vin->lock);
@@ -14896,8 +15063,16 @@ static int pg_load(void)
 					ch_gsm->vinetic_alm_slot = vc_slot;
 				else if (!strcasecmp(vc_type, "PCM"))
 					ch_gsm->vinetic_pcm_slot = vc_slot;
+				// reset registaration status
+				ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+				// reset callwait state
 				ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+				// reset clir state
 				ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+				// reset rssi value
+				ch_gsm->rssi = 99;
+				// reset ber value
+				ch_gsm->ber = 99;
 				// get config variables
 				// alias
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "alias"))) {
@@ -14909,7 +15084,7 @@ static int pg_load(void)
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "enable")))
 					ch_gsm->config.enable = -ast_true(cvar);
 				// pin
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "pin")) && (is_str_digit(cvar)))
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "pin")))
 					ch_gsm->pin = ast_strdup(cvar);
 				// baudrate
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "baudrate")) && (is_str_digit(cvar)))
