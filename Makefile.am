@@ -15,6 +15,17 @@ chan_polygator_la_SOURCES = \
 chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
 chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic
 
+noinst_HEADERS = \
+		address.h \
+		at.h \
+		m10.h \
+		rtp.h \
+		sim300.h \
+		sim900.h \
+		sms.h \
+		strutil.h \
+		x_timer.h
+
 firmwaredir = $(astdatadir)/polygator
 dist_firmware_DATA = \
 	firmware/edspPRAMfw_RTP_782_14.bin \
