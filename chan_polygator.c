@@ -300,6 +300,7 @@ struct pg_call_gsm {
 	} timers;
 	struct timeval start_time;
 	struct timeval answer_time;
+	int cause;
 	AST_LIST_ENTRY(pg_call_gsm) entry;
 };
 
@@ -4956,17 +4957,23 @@ static void *pg_channel_gsm_workthread(void *data)
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CEER:
 							if (is_str_begin_by(r_buf, "+CEER:")) {
+								if (ch_gsm->at_cmd->sub_cmd) call = (struct pg_call_gsm *)ch_gsm->at_cmd->sub_cmd;
+								else call = NULL;
 								if (sscanf(r_buf, "+CEER: \"Cause Select:%u Cause:%u\"", &cause_select, &cause_value) == 2) { // SIM900
 									ast_verb(4, "GSM channel=\"%s\": CEER Cause Select=%u Cause=%u\n", ch_gsm->alias, cause_select, cause_value);
 									switch (cause_select)
 									{
 										case 67:
-											if (ch_gsm->at_cmd->sub_cmd)
-												pg_call_gsm_sm((struct pg_call_gsm *)ch_gsm->at_cmd->sub_cmd, PG_CALL_GSM_MSG_RELEASE_IND, cause_value);
+											if (call) {
+												if ((cause_value > 0) && (cause_value < 128))
+													pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, cause_value);
+												else
+													pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, call->cause);
+											}
 											break;
 										default:
-											if (ch_gsm->at_cmd->sub_cmd)
-												pg_call_gsm_sm((struct pg_call_gsm *)ch_gsm->at_cmd->sub_cmd, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_UNSPECIFIED);
+											if (call)
+												pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, call->cause);
 											break;
 									}
 								} else if (sscanf(r_buf, "+CEER: %u,%u", &cause_select, &cause_value) == 2) { // M10
@@ -4974,25 +4981,21 @@ static void *pg_channel_gsm_workthread(void *data)
 									switch (cause_select)
 									{
 										case 1:
-											if (ch_gsm->at_cmd->sub_cmd)
-												pg_call_gsm_sm((struct pg_call_gsm *)ch_gsm->at_cmd->sub_cmd, PG_CALL_GSM_MSG_RELEASE_IND, cause_value);
+											if (call)
+												pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, cause_value);
 											break;
 										default:
-											if (ch_gsm->at_cmd->sub_cmd)
-												pg_call_gsm_sm((struct pg_call_gsm *)ch_gsm->at_cmd->sub_cmd, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_UNSPECIFIED);
+											if (call)
+												pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, call->cause);
 											break;
 									}
-								} else if (sscanf(r_buf, "+CEER: %u", &cause_value) == 1) { // SIM300
-									ast_verb(4, "GSM channel=\"%s\": CEER Cause=%u\n", ch_gsm->alias, cause_value);
-									if (ch_gsm->at_cmd->sub_cmd)
-										pg_call_gsm_sm((struct pg_call_gsm *)ch_gsm->at_cmd->sub_cmd, PG_CALL_GSM_MSG_RELEASE_IND, cause_value);
 								} else {
-									if (ch_gsm->at_cmd->sub_cmd)
-										pg_call_gsm_sm((struct pg_call_gsm *)ch_gsm->at_cmd->sub_cmd, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_UNSPECIFIED);
+									if (call)
+										pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, call->cause);
 								}
 							} else if (strstr(r_buf, "ERROR")) {
-								if (ch_gsm->at_cmd->sub_cmd)
-									pg_call_gsm_sm((struct pg_call_gsm *)ch_gsm->at_cmd->sub_cmd, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_UNSPECIFIED);
+								if (call)
+									pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, call->cause);
 							}
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						default:
@@ -6946,6 +6949,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				{
 			  		// valid if call state OUTGOING_CALL_PROCEEDING || CALL_DELIVERED
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
+						call->cause = AST_CAUSE_USER_BUSY;
 						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
 					}
 				}
@@ -6955,9 +6959,11 @@ static void *pg_channel_gsm_workthread(void *data)
 				AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
 				{
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
+						call->cause = AST_CAUSE_NO_ANSWER;
 						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
 					} else if (call->state == PG_CALL_GSM_STATE_ACTIVE) {
 						if (pg_channel_gsm_get_calls_count(ch_gsm) == 1) {
+							call->cause = AST_CAUSE_NORMAL_CLEARING;
 							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
 						}
 					}
@@ -6968,9 +6974,11 @@ static void *pg_channel_gsm_workthread(void *data)
 				AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
 				{
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
+						call->cause = AST_CAUSE_NO_ANSWER;
 						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
 					} else if (call->state == PG_CALL_GSM_STATE_ACTIVE) {
 						if (pg_channel_gsm_get_calls_count(ch_gsm) == 1) {
+							call->cause = AST_CAUSE_NORMAL_CLEARING;
 							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
 						}
 					}
@@ -6981,6 +6989,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
 				{
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED))
+						call->cause = AST_CAUSE_NO_ANSWER;
 						pg_atcommand_queue_append(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
 				}
 			}
