@@ -2072,6 +2072,9 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 	struct address testaddr;
 	struct address *resaddr = NULL;
 
+	if (!imsi)
+		return NULL;
+
 	gettimeofday(&tv, NULL);
 	str0 = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM '%q-dcr' WHERE timestamp>%ld ORDER BY timestamp DESC;", imsi, (long int)(tv.tv_sec - ttl));
 	res = sqlite3_prepare_fun(pg_gen_db, str0, strlen(str0), &sql0, NULL);
@@ -4206,6 +4209,8 @@ static void *pg_channel_gsm_workthread(void *data)
 		struct at_gen_clip_unsol *clip_un;
 	} parser_ptrs;
 
+	char ts0[32], ts1[32];
+	unsigned int tu0, tu1, tu2, tu3, tu4, tu5;
 	char tmpbuf[512];
 	struct pdu *pdu, *curr;
 
@@ -4746,7 +4751,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CLCC:
-							if (is_str_begin_by(r_buf, "+CLCC:")) {
+							if ((is_str_begin_by(r_buf, "+CLCC:")) && (sscanf(r_buf, "+CLCC: %u,%u,%u,%u,%u,\"%[0-9+]\",%u,\"%s\"", &tu0, &tu1, &tu2, &tu3, &tu4, ts0, &tu5, ts1) == 8)) {
 								parser_ptrs.clcc_ex = (struct at_gen_clcc_exec *)tmpbuf;
 								if (at_gen_clcc_exec_parse(r_buf, r_buf_len, parser_ptrs.clcc_ex) < 0) {
 									ast_log(LOG_ERROR, "GSM channel=\"%s\": at_gen_clcc_exec_parse(%.*s) error\n", ch_gsm->alias, r_buf_len, r_buf);
@@ -9557,7 +9562,7 @@ static void *pg_vinetic_workthread(void *data)
 			case PG_VINETIC_STATE_RUN:
 				ast_mutex_unlock(&vin->lock);
 				if (vin_get_status(&vin->context) < 0) {
-					ast_verbose("vinetic=\"%s\": status error\n", vin->name);
+					ast_log(LOG_ERROR, "vinetic=\"%s\": status error\n", vin->name);
 					ast_mutex_lock(&vin->lock);
 					vin->state = PG_VINETIC_STATE_IDLE;
 				} else {
@@ -9919,7 +9924,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 						if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
 							call->direction = PG_CALL_GSM_DIRECTION_OUTGOING;
 							call->channel_rtp = rtp;
-							pg_channel_gsm_last = ch_gsm;
+							tr_gsm->channel_gsm_last = ch_gsm_fold;
 							ast_verb(3, "Polygator: got GSM channel=\"%s\" from trunk=\"%s\"\n", ch_gsm->alias, trunk);
 							break;
 						}
@@ -12421,6 +12426,8 @@ static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_
 			{
 				snprintf(numbuf, sizeof(numbuf), "%lu", (unsigned long int)count);
 				snprintf(linbuf, sizeof(linbuf), "%d", call_gsm->line);
+				snprintf(calling, sizeof(calling), "%s%s", (call_gsm->calling_name.type.full == 145)?("+"):(""), call_gsm->calling_name.value);
+				snprintf(called, sizeof(called), "%s%s", (call_gsm->called_name.type.full == 145)?("+"):(""), call_gsm->called_name.value);
 				snprintf(durbuf, sizeof(durbuf), "%ld", (long int)(tv.tv_sec - call_gsm->start_time.tv_sec));
 				snprintf(bilbuf, sizeof(bilbuf), "%ld", (long int)((call_gsm->answer_time.tv_sec)?(tv.tv_sec - call_gsm->answer_time.tv_sec):(0)));
 				ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %*s | %*s |\n",
