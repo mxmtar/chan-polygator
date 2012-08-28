@@ -3702,12 +3702,12 @@ pg_channel_gsm_call_incoming_end:
 	ch_gsm->channel_rtp_usage++;
 	ch_gsm->channel_rtp = rtp;
 
+	// prevent deadlock while asterisk channel is allocating
+	ast_mutex_unlock(&ch_gsm->lock);
 	// increment channel ID
 	ast_mutex_lock(&pg_lock);
 	ch_id = channel_id++;
 	ast_mutex_unlock(&pg_lock);
-	// prevent deadlock while asterisk channel is allocating
-	ast_mutex_unlock(&ch_gsm->lock);
 	// allocation channel in pbx spool
 	sprintf(calling, "%s%s", (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
 	sprintf(called, "%s%s", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
@@ -4209,6 +4209,7 @@ static void *pg_channel_gsm_workthread(void *data)
 		struct at_gen_clip_unsol *clip_un;
 	} parser_ptrs;
 
+	uintptr_t tuiptr;
 	char ts0[32], ts1[32];
 	unsigned int tu0, tu1, tu2, tu3, tu4, tu5;
 	char tmpbuf[512];
@@ -4962,7 +4963,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CEER:
 							if (is_str_begin_by(r_buf, "+CEER:")) {
-								if (ch_gsm->at_cmd->sub_cmd) call = (struct pg_call_gsm *)ch_gsm->at_cmd->sub_cmd;
+								if (ch_gsm->at_cmd->sub_cmd) memcpy(&call, &ch_gsm->at_cmd->sub_cmd, sizeof(uintptr_t));
 								else call = NULL;
 								if (sscanf(r_buf, "+CEER: \"Cause Select:%u Cause:%u\"", &cause_select, &cause_value) == 2) { // SIM900
 									ast_verb(4, "GSM channel=\"%s\": CEER Cause Select=%u Cause=%u\n", ch_gsm->alias, cause_select, cause_value);
@@ -5523,9 +5524,9 @@ static void *pg_channel_gsm_workthread(void *data)
 								res = -1;
 								sscanf(r_buf, "+CME ERROR: %d", &res);
 								if (ch_gsm->flags.pin_required) {
-									ast_verbose("Polygator: GSM channel=\"%s\": ICCID=\"%s\" PIN=\"%s\" not accepted: %s\n", ch_gsm->alias, ((strlen(ch_gsm->iccid))?(ch_gsm->iccid):("unknown")), ch_gsm->pin, cme_error_print(res));
+									ast_verbose("Polygator: GSM channel=\"%s\": ICCID=\"%s\" PIN=\"%s\" not accepted: %s\n", ch_gsm->alias, ch_gsm->iccid?ch_gsm->iccid:"unknown", ch_gsm->pin?ch_gsm->pin:"unknown", cme_error_print(res));
 								} else if (ch_gsm->flags.puk_required) {
-									ast_verbose("Polygator: GSM channel=\"%s\": ICCID=\"%s\" PUK=\"%s\" not accepted: %s\n", ch_gsm->alias, ((strlen(ch_gsm->iccid))?(ch_gsm->iccid):("unknown")), ch_gsm->puk, cme_error_print(res));
+									ast_verbose("Polygator: GSM channel=\"%s\": ICCID=\"%s\" PUK=\"%s\" not accepted: %s\n", ch_gsm->alias, ch_gsm->iccid?ch_gsm->iccid:"unknown", ch_gsm->puk?ch_gsm->puk:"unknown", cme_error_print(res));
 								}
 							}
 							break;
@@ -6955,7 +6956,8 @@ static void *pg_channel_gsm_workthread(void *data)
 			  		// valid if call state OUTGOING_CALL_PROCEEDING || CALL_DELIVERED
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
 						call->cause = AST_CAUSE_USER_BUSY;
-						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
+						memcpy(&tuiptr, &call, sizeof(uintptr_t));
+						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
 					}
 				}
 			}
@@ -6965,11 +6967,13 @@ static void *pg_channel_gsm_workthread(void *data)
 				{
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
 						call->cause = AST_CAUSE_NO_ANSWER;
-						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
+						memcpy(&tuiptr, &call, sizeof(uintptr_t));
+						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
 					} else if (call->state == PG_CALL_GSM_STATE_ACTIVE) {
 						if (pg_channel_gsm_get_calls_count(ch_gsm) == 1) {
 							call->cause = AST_CAUSE_NORMAL_CLEARING;
-							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
+							memcpy(&tuiptr, &call, sizeof(uintptr_t));
+							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
 						}
 					}
 				}
@@ -6980,11 +6984,13 @@ static void *pg_channel_gsm_workthread(void *data)
 				{
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
 						call->cause = AST_CAUSE_NO_ANSWER;
-						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
+						memcpy(&tuiptr, &call, sizeof(uintptr_t));
+						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
 					} else if (call->state == PG_CALL_GSM_STATE_ACTIVE) {
 						if (pg_channel_gsm_get_calls_count(ch_gsm) == 1) {
 							call->cause = AST_CAUSE_NORMAL_CLEARING;
-							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
+							memcpy(&tuiptr, &call, sizeof(uintptr_t));
+							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
 						}
 					}
 				}
@@ -6993,9 +6999,11 @@ static void *pg_channel_gsm_workthread(void *data)
 			else if (strstr(r_buf, "NO ANSWER")) {
 				AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
 				{
-					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED))
+					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
 						call->cause = AST_CAUSE_NO_ANSWER;
-						pg_atcommand_queue_append(ch_gsm, AT_CEER, AT_OPER_EXEC, (uintptr_t)call, pg_at_response_timeout, 0, NULL);
+						memcpy(&tuiptr, &call, sizeof(uintptr_t));
+						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
+					}
 				}
 			}
 			// RING
@@ -9185,20 +9193,20 @@ static void *pg_vinetic_workthread(void *data)
 				// disable polling
 				if (vin_poll_disable(&vin->context) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_poll_disable(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				// reset
 				if (vin_reset(&vin->context) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_reset(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				// reset rdyq
 				if (vin_reset_rdyq(&vin->context) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_reset_rdyq(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				// check rdyq status
 				for (i=0; i<5000; i++)
@@ -9208,40 +9216,40 @@ static void *pg_vinetic_workthread(void *data)
 				}
 				if (i == 5000) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": not ready\n", vin->name);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				// disable all interrupt
 				if (vin_phi_disable_interrupt(&vin->context) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_phi_disable_interrupt(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				// revision
 				if (!vin_phi_revision(&vin->context)) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_phi_revision(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				ast_verb(3, "vinetic=\"%s\": revision %s\n", vin->name, vin_revision_str(&vin->context));
 				// download EDSP firmware
 				if (vin_download_edsp_firmware(&vin->context) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_edsp_firmware(): %s\n", vin->name, vin_error_str(&vin->context));
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_edsp_firmware(): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				// enable polling
 				if (vin_poll_enable(&vin->context) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_poll_enable(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				// firmware version
 				if (vin_read_fw_version(&vin->context) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_read_fw_version(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				ast_verb(3, "vinetic=\"%s\": EDSP firmware version %u.%u.%u\n", vin->name,
 					(vin->context.edsp_sw_version_register.mv << 13) +
@@ -9354,27 +9362,27 @@ static void *pg_vinetic_workthread(void *data)
 				if (vin_download_alm_dsp(&vin->context, vin->context.alm_dsp_ab_path) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(AB): %s\n", vin->name, vin_error_str(&vin->context));
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(AB): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				if (vin_jump_alm_dsp(&vin->context, 0) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(AB): %s\n", vin->name, vin_error_str(&vin->context));
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(AB): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				// download ALM DSP CD firmware...", vin_dev_name(&vin)); 
 				if (vin_download_alm_dsp(&vin->context, vin->context.alm_dsp_cd_path) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(CD): %s\n", vin->name, vin_error_str(&vin->context));
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_alm_dsp(CD): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				if (vin_jump_alm_dsp(&vin->context, 2) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(CD): %s\n", vin->name, vin_error_str(&vin->context));
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_jump_alm_dsp(CD): line %d\n", vin->name, vin->context.errorline);
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				// download CRAM
 				for (i=0; i<4; i++)
@@ -9382,20 +9390,20 @@ static void *pg_vinetic_workthread(void *data)
 					if (vin_download_cram(&vin->context, i, vin->context.cram_path) < 0) {
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_cram(): %s\n", vin->name, vin_error_str(&vin->context));
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_download_cram(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
+						vin->state = PG_VINETIC_STATE_IDLE;
+						break;
 					}
 					if (vin_write_sop_generic(&vin->context, i, 0x07, 0x2001) < 0) {
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): %s\n", vin->name, vin_error_str(&vin->context));
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
+						vin->state = PG_VINETIC_STATE_IDLE;
+						break;
 					}
 					if (vin_write_sop_generic(&vin->context, i, 0x08, 0x4000) < 0) {
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): %s\n", vin->name, vin_error_str(&vin->context));
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
+						vin->state = PG_VINETIC_STATE_IDLE;
+						break;
 					}
 				}
 				// patch ALM to work with GSM module direct
@@ -9405,46 +9413,46 @@ static void *pg_vinetic_workthread(void *data)
 						if (vin_write_sop_generic(&vin->context, i, 0x07, 0x2011) < 0) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): %s\n", vin->name, vin_error_str(&vin->context));
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): line %d\n", vin->name, vin->context.errorline);
-							ast_mutex_unlock(&vin->lock);
-							goto pg_vinetic_workthread_end;
+							vin->state = PG_VINETIC_STATE_IDLE;
+							break;
 						}
 						if (vin_write_sop_generic(&vin->context, i, 0x08, 0x40C0) < 0) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): %s\n", vin->name, vin_error_str(&vin->context));
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): line %d\n", vin->name, vin->context.errorline);
-							ast_mutex_unlock(&vin->lock);
-							goto pg_vinetic_workthread_end;
+							vin->state = PG_VINETIC_STATE_IDLE;
+							break;
 						}
 						if (vin_write_sop_generic(&vin->context, i, 0x09, 0x0000) < 0) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): %s\n", vin->name, vin_error_str(&vin->context));
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): line %d\n", vin->name, vin->context.errorline);
-							ast_mutex_unlock(&vin->lock);
-							goto pg_vinetic_workthread_end;
+							vin->state = PG_VINETIC_STATE_IDLE;
+							break;
 						}
 						if (vin_write_sop_generic(&vin->context, i, 0x0A, 0x0000) < 0) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): %s\n", vin->name, vin_error_str(&vin->context));
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): line %d\n", vin->name, vin->context.errorline);
-							ast_mutex_unlock(&vin->lock);
-							goto pg_vinetic_workthread_end;
+							vin->state = PG_VINETIC_STATE_IDLE;
+							break;
 						}
 						if (vin_write_sop_generic(&vin->context, i, 0x0F, 0x000C) < 0) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): %s\n", vin->name, vin_error_str(&vin->context));
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): line %d\n", vin->name, vin->context.errorline);
-							ast_mutex_unlock(&vin->lock);
-							goto pg_vinetic_workthread_end;
+							vin->state = PG_VINETIC_STATE_IDLE;
+							break;
 						}
 						if (vin_write_sop_generic(&vin->context, i, 0x10, 0x0400) < 0) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): %s\n", vin->name, vin_error_str(&vin->context));
 							ast_log(LOG_ERROR, "vinetic=\"%s\": vin_write_sop_generic(): line %d\n", vin->name, vin->context.errorline);
-							ast_mutex_unlock(&vin->lock);
-							goto pg_vinetic_workthread_end;
+							vin->state = PG_VINETIC_STATE_IDLE;
+							break;
 						}
 					}
 				}
 				// switch to little endian mode
 				if (vin_set_little_endian_mode(&vin->context) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_little_endian_mode(): %s\n", vin->name, vin_error_str(&vin->context));
-					ast_mutex_unlock(&vin->lock);
-					goto pg_vinetic_workthread_end;
+					vin->state = PG_VINETIC_STATE_IDLE;
+					break;
 				}
 				ast_verb(3, "vinetic=\"%s\": firmware downloading succeeded\n", vin->name);
 				vin->state = PG_VINETIC_STATE_RUN;
@@ -9456,8 +9464,8 @@ static void *pg_vinetic_workthread(void *data)
 					if (vin_ali_enable(vin->context) < 0) {
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_enable(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
+						vin->state = PG_VINETIC_STATE_IDLE;
+						break;
 					}
 					for (i=0; i<4 ; i++)
 					{
@@ -9466,22 +9474,22 @@ static void *pg_vinetic_workthread(void *data)
 							if (vin_ali_channel_enable(vin->context, i) < 0) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_channel_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_channel_enable(): line %d\n", vin->name, vin->context.errorline);
-								ast_mutex_unlock(&vin->lock);
-								goto pg_vinetic_workthread_end;
+								vin->state = PG_VINETIC_STATE_IDLE;
+								break;
 							}
 							// enable vinetic ALI Near End LEC
 							if (vin_ali_near_end_lec_enable(vin->context, i) < 0) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): line %d\n", vin->name, vin->context.errorline);
-								ast_mutex_unlock(&vin->lock);
-								goto pg_vinetic_workthread_end;
+								vin->state = PG_VINETIC_STATE_IDLE;
+								break;
 							}
 							// set ALI channel operation mode ACTIVE_HIGH_VBATH
 							if (vin_set_opmode(&vin->context, i, vin->context.ali_opmode[i]) < 0) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_opmode(): %s\n", vin->name, vin_error_str(&vin->context));
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_opmode(): line %d\n", vin->name, vin->context.errorline);
-								ast_mutex_unlock(&vin->lock);
-								goto pg_vinetic_workthread_end;
+								vin->state = PG_VINETIC_STATE_IDLE;
+								break;
 							}
 						}
 					}
@@ -9492,8 +9500,8 @@ static void *pg_vinetic_workthread(void *data)
 					if (vin_signaling_enable(vin->context) < 0) {
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_enable(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
+						vin->state = PG_VINETIC_STATE_IDLE;
+						break;
 					}
 					for (i=0; i<4 ; i++)
 					{
@@ -9502,22 +9510,22 @@ static void *pg_vinetic_workthread(void *data)
 							if (vin_signaling_channel_enable(vin->context, i) < 0) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_enable(): line %d\n", vin->name, vin->context.errorline);
-								ast_mutex_unlock(&vin->lock);
-								goto pg_vinetic_workthread_end;
+								vin->state = PG_VINETIC_STATE_IDLE;
+								break;
 							}
 							// enable DTMF receiver
 							if (vin_dtmf_receiver_enable(vin->context, i) < 0) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_enable(): line %d\n", vin->name, vin->context.errorline);
-								ast_mutex_unlock(&vin->lock);
-								goto pg_vinetic_workthread_end;
+								vin->state = PG_VINETIC_STATE_IDLE;
+								break;
 							}
 							// enable signalling channel RTP
 							if (vin_signaling_channel_config_rtp(vin->context, i) < 0) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_config_rtp(): line %d\n", vin->name, vin->context.errorline);
-								ast_mutex_unlock(&vin->lock);
-								goto pg_vinetic_workthread_end;
+								vin->state = PG_VINETIC_STATE_IDLE;
+								break;
 							}
 						}
 					}
@@ -9528,15 +9536,15 @@ static void *pg_vinetic_workthread(void *data)
 					if ((vin_coder_enable(vin->context)) < 0) {
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_enable(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
+						vin->state = PG_VINETIC_STATE_IDLE;
+						break;
 					}
 					// set coder configuration RTP
 					if (vin_coder_config_rtp(vin->context) < 0) {
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
 						ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): line %d\n", vin->name, vin->context.errorline);
-						ast_mutex_unlock(&vin->lock);
-						goto pg_vinetic_workthread_end;
+						vin->state = PG_VINETIC_STATE_IDLE;
+						break;
 					}
 					for (i=0; i<4 ; i++)
 					{
@@ -9545,15 +9553,15 @@ static void *pg_vinetic_workthread(void *data)
 							if (vin_coder_channel_config_rtp(vin->context, i) < 0) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_config_rtp(): line %d\n", vin->name, vin->context.errorline);
-								ast_mutex_unlock(&vin->lock);
-								goto pg_vinetic_workthread_end;
+								vin->state = PG_VINETIC_STATE_IDLE;
+								break;
 							}
 							// enable coder channel speech compression
 							if (vin_coder_channel_enable(vin->context, i) < 0) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_enable(): %s\n", vin->name, vin_error_str(&vin->context));
 								ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_enable(): line %d\n", vin->name, vin->context.errorline);
-								ast_mutex_unlock(&vin->lock);
-								goto pg_vinetic_workthread_end;
+								vin->state = PG_VINETIC_STATE_IDLE;
+								break;
 							}
 						}
 					}
@@ -9562,12 +9570,15 @@ static void *pg_vinetic_workthread(void *data)
 			case PG_VINETIC_STATE_RUN:
 				ast_mutex_unlock(&vin->lock);
 				if (vin_get_status(&vin->context) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": status error\n", vin->name);
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_get_status()\n", vin->name);
 					ast_mutex_lock(&vin->lock);
 					vin->state = PG_VINETIC_STATE_IDLE;
 				} else {
-// 					ast_verbose("vinetic=\"%s\": status ok\n", vin->name);
 					ast_mutex_lock(&vin->lock);
+					if (vin->context.status.custom.bits.timeout) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": ready timeout\n", vin->name);
+						vin->state = PG_VINETIC_STATE_IDLE;
+					}
 				}
 				break;
 			default:
@@ -9845,7 +9856,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #else
 	int joint;
 #endif
-	int res;
+	ssize_t res;
 	struct ast_channel *ast_ch;
 	struct pg_trunk_gsm *tr_gsm;
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold, *ch_gsm_fold_start;
@@ -10368,12 +10379,12 @@ pg_gsm_requester_vinetic_end:
 	ch_gsm->channel_rtp_usage++;
 	ch_gsm->channel_rtp = rtp;
 
+	// prevent deadlock while asterisk channel is allocating
+	ast_mutex_unlock(&ch_gsm->lock);
 	// increment channel ID
 	ast_mutex_lock(&pg_lock);
 	ch_id = channel_id++;
 	ast_mutex_unlock(&pg_lock);
-	// prevent deadlock while asterisk channel is allocating
-	ast_mutex_unlock(&ch_gsm->lock);
 	// allocation channel in pbx spool
 #if ASTERISK_VERSION_NUM < 10800
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
@@ -10537,6 +10548,8 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 	
 	ast_mutex_lock(&ch_gsm->lock);
 
+	ast_verb(4, "GSM channel=\"%s\": call line=%d hangup\n", ch_gsm->alias, call->line);
+
 	ast_setstate(ast_ch, AST_STATE_DOWN);
 	res = pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_REQ, 0);
 	ast_ch->tech_pvt = NULL;
@@ -10557,17 +10570,20 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 			if ((res = vin_set_opmode(&vin->context, ch_gsm->vinetic_alm_slot, VIN_OP_MODE_POWER_DOWN_HIGH_IMPEDANCE)) < 0) {
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_opmode(): %s\n", vin->name, vin_error_str(&vin->context));
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_opmode(): line %d\n", vin->name, vin->context.errorline);
+				goto pg_gsm_hangup_vinetic_end;
 			}
 			// disable vinetic ALI channel
 			if ((res = vin_ali_channel_disable(vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_channel_disable(): %s\n", vin->name, vin_error_str(&vin->context));
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_channel_disable(): line %d\n", vin->name, vin->context.errorline);
+				goto pg_gsm_hangup_vinetic_end;
 			}
 			if (!is_vin_ali_used(vin->context)) {
 				// disable vinetic ALI module
 				if ((res = vin_ali_disable(vin->context)) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_disable(): %s\n", vin->name, vin_error_str(&vin->context));
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_disable(): line %d\n", vin->name, vin->context.errorline);
+					goto pg_gsm_hangup_vinetic_end;
 				}
 			}
 		}
@@ -10576,17 +10592,20 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 		if ((res = vin_dtmf_receiver_disable(vin->context, ch_gsm->channel_rtp->position_on_vinetic)) < 0) {
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_disable(): %s\n", vin->name, vin_error_str(&vin->context));
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_dtmf_receiver_disable(): line %d\n", vin->name, vin->context.errorline);
+			goto pg_gsm_hangup_vinetic_end;
 		}
 		// disable signaling channel
 		if ((res = vin_signaling_channel_disable(vin->context, ch_gsm->channel_rtp->position_on_vinetic)) < 0) {
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_disable(): %s\n", vin->name, vin_error_str(&vin->context));
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_channel_disable(): line %d\n", vin->name, vin->context.errorline);
+			goto pg_gsm_hangup_vinetic_end;
 		}
 		if (!is_vin_signaling_used(vin->context)) {
 			// disable signaling module
 			if ((res = vin_signaling_disable(vin->context)) < 0) {
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_disable(): %s\n", vin->name, vin_error_str(&vin->context));
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_signaling_disable(): line %d\n", vin->name, vin->context.errorline);
+				goto pg_gsm_hangup_vinetic_end;
 			}
 		}
 		// coder module
@@ -10594,12 +10613,14 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 		if ((res = vin_coder_channel_disable(vin->context, ch_gsm->channel_rtp->position_on_vinetic)) < 0) {
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_disable(): %s\n", vin->name, vin_error_str(&vin->context));
 			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_channel_disable(): line %d\n", vin->name, vin->context.errorline);
+			goto pg_gsm_hangup_vinetic_end;
 		}
 		if (!is_vin_coder_used(vin->context)) {
 			// disable coder module
 			if ((res = vin_coder_disable(vin->context)) < 0) {
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_disable(): %s\n", vin->name, vin_error_str(&vin->context));
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_disable(): line %d\n", vin->name, vin->context.errorline);
+				goto pg_gsm_hangup_vinetic_end;
 			}
 		}
 pg_gsm_hangup_vinetic_end:
@@ -10669,19 +10690,21 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_BUSY:
-			ast_verb(4, "GSM channel=\"%s\": call line=%d indicate busy\n", ch_gsm->alias, call->line);
 			if (ast_ch->_state != AST_STATE_UP) {
+				ast_verb(4, "GSM channel=\"%s\": call line=%d indicate busy\n", ch_gsm->alias, call->line);
 				ast_softhangup_nolock(ast_ch, AST_SOFTHANGUP_DEV);
 				res = 0;
-			}
+			} else
+				ast_verb(4, "GSM channel=\"%s\": call line=%d indicate busy state UP\n", ch_gsm->alias, call->line);
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_CONGESTION:
-			ast_verb(4, "GSM channel=\"%s\": call line=%d indicate congestion\n", ch_gsm->alias, call->line);
 			if (ast_ch->_state != AST_STATE_UP) {
+				ast_verb(4, "GSM channel=\"%s\": call line=%d indicate congestion\n", ch_gsm->alias, call->line);
 				ast_softhangup_nolock(ast_ch, AST_SOFTHANGUP_DEV);
 				res = 0;
-			}
+			} else
+				ast_verb(4, "GSM channel=\"%s\": call line=%d indicate congestion state UP\n", ch_gsm->alias, call->line);
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_PROCEEDING:
