@@ -131,6 +131,7 @@ struct pg_board {
 
 	char *type;
 	char *name;
+	char *path;
 
 	// board channel list
 	AST_LIST_HEAD_NOLOCK(channel_gsm_list, pg_channel_gsm) channel_gsm_list;
@@ -150,6 +151,7 @@ struct pg_vinetic {
 	struct pg_board *board;
 
 	char *name;
+	char *path;
 
 	// vinetic firmware
 	char *firmware;
@@ -184,6 +186,7 @@ struct pg_channel_rtp {
 	ast_mutex_t lock;
 
 	char *name;
+	char *path;
 	int fd;
 
 	unsigned int position_on_vinetic;
@@ -614,6 +617,7 @@ static char *pg_cli_show_channels(struct ast_cli_entry *e, int cmd, struct ast_c
 static char *pg_cli_show_trunks(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_board(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_config_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
@@ -628,6 +632,7 @@ static struct ast_cli_entry pg_cli[] = {
 	AST_CLI_DEFINE(pg_cli_show_trunks, "Show PG trunks information summary"),
 	AST_CLI_DEFINE(pg_cli_show_calls, "Show PG calls information summary"),
 	AST_CLI_DEFINE(pg_cli_show_board, "Show PG board information"),
+	AST_CLI_DEFINE(pg_cli_show_vinetic, "Show VINETIC information"),
 	AST_CLI_DEFINE(pg_cli_show_channel_gsm, "Show PG GSM channel information"),
 	AST_CLI_DEFINE(pg_cli_config_actions, "Save Polygator configuration"),
 	AST_CLI_DEFINE(pg_cli_channel_gsm_actions, "Perform actions on GSM channels"),
@@ -2655,7 +2660,6 @@ static char *pg_call_gsm_outgoing_to_string(int outgoing)
 //------------------------------------------------------------------------------
 static int pg_channel_gsm_vio_get(struct pg_channel_gsm *ch_gsm)
 {
-	char path[PATH_MAX];
 	FILE *fp;
 	char buf[256];
 	char name[64];
@@ -2668,11 +2672,10 @@ static int pg_channel_gsm_vio_get(struct pg_channel_gsm *ch_gsm)
 	int res = -1;
 
 	if (ch_gsm) {
-		snprintf(path, sizeof(path), "/dev/polygator/%s", ch_gsm->board->name);
-		if ((fp = fopen(path, "r"))) {
+		if ((fp = fopen(ch_gsm->board->path, "r"))) {
 			while (fgets(buf, sizeof(buf), fp))
 			{
-				if (sscanf(buf, "GSM%u %[0-9A-Za-z-] %[0-9A-Za-z-] VIN%u%[ACMLP]%u VIO=%u", &pos, name, type, &vin_num, vc_type, &vc_slot, &vio) == 7) {
+				if (sscanf(buf, "GSM%u %[0-9A-Za-z/!-] %[0-9A-Za-z-] VIN%u%[ACMLP]%u VIO=%u", &pos, name, type, &vin_num, vc_type, &vc_slot, &vio) == 7) {
 					if (pos == ch_gsm->position_on_board) {
 						res = vio;
 						break;
@@ -2695,15 +2698,13 @@ static int pg_channel_gsm_vio_get(struct pg_channel_gsm *ch_gsm)
 //------------------------------------------------------------------------------
 static int pg_channel_gsm_power_set(struct pg_channel_gsm *ch_gsm, int state)
 {
-	char path[PATH_MAX];
 	char cmd[64];
 	int cmdlen;
 	int fd;
 	int res = -1;
 
 	if (ch_gsm) {
-		snprintf(path, sizeof(path), "/dev/polygator/%s", ch_gsm->board->name);
-		if ((fd = open(path, O_WRONLY)) > 0) {
+		if ((fd = open(ch_gsm->board->path, O_WRONLY)) > 0) {
 			cmdlen = snprintf(cmd, sizeof(cmd), "GSM%u PWR=%d", ch_gsm->position_on_board, state);
 			res = write(fd, cmd, cmdlen);
 			if ((res > 0) && (res == cmdlen))
@@ -2727,15 +2728,13 @@ static int pg_channel_gsm_power_set(struct pg_channel_gsm *ch_gsm, int state)
 //------------------------------------------------------------------------------
 static int pg_channel_gsm_key_press(struct pg_channel_gsm *ch_gsm, int state)
 {
-	char path[PATH_MAX];
 	char cmd[64];
 	int cmdlen;
 	int fd;
 	int res = -1;
 
 	if (ch_gsm) {
-		snprintf(path, sizeof(path), "/dev/polygator/%s", ch_gsm->board->name);
-		if ((fd = open(path, O_WRONLY)) > 0) {
+		if ((fd = open(ch_gsm->board->path, O_WRONLY)) > 0) {
 			cmdlen = snprintf(cmd, sizeof(cmd), "GSM%u KEY=%d", ch_gsm->position_on_board, state);
 			res = write(fd, cmd, cmdlen);
 			if ((res > 0) && (res == cmdlen))
@@ -2775,6 +2774,31 @@ static inline struct pg_vinetic *pg_get_vinetic_from_board(struct pg_board *brd,
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_get_vinetic_by_name()
+//------------------------------------------------------------------------------
+static struct pg_vinetic *pg_get_vinetic_by_name(const char *name)
+{
+	struct pg_board *brd = NULL;
+	struct pg_vinetic *vin = NULL;
+	// check for name present
+	if (name) {
+		// traverse board list for matching entry name
+		AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
+		{
+			ast_mutex_lock(&brd->lock);
+			AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry)
+				// compare name strings
+				if (!strcmp(name, vin->name)) break;
+			ast_mutex_unlock(&brd->lock);
+		}
+	}
+	return vin;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_vinetic_by_name()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_is_vinetic_run()
 //------------------------------------------------------------------------------
 static inline int pg_is_vinetic_run(struct pg_vinetic *vin)
@@ -2800,7 +2824,6 @@ static inline int pg_is_vinetic_run(struct pg_vinetic *vin)
 //------------------------------------------------------------------------------
 static inline struct pg_channel_rtp *pg_get_channel_rtp(struct pg_vinetic *vin)
 {
-	char path[PATH_MAX];
 	struct pg_channel_rtp *rtp = NULL;
 
 	if (vin) {
@@ -2809,9 +2832,8 @@ static inline struct pg_channel_rtp *pg_get_channel_rtp(struct pg_vinetic *vin)
 		{
 			ast_mutex_lock(&rtp->lock);
 			if (!rtp->busy) {
-				snprintf(path, sizeof(path), "/dev/polygator/%s", rtp->name);
-				if ((rtp->fd = open(path, O_RDWR | O_NONBLOCK)) < 0) {
-					ast_log(LOG_ERROR, "RTP channel=\"%s\": can't open device \"%s\": %s\n", rtp->name, path, strerror(errno));
+				if ((rtp->fd = open(rtp->path, O_RDWR | O_NONBLOCK)) < 0) {
+					ast_log(LOG_ERROR, "RTP channel=\"%s\": can't open device \"%s\": %s\n", rtp->name, rtp->path, strerror(errno));
 				} else {
 					// init statistic counter
 					rtp->send_sid_count = 0;
@@ -4233,6 +4255,7 @@ static void *pg_channel_gsm_workthread(void *data)
 	if (!ch_gsm->flags.power) {
 		if (pg_channel_gsm_power_set(ch_gsm, 1)) {
 			ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM power suply to on: %s\n", ch_gsm->alias, strerror(errno));
+			ast_mutex_unlock(&ch_gsm->lock);
 			goto pg_channel_gsm_workthread_end;
 		}
 		ch_gsm->flags.power = 1;
@@ -8692,6 +8715,12 @@ static void *pg_channel_gsm_workthread(void *data)
 				usleep(1000);
 				ast_mutex_lock(&ch_gsm->lock);
 			}
+			// flush AT command queue
+			if (ch_gsm->at_cmd) {
+				ast_free(ch_gsm->at_cmd);
+				ch_gsm->at_cmd = NULL;
+			}
+			pg_atcommand_queue_flush(ch_gsm);
 			// stop all timers
 			memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
 			// disable GSM module - key press imitation
@@ -8732,6 +8761,12 @@ static void *pg_channel_gsm_workthread(void *data)
 				usleep(1000);
 				ast_mutex_lock(&ch_gsm->lock);
 			}
+			// flush AT command queue
+			if (ch_gsm->at_cmd) {
+				ast_free(ch_gsm->at_cmd);
+				ch_gsm->at_cmd = NULL;
+			}
+			pg_atcommand_queue_flush(ch_gsm);
 			// stop all timers
 			memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
 			// set init signal
@@ -9172,7 +9207,7 @@ static void *pg_vinetic_workthread(void *data)
 			case PG_VINETIC_STATE_INIT:
 				ast_debug(3, "vinetic=\"%s\": init\n", vin->name);
 
-				vin_init(&vin->context, "/dev/polygator/%s", vin->name);
+				vin_init(&vin->context, "%s", vin->path);
 				vin_set_dev_name(&vin->context, vin->name);
 				vin_set_pram(&vin->context, "%s/polygator/edspPRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware);
 				vin_set_dram(&vin->context, "%s/polygator/edspDRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware);
@@ -11416,6 +11451,43 @@ static char *pg_cli_generate_complete_board_name(const char *begin, int count)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_generate_complete_vinetic_name()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_vinetic_name(const char *begin, int count)
+{  
+	struct pg_board *brd;
+	struct pg_vinetic *vin;
+	char *res;
+	int beginlen;
+	int which;
+
+	res = NULL;
+	brd = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
+	{
+		ast_mutex_lock(&brd->lock);
+		AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry)
+		{
+			// compare begin of vinetic name
+			if ((!strncmp(begin, vin->name, beginlen)) && (++which > count))
+			{
+				res = ast_strdup(vin->name);
+				break;
+			}
+		}
+		ast_mutex_unlock(&brd->lock);
+	}
+
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_vinetic_name()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_generate_complete_config_filename()
 //------------------------------------------------------------------------------
 static char *pg_cli_generate_complete_config_filename(const char *begin, int count)
@@ -12526,6 +12598,60 @@ static char *pg_cli_show_board(struct ast_cli_entry *e, int cmd, struct ast_cli_
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_show_vinetic()
+//------------------------------------------------------------------------------
+static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	struct pg_vinetic *vin;
+
+	switch (cmd)
+	{
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_INIT:
+			e->command = "polygator show vinetic";
+			e->usage = "Usage: polygator show vinetic <vinetic>\n";
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_GENERATE:
+			// try to generate complete VINETIC name
+			if (a->pos == 3)
+				return pg_cli_generate_complete_vinetic_name(a->word, a->n);
+
+			return NULL;
+	}
+
+	if (a->argc != 4)
+		return CLI_SHOWUSAGE;
+
+	// get vinetic by name
+	vin = pg_get_vinetic_by_name(a->argv[3]);
+
+	if (vin) {
+		ast_mutex_lock(&vin->lock);
+		ast_cli(a->fd, "  VINETIC \"%s\"\n", vin->name);
+		ast_cli(a->fd, "  -- device = %s\n", vin->path);
+		if (pg_is_vinetic_run(vin)) {
+			ast_cli(a->fd, "  -- EDSP firmware version %u.%u.%u\n",
+				(vin->context.edsp_sw_version_register.mv << 13) +
+				(vin->context.edsp_sw_version_register.prt << 12) +
+				(vin->context.edsp_sw_version_register.features << 0),
+				vin->context.edsp_sw_version_register.main_version,
+				vin->context.edsp_sw_version_register.release);
+
+		} else
+			ast_cli(a->fd, "  is not running\n");
+
+		ast_mutex_unlock(&vin->lock);
+	} else
+		ast_cli(a->fd, "  VINETIC \"%s\" not found\n", a->argv[3]);
+
+	return CLI_SUCCESS;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_show_vinetic()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_show_channel_gsm()
 //------------------------------------------------------------------------------
 static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
@@ -12557,6 +12683,7 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 
 		ast_cli(a->fd, "  Channel \"%s\"\n", ch_gsm->alias);
 		ast_cli(a->fd, "  -- device = %s\n", ch_gsm->device);
+		ast_cli(a->fd, "  -- TTY device = %s\n", ch_gsm->tty_path);
 		ast_cli(a->fd, "  -- module = %s\n", pg_gsm_module_type_to_string(ch_gsm->gsm_module_type));
 		ast_cli(a->fd, "  -- power = %s\n", ch_gsm->flags.power?"on":"off");
 		ast_cli(a->fd, "  -- status = %s\n", ch_gsm->flags.enable?"enabled":"disabled");
@@ -14910,13 +15037,15 @@ static void pg_cleanup(void)
 			// destroy vinetic RTP channel list
 			while ((rtp = AST_LIST_REMOVE_HEAD(&vin->channel_rtp_list, pg_vinetic_channel_rtp_list_entry)))
 			{
-				if (rtp->name) ast_free(rtp->name);
+				ast_free(rtp->name);
+				ast_free(rtp->path);
 				ast_free(rtp);
 			}
 #if ASTERISK_VERSION_NUM >= 100000
 			ast_format_cap_destroy(vin->capabilities);
 #endif
 			ast_free(vin->name);
+			ast_free(vin->path);
 			ast_free(vin->firmware);
 			ast_free(vin->almab);
 			ast_free(vin->almcd);
@@ -14924,8 +15053,9 @@ static void pg_cleanup(void)
 			ast_free(vin);
 		}
 		// free dynamic allocated memory
-		if (brd->name) ast_free(brd->name);
-		if (brd->type) ast_free(brd->type);
+		ast_free(brd->name);
+		ast_free(brd->path);
+		ast_free(brd->type);
 		ast_free(brd);
 	}
 	// close General Database
@@ -14970,6 +15100,7 @@ static int pg_load(void)
 	char type[64];
 	char name[64];
 	int res;
+	char *cp;
 
 	unsigned int pos;
 	unsigned int index;
@@ -15031,12 +15162,14 @@ static int pg_load(void)
 		goto pg_load_error;
 	}
 	// scan polygator subsystem
-	snprintf(path, PATH_MAX, "/dev/polygator/%s", "subsystem");
+	snprintf(path, PATH_MAX, "/dev/%s", "polygator/subsystem");
 	if ((fp = fopen(path, "r"))) {
 		while (fgets(buf, sizeof(buf), fp))
 		{
-			if (sscanf(buf, "%[0-9a-z-] %[0-9a-z-]", type, name) == 2) {
-				ast_verbose("Polygator: found board type=\"%s\" name=\"%s\"\n", type, name);
+			if (sscanf(buf, "%[0-9a-z-] %[0-9a-z/!-]", type, name) == 2) {
+				str_xchg(name, '!', '/');
+				cp =  strrchr(name, '/');
+				ast_verbose("Polygator: found board type=\"%s\" name=\"%s\"\n", type, (cp)?(cp+1):(name));
 				if (!(brd = ast_calloc(1, sizeof(struct pg_board)))) {
 					ast_log(LOG_ERROR, "can't get memory for struct pg_board\n");
 					goto pg_load_error;
@@ -15046,7 +15179,9 @@ static int pg_load(void)
 				// init board
 				ast_mutex_init(&brd->lock);
 				brd->type = ast_strdup(type);
-				brd->name = ast_strdup(name);
+				brd->name = ast_strdup((cp)?(cp+1):(name));
+				snprintf(path, PATH_MAX, "/dev/%s", name);
+				brd->path = ast_strdup(path);
 			}
 		}
 		fclose(fp);
@@ -15056,21 +15191,20 @@ static int pg_load(void)
 			ast_log(LOG_ERROR, "unable to scan Polygator subsystem: %d %s\n", errno, strerror(errno));
 			goto pg_load_error;
 		} else
-			ast_verbose("Polygator: subsystem not found\n");
+			ast_verbose("Polygator: subsnameystem not found\n");
 	}
 	// scan polygator board
 	brd_num = 0;
 	pwr_seq_num = 0;
 	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
 	{
-		snprintf(path, PATH_MAX, "/dev/polygator/%s", brd->name);
-		if (!(fp = fopen(path, "r"))) {
+		if (!(fp = fopen(brd->path, "r"))) {
 			ast_log(LOG_ERROR, "unable to scan Polygator board \"%s\": %s\n", brd->name, strerror(errno));
 			goto pg_load_error;
 		}
 		while (fgets(buf, sizeof(buf), fp))
 		{
-			if (sscanf(buf, "GSM%u %[0-9A-Za-z-] %[0-9A-Za-z-] VIN%u%[ACMLP]%u VIO=%u", &pos, name, type, &vin_num, vc_type, &vc_slot, &vio) == 7) {
+			if (sscanf(buf, "GSM%u %[0-9A-Za-z/!-] %[0-9A-Za-z-] VIN%u%[ACMLP]%u VIO=%u", &pos, name, type, &vin_num, vc_type, &vc_slot, &vio) == 7) {
 				snprintf(buf, sizeof(buf), "%s-gsm%u", brd->name, pos);
 				ast_verbose("Polygator: found GSM channel=\"%s\"\n", buf);
 				if (!(ch_gsm = ast_calloc(1, sizeof(struct pg_channel_gsm)))) {
@@ -15090,7 +15224,8 @@ static int pg_load(void)
 				ch_gsm->device = ast_strdup(buf);
 				snprintf(buf, sizeof(buf), "chan-%u%u", brd_num, pos);
 				ch_gsm->alias = ast_strdup(buf);
-				snprintf(path, sizeof(path), "/dev/polygator/%s", name);
+				str_xchg(name, '!', '/');
+				snprintf(path, sizeof(path), "/dev/%s", name);
 				ch_gsm->tty_path = ast_strdup(path);
 				ch_gsm->gsm_module_type = pg_gsm_module_type_get(type);
 				ch_gsm->at_pipe[0] = ch_gsm->at_pipe[1] = -1;
@@ -15319,8 +15454,10 @@ static int pg_load(void)
 						goto pg_load_error;
 					}
 				}
-			} else if (sscanf(buf, "VIN%uRTP%u %[0-9A-Za-z-]", &index, &pos, name) == 3) {
-				ast_verbose("Polygator: found RTP channel=\"%s\"\n", name);
+			} else if (sscanf(buf, "VIN%uRTP%u %[0-9A-Za-z/!-]", &index, &pos, name) == 3) {
+				str_xchg(name, '!', '/');
+				cp =  strrchr(name, '/');
+				ast_verbose("Polygator: found RTP channel=\"%s\"\n", (cp)?(cp+1):(name));
 				if ((vin = pg_get_vinetic_from_board(brd, index))) {
 					if (!(rtp = ast_calloc(1, sizeof(struct pg_channel_rtp)))) {
 						ast_log(LOG_ERROR, "can't get memory for struct pg_channel_rtp\n");
@@ -15332,11 +15469,15 @@ static int pg_load(void)
 					ast_mutex_init(&rtp->lock);
 					rtp->vinetic = vin;
 					rtp->position_on_vinetic = pos;
-					rtp->name = ast_strdup(name);
+					rtp->name = ast_strdup((cp)?(cp+1):(name));
+					snprintf(path, sizeof(path), "/dev/%s", name);
+					rtp->path = ast_strdup(path);
 				} else 
 					ast_log(LOG_WARNING, "PG board=\"%s\": VIN%u not found\n", brd->name, index);
-			} else if (sscanf(buf, "VIN%u %[0-9A-Za-z-]", &pos, name) == 2) {
-				ast_verbose("Polygator: found vinetic=\"%s\"\n", name);
+			} else if (sscanf(buf, "VIN%u %[0-9A-Za-z/!-]", &pos, name) == 2) {
+				str_xchg(name, '!', '/');
+				cp =  strrchr(name, '/');
+				ast_verbose("Polygator: found vinetic=\"%s\"\n", (cp)?(cp+1):(name));
 				if (!(vin = ast_calloc(1, sizeof(struct pg_vinetic)))) {
 					ast_log(LOG_ERROR, "can't get memory for struct pg_vinetic\n");
 					goto pg_load_error;
@@ -15347,7 +15488,9 @@ static int pg_load(void)
 				ast_mutex_init(&vin->lock);
 				vin->position_on_board = pos;
 				vin->board = brd;
-				vin->name = ast_strdup(name);
+				vin->name = ast_strdup((cp)?(cp+1):(name));
+				snprintf(path, sizeof(path), "/dev/%s", name);
+				vin->path = ast_strdup(path);
 				// firmware
 				if ((cvar = pg_get_config_variable(ast_cfg, vin->name, "firmware")))
 					vin->firmware = ast_strdup(cvar);

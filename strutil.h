@@ -184,6 +184,7 @@ extern const char char_cr;
 extern const char char_lf;
 extern const char char_ctrlz;
 // prototypes
+extern int str_xchg(const char *str, char p, char r);
 extern int is_str_digit(const char *buf);
 extern int is_str_xdigit(const char *buf);
 extern int is_str_printable(const char *buf);
