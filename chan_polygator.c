@@ -457,7 +457,7 @@ struct pg_channel_gsm {
 	} debug;
 
 	// Runtime data
-	unsigned int power_sequence_number;
+	int power_sequence_number;
 	int reg_stat; /* Registration status */
 	int reg_stat_old; /* Registration status */
 	int state;
@@ -2220,14 +2220,41 @@ static struct pg_channel_gsm *pg_get_channel_gsm_by_name(const char *name)
 		// traverse channel gsm list for matching entry name
 		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
 		{
+			ast_mutex_lock(&ch_gsm->lock);
 			// compare name strings
-			if (!strcmp(name, ch_gsm->alias)) break;
+			if (!strcmp(name, ch_gsm->alias)) {
+				ast_mutex_unlock(&ch_gsm->lock);
+				break;
+			}
+			ast_mutex_unlock(&ch_gsm->lock);
 		}
 	}
 	return ch_gsm;
 }
 //------------------------------------------------------------------------------
 // end of pg_get_channel_gsm_by_name()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_get_channel_gsm_power_sequence_number()
+//------------------------------------------------------------------------------
+static int pg_get_channel_gsm_power_sequence_number(void)
+{
+	struct pg_channel_gsm *ch_gsm;
+	int seq = 1;
+
+	// traverse channel gsm list
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
+	{
+		ast_mutex_lock(&ch_gsm->lock);
+		if (ch_gsm->power_sequence_number > 0) seq++;
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+
+	return seq;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_channel_gsm_power_sequence_number()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -4246,23 +4273,26 @@ static void *pg_channel_gsm_workthread(void *data)
 	ast_debug(4, "GSM channel=\"%s\": thread start\n", ch_gsm->alias);
 	ast_verbose("Polygator: GSM channel=\"%s\" enabled\n", ch_gsm->alias);
 
-	if (ch_gsm->power_sequence_number)
-		usleep(799999 * ch_gsm->power_sequence_number);
+	ast_mutex_lock(&ch_gsm->lock);
+	res = ch_gsm->power_sequence_number;
+	ast_mutex_unlock(&ch_gsm->lock);
+
+	if (res > 0)
+		usleep(799999 * res);
 
 	ast_mutex_lock(&ch_gsm->lock);
+	ch_gsm->power_sequence_number = -1;
 
 	// enable power suply
-	if (!ch_gsm->flags.power) {
-		if (pg_channel_gsm_power_set(ch_gsm, 1)) {
-			ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM power suply to on: %s\n", ch_gsm->alias, strerror(errno));
-			ast_mutex_unlock(&ch_gsm->lock);
-			goto pg_channel_gsm_workthread_end;
-		}
-		ch_gsm->flags.power = 1;
+	if (pg_channel_gsm_power_set(ch_gsm, 1)) {
+		ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM power suply to on: %s\n", ch_gsm->alias, strerror(errno));
 		ast_mutex_unlock(&ch_gsm->lock);
-		sleep(2);
-		ast_mutex_lock(&ch_gsm->lock);
+		goto pg_channel_gsm_workthread_end;
 	}
+	ch_gsm->flags.power = 1;
+	ast_mutex_unlock(&ch_gsm->lock);
+	sleep(3);
+	ast_mutex_lock(&ch_gsm->lock);
 
 	// open TTY device
 	if ((ch_gsm->tty_fd = open(ch_gsm->tty_path, O_RDWR | O_NONBLOCK)) < 0) {
@@ -4712,7 +4742,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						case AT_D:
 						case AT_A:
 						case AT_H:
-							if (is_str_begin_by(r_buf, "ERROR")) {
+							if (strstr(r_buf, "ERROR")) {
 								if (ch_gsm->at_cmd->attempt) {
 									ch_gsm->at_cmd->attempt--;
 									pg_atcommand_trysend(ch_gsm);
@@ -5296,8 +5326,8 @@ static void *pg_channel_gsm_workthread(void *data)
 											if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 											if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
 											if (ch_gsm->iccid) ast_free(ch_gsm->iccid); ch_gsm->iccid = NULL;
-											if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
-											if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
+// 											if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
+// 											if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
 											if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
 
 											ch_gsm->flags.sms_table_needed = 1;
@@ -6488,8 +6518,8 @@ static void *pg_channel_gsm_workthread(void *data)
 												if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 												if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
 												if (ch_gsm->iccid) ast_free(ch_gsm->iccid); ch_gsm->iccid = NULL;
-												if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
-												if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
+// 												if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
+// 												if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
 												if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
 
 												ch_gsm->flags.sms_table_needed = 1;
@@ -6499,7 +6529,7 @@ static void *pg_channel_gsm_workthread(void *data)
 
 												// reset registaration status
 												ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
-												// reset callwait state
+												// reset callwait statech_gsm->pin
 												ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 												// reset clir state
 												ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
@@ -6673,8 +6703,8 @@ static void *pg_channel_gsm_workthread(void *data)
 												if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 												if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
 												if (ch_gsm->iccid) ast_free(ch_gsm->iccid); ch_gsm->iccid = NULL;
-												if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
-												if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
+// 												if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
+// 												if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
 												if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
 
 												ch_gsm->flags.sms_table_needed = 1;
@@ -6854,8 +6884,8 @@ static void *pg_channel_gsm_workthread(void *data)
 												if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 												if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
 												if (ch_gsm->iccid) ast_free(ch_gsm->iccid); ch_gsm->iccid = NULL;
-												if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
-												if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
+// 												if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
+// 												if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
 												if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
 
 												ch_gsm->flags.sms_table_needed = 1;
@@ -7152,7 +7182,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				}
 			}
 			// NORMAL POWER DOWN
-			else if (!strncasecmp(r_buf, "NORMAL POWER DOWN", strlen("NORMAL POWER DOWN"))) {
+			else if (is_str_begin_by(r_buf, "NORMAL POWER DOWN")) {
 				ast_verb(4, "GSM channel=\"%s\": normal power down\n", ch_gsm->alias);
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLE;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -7165,12 +7195,40 @@ static void *pg_channel_gsm_workthread(void *data)
 					ast_mutex_unlock(&ch_gsm->lock);
 					goto pg_channel_gsm_workthread_end;
 				}
+				ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLE;
+				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+				// disable power suply
+				if (pg_channel_gsm_power_set(ch_gsm, 0)) {
+					ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM power suply to off: %s\n", ch_gsm->alias, strerror(errno));
+					ast_mutex_unlock(&ch_gsm->lock);
+					goto pg_channel_gsm_workthread_end;
+				}
+				ch_gsm->flags.power = 0;
+				//
 				ast_mutex_unlock(&ch_gsm->lock);
-				usleep(799999);
+				sleep(3);
+				ast_mutex_lock(&ch_gsm->lock);
+				//
+				res = ch_gsm->power_sequence_number = pg_get_channel_gsm_power_sequence_number();
+				ast_mutex_unlock(&ch_gsm->lock);
+				if (res > 0)
+					usleep(799999 * res);
+				ast_mutex_lock(&ch_gsm->lock);
+				ch_gsm->power_sequence_number = -1;
+				// enable power suply
+				if (pg_channel_gsm_power_set(ch_gsm, 1)) {
+					ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM power suply to on: %s\n", ch_gsm->alias, strerror(errno));
+					ast_mutex_unlock(&ch_gsm->lock);
+					goto pg_channel_gsm_workthread_end;
+				}
+				ch_gsm->flags.power = 1;
+				//
+				ast_mutex_unlock(&ch_gsm->lock);
+				sleep(3);
 				ast_mutex_lock(&ch_gsm->lock);
 			}
 			// RDY
-			else if (!strcasecmp(r_buf, "RDY")) {
+			else if (is_str_begin_by(r_buf, "RDY")) {
 				// stop waitrdy timer
 				x_timer_stop(ch_gsm->timers.waitrdy);
 				// valid if mgmt state WAIT_RDY
@@ -7178,12 +7236,11 @@ static void *pg_channel_gsm_workthread(void *data)
 					ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_CFUN;
 					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 				}
-// 				ch_gsm->config.baudrate = ch_gsm->baudrate;
 				ast_verb(4, "GSM channel=\"%s\": serial port work at speed = %d baud\n", ch_gsm->alias, ch_gsm->baudrate);
 // 				pg_atcommand_queue_append(ch_gsm, AT_UNKNOWN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "AT+IPR=%d;&W", chnl->config.baudrate);
 			}
 			// CFUN
-			else if (!strncasecmp(r_buf, "+CFUN:", 6)) {
+			else if (is_str_begin_by(r_buf, "+CFUN:")) {
 				// valid if mgmt state WAIT_CFUN
 				if (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_CFUN) {
 					if (!strcasecmp(r_buf, "+CFUN: 0")) {
@@ -7238,8 +7295,8 @@ static void *pg_channel_gsm_workthread(void *data)
 							if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 							if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
 							if (ch_gsm->iccid) ast_free(ch_gsm->iccid); ch_gsm->iccid = NULL;
-							if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
-							if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
+// 							if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
+// 							if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
 							if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
 
 							ch_gsm->flags.sms_table_needed = 1;
@@ -8663,9 +8720,43 @@ static void *pg_channel_gsm_workthread(void *data)
 			x_timer_stop(ch_gsm->timers.waitviodown);
 			// stop testviodown timer
 			x_timer_stop(ch_gsm->timers.testviodown);
-			// shutdown channel
+			// check for restart
+			if (!ch_gsm->flags.restart_now) {
+				// shutdown channel
+				ast_mutex_unlock(&ch_gsm->lock);
+				goto pg_channel_gsm_workthread_end;
+			}
+			ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLE;
+			ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+			// disable power suply
+			if (pg_channel_gsm_power_set(ch_gsm, 0)) {
+				ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM power suply to off: %s\n", ch_gsm->alias, strerror(errno));
+				ast_mutex_unlock(&ch_gsm->lock);
+				goto pg_channel_gsm_workthread_end;
+			}
+			ch_gsm->flags.power = 0;
+			//
 			ast_mutex_unlock(&ch_gsm->lock);
-			goto pg_channel_gsm_workthread_end;
+			sleep(3);
+			ast_mutex_lock(&ch_gsm->lock);
+			//
+			res = ch_gsm->power_sequence_number = pg_get_channel_gsm_power_sequence_number();
+			ast_mutex_unlock(&ch_gsm->lock);
+			if (res > 0)
+				usleep(799999 * res);
+			ast_mutex_lock(&ch_gsm->lock);
+			ch_gsm->power_sequence_number = -1;
+			// enable power suply
+			if (pg_channel_gsm_power_set(ch_gsm, 1)) {
+				ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM power suply to on: %s\n", ch_gsm->alias, strerror(errno));
+				ast_mutex_unlock(&ch_gsm->lock);
+				goto pg_channel_gsm_workthread_end;
+			}
+			ch_gsm->flags.power = 1;
+			//
+			ast_mutex_unlock(&ch_gsm->lock);
+			sleep(3);
+			ast_mutex_lock(&ch_gsm->lock);
 		}
 		// testviodown
 		if (is_x_timer_enable(ch_gsm->timers.testviodown) && is_x_timer_fired(ch_gsm->timers.testviodown)) {
@@ -8684,13 +8775,15 @@ static void *pg_channel_gsm_workthread(void *data)
 				x_timer_stop(ch_gsm->timers.testviodown);
 				// stop waitviodown timer
 				x_timer_stop(ch_gsm->timers.waitviodown);
-				//
+				// check for restart
 				if (!ch_gsm->flags.restart_now) {
+					// shutdown channel
 					ast_mutex_unlock(&ch_gsm->lock);
 					goto pg_channel_gsm_workthread_end;
 				}
+				//
 				ast_mutex_unlock(&ch_gsm->lock);
-				usleep(799999);
+				sleep(3);
 				ast_mutex_lock(&ch_gsm->lock);
 			} else {
 				// restart testviodown timer
@@ -8911,9 +9004,7 @@ static void *pg_channel_gsm_workthread(void *data)
 
 				ch_gsm->baudrate = ch_gsm->baudrate_test;
 				ast_verb(4, "GSM channel=\"%s\": serial port work at speed = %d baud\n", ch_gsm->alias, ch_gsm->baudrate);
-
-				// set GSM module baud rate
-				pg_atcommand_queue_append(ch_gsm, AT_UNKNOWN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "AT+IPR=%d;&W", ch_gsm->baudrate);
+// 				pg_atcommand_queue_append(ch_gsm, AT_UNKNOWN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "AT+IPR=%d;&W", ch_gsm->baudrate);
 
 				// disable GSM module functionality
 				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
@@ -9130,8 +9221,8 @@ pg_channel_gsm_workthread_end:
 	if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 	if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
 	if (ch_gsm->iccid) ast_free(ch_gsm->iccid); ch_gsm->iccid = NULL;
-	if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
-	if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
+// 	if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
+// 	if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
 	if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
 
 	// reset registaration status
@@ -9154,9 +9245,12 @@ pg_channel_gsm_workthread_end:
 
 	// close TTY device
 	close(ch_gsm->tty_fd);
+
+	// disable power suply
+	pg_channel_gsm_power_set(ch_gsm, 0);
+
 	// reset GSM channel flags
 	memset(&ch_gsm->flags, 0, sizeof(struct pg_channel_gsm_flags));
-	ch_gsm->flags.power = 1;
 
 	// stop receiver debug session
 	if (ch_gsm->debug.receiver) {
@@ -15247,6 +15341,8 @@ static int pg_load(void)
 				ch_gsm->rssi = 99;
 				// reset ber value
 				ch_gsm->ber = 99;
+				// reset power sequence number
+				ch_gsm->power_sequence_number = -1;
 				// get config variables
 				// alias
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "alias"))) {
