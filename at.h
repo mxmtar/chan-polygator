@@ -429,7 +429,9 @@ extern char *get_at_com_oper_by_id(u_int32_t oper);
 extern char *reg_status_print(int stat);
 extern char *reg_status_print_short(int stat);
 extern char *rssi_print(char *obuf, int rssi);
+extern char *rssi_print_short(char *obuf, int rssi);
 extern char *ber_print(int ber);
+extern char *ber_print_short(int ber);
 extern char *cme_error_print(int ec);
 extern char *cms_error_print(int ec);
 // prototype parse function
