@@ -65,6 +65,19 @@ struct x_timer {
 		tv_add(_timer.expires, _timer.timeout); \
 	} while(0)
 
+#define x_timer_set_second(_timer, _timeout) \
+	do { \
+		struct timeval __curr_time; \
+		struct timeval __timeout; \
+		tv_set(__timeout, _timeout, 0); \
+		gettimeofday(&__curr_time, NULL); \
+		_timer.enable = 1; \
+		tv_cpy(_timer.start, __curr_time); \
+		tv_cpy(_timer.timeout, __timeout); \
+		tv_cpy(_timer.expires, _timer.start); \
+		tv_add(_timer.expires, _timer.timeout); \
+	} while(0)
+
 #define x_timer_stop(_timer) \
 	do { \
 		_timer.enable = 0; \

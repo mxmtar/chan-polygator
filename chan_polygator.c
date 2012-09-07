@@ -42,6 +42,7 @@
 #include "libvinetic.h"
 
 #include "address.h"
+#include "imei.h"
 #include "rtp.h"
 #include "sms.h"
 #include "strutil.h"
@@ -426,6 +427,7 @@ struct pg_channel_gsm {
 		unsigned int func_test_run:1;
 		unsigned int sms_table_needed:1;
 		unsigned int dcr_table_needed:1;
+		unsigned int main_tty:1;
 	} flags;
 
 	// timers
@@ -620,6 +622,7 @@ static char *pg_cli_show_channels(struct ast_cli_entry *e, int cmd, struct ast_c
 static char *pg_cli_show_trunks(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_show_devinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_board(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
@@ -636,6 +639,7 @@ static struct ast_cli_entry pg_cli[] = {
 	AST_CLI_DEFINE(pg_cli_show_trunks, "Show PG trunks information summary"),
 	AST_CLI_DEFINE(pg_cli_show_calls, "Show PG calls information summary"),
 	AST_CLI_DEFINE(pg_cli_show_netinfo, "Show PG GSM network information summary"),
+	AST_CLI_DEFINE(pg_cli_show_devinfo, "Show PG device information summary"),
 	AST_CLI_DEFINE(pg_cli_show_board, "Show PG board information"),
 	AST_CLI_DEFINE(pg_cli_show_vinetic, "Show VINETIC information"),
 	AST_CLI_DEFINE(pg_cli_show_channel_gsm, "Show PG GSM channel information"),
@@ -729,7 +733,7 @@ static struct pg_cgannel_gsm_param pg_channel_gsm_params[] = {
 	PG_CHANNEL_GSM_PARAM("alias", PG_CHANNEL_GSM_PARAM_ALIAS, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
 	PG_CHANNEL_GSM_PARAM("pin", PG_CHANNEL_GSM_PARAM_PIN, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
 	PG_CHANNEL_GSM_PARAM("puk", PG_CHANNEL_GSM_PARAM_PUK, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("imei", PG_CHANNEL_GSM_PARAM_IMEI, PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
+	PG_CHANNEL_GSM_PARAM("imei", PG_CHANNEL_GSM_PARAM_IMEI, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
 	PG_CHANNEL_GSM_PARAM("number", PG_CHANNEL_GSM_PARAM_NUMBER, PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
 	PG_CHANNEL_GSM_PARAM("progress", PG_CHANNEL_GSM_PARAM_PROGRESS, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
 	PG_CHANNEL_GSM_PARAM("incoming", PG_CHANNEL_GSM_PARAM_INCOMING, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
@@ -2798,6 +2802,36 @@ static int pg_channel_gsm_power_set(struct pg_channel_gsm *ch_gsm, int state)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_channel_gsm_serial_set()
+//------------------------------------------------------------------------------
+static int pg_channel_gsm_serial_set(struct pg_channel_gsm *ch_gsm, int serial)
+{
+	char cmd[64];
+	int cmdlen;
+	int fd;
+	int res = -1;
+
+	if (ch_gsm) {
+		if ((fd = open(ch_gsm->board->path, O_WRONLY)) > 0) {
+			cmdlen = snprintf(cmd, sizeof(cmd), "GSM%u SERIAL=%d", ch_gsm->position_on_board, serial);
+			res = write(fd, cmd, cmdlen);
+			if ((res > 0) && (res == cmdlen))
+				res = 0;
+			else
+				res = -1;
+			fsync(fd);
+			close(fd);
+		}
+	} else
+		errno = ENODEV;
+
+	return res;
+}
+//------------------------------------------------------------------------------
+// pg_channel_gsm_serial_set()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_channel_gsm_key_press()
 //------------------------------------------------------------------------------
 static int pg_channel_gsm_key_press(struct pg_channel_gsm *ch_gsm, int state)
@@ -4347,6 +4381,12 @@ static void *pg_channel_gsm_workthread(void *data)
 		ast_mutex_unlock(&ch_gsm->lock);
 		goto pg_channel_gsm_workthread_end;
 	}
+	// set serial port to main channel
+	if (pg_channel_gsm_serial_set(ch_gsm, 0) < 0) {
+		ast_log(LOG_ERROR, "GSM channel=\"%s\": can't switch serial port to main channel: %s\n", ch_gsm->alias, strerror(errno));
+		ast_mutex_unlock(&ch_gsm->lock);
+		goto pg_channel_gsm_workthread_end;
+	}
 
 	// init command queue
 	ch_gsm->cmd_done = 1;
@@ -4383,6 +4423,7 @@ static void *pg_channel_gsm_workthread(void *data)
 	ch_gsm->flags.pin_accepted = 0;
 	ch_gsm->flags.sms_table_needed = 1;
 	ch_gsm->flags.dcr_table_needed = 1;
+	ch_gsm->flags.main_tty = 1;
 
 	ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
 
@@ -4437,7 +4478,8 @@ static void *pg_channel_gsm_workthread(void *data)
 		gettimeofday(&curr_tv, &curr_tz);
 
 		FD_ZERO(&rfds);
-		FD_SET(ch_gsm->tty_fd, &rfds);
+		if (ch_gsm->flags.main_tty)
+			FD_SET(ch_gsm->tty_fd, &rfds);
 
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 250000;
@@ -4524,8 +4566,11 @@ static void *pg_channel_gsm_workthread(void *data)
 							}
 						}
 					}
-				} else if (r_len < 0)
-					ast_log(LOG_ERROR, "GSM channel=\"%s\": read error: %s\n", ch_gsm->alias, strerror(errno));
+				} else if (r_len < 0) {
+					if (errno != EAGAIN) {
+						ast_log(LOG_ERROR, "GSM channel=\"%s\": read error: %s\n", ch_gsm->alias, strerror(errno));
+					}
+				}
 			}
 		} else if (res < 0) {
 			ast_log(LOG_ERROR, "GSM channel=\"%s\": select error: %s\n", ch_gsm->alias, strerror(errno));
@@ -4808,14 +4853,14 @@ static void *pg_channel_gsm_workthread(void *data)
 						case AT_GMM:
 						case AT_CGMM:
 							if (strcmp(r_buf, "OK") && !strstr(r_buf, "ERROR")) {
-								if (!ch_gsm->model) ch_gsm->model = ast_strdup(ch_gsm->model);
+								if (!ch_gsm->model) ch_gsm->model = ast_strdup(r_buf);
 							}
 							break;
 						//+++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_GMR:
 						case AT_CGMR:
 							if (strcmp(r_buf, "OK") && !strstr(r_buf, "ERROR")) {
-								if (!ch_gsm->firmware) ch_gsm->firmware = ast_strdup(ch_gsm->firmware);
+								if (!ch_gsm->firmware) ch_gsm->firmware = ast_strdup(r_buf);
 							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -9441,11 +9486,31 @@ static void *pg_vinetic_workthread(void *data)
 
 				vin_init(&vin->context, "%s", vin->path);
 				vin_set_dev_name(&vin->context, vin->name);
-				vin_set_pram(&vin->context, "%s/polygator/edspPRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware);
-				vin_set_dram(&vin->context, "%s/polygator/edspDRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware);
-				vin_set_alm_dsp_ab(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->almab);
-				vin_set_alm_dsp_cd(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->almcd);
-				vin_set_cram(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->cram);
+				if (vin_set_pram(&vin->context, "%s/polygator/edspPRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_pram(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				if (vin_set_dram(&vin->context, "%s/polygator/edspDRAMfw_%s.bin", ast_config_AST_DATA_DIR, vin->firmware) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_dram(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				if (vin_set_alm_dsp_ab(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->almab) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_alm_dsp_ab(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				if (vin_set_alm_dsp_cd(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->almcd) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_alm_dsp_cd(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
+				if (vin_set_cram(&vin->context, "%s/polygator/%s", ast_config_AST_DATA_DIR, vin->cram) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_set_cram(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_mutex_unlock(&vin->lock);
+					goto pg_vinetic_workthread_end;
+				}
 				// open
 				if (vin_open(&vin->context) < 0) {
 					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_open(): %s\n", vin->name, vin_error_str(&vin->context));
@@ -12797,11 +12862,11 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 	char rssi[32];
 	int number_fl;
 	int alias_fl;
-	int device_fl;
-	int module_fl;
 	int status_fl;
 	int sim_fl;
 	int reg_fl;
+	int oper_fl;
+	int code_fl;
 	int imsi_fl;
 	int rssi_fl;
 	int ber_fl;
@@ -12832,11 +12897,11 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 	count = 0;
 	number_fl = strlen("#");
 	alias_fl = strlen("Alias");
-	device_fl = strlen("Device");
-	module_fl = strlen("Module");
 	status_fl = strlen("Status");
 	sim_fl = strlen("SIM");
 	reg_fl = strlen("Registered");
+	oper_fl = strlen("Operator");
+	code_fl = strlen("Code");
 	imsi_fl = strlen("IMSI");
 	rssi_fl = strlen("RSSI");
 	ber_fl = strlen("BER");
@@ -12845,11 +12910,11 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 		ast_mutex_lock(&ch_gsm->lock);
 		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
 		alias_fl = mmax(alias_fl, strlen(ch_gsm->alias));
-		device_fl = mmax(device_fl, strlen(ch_gsm->device));
-		module_fl = mmax(module_fl, strlen(pg_gsm_module_type_to_string(ch_gsm->gsm_module_type)));
 		status_fl = mmax(status_fl, strlen(ch_gsm->flags.enable?"enabled":"disabled"));
 		sim_fl = mmax(sim_fl, strlen(ch_gsm->flags.sim_inserted?"inserted":""));
 		reg_fl = mmax(reg_fl, strlen(ch_gsm->flags.sim_inserted?reg_status_print_short(ch_gsm->reg_stat):""));
+		oper_fl = mmax(oper_fl, strlen(ch_gsm->operator_name?ch_gsm->operator_name:""));
+		code_fl = mmax(code_fl, strlen(ch_gsm->operator_code?ch_gsm->operator_code:""));
 		imsi_fl = mmax(imsi_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->imsi?ch_gsm->imsi:"unknown"):""));
 		rssi_fl = mmax(rssi_fl, strlen(ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):""));
 		ber_fl = mmax(ber_fl, strlen(ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):""));
@@ -12860,12 +12925,12 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 		ast_cli(a->fd, "  GSM channel%s:\n", ESS(count));
 		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
 				number_fl, "#",
-		  		alias_fl, "Alias",
-				device_fl, "Device",
-				module_fl, "Module",
+				alias_fl, "Alias",
 				status_fl, "Status",
 				sim_fl, "SIM",
 				reg_fl, "Registered",
+				oper_fl, "Operator",
+				code_fl, "Code",
 				imsi_fl, "IMSI",
 				rssi_fl, "RSSI",
 				ber_fl, "BER");
@@ -12876,11 +12941,11 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %*s | %*s |\n",
 					number_fl, (unsigned long int)count++,
 					alias_fl, ch_gsm->alias,
-					device_fl, ch_gsm->device,
-					module_fl, pg_gsm_module_type_to_string(ch_gsm->gsm_module_type),
 					status_fl, ch_gsm->flags.enable?"enabled":"disabled",
 					sim_fl, ch_gsm->flags.sim_inserted?"inserted":"",
 					reg_fl, ch_gsm->flags.sim_inserted?reg_status_print_short(ch_gsm->reg_stat):"",
+					oper_fl, ch_gsm->operator_name?ch_gsm->operator_name:"",
+					code_fl, ch_gsm->operator_code?ch_gsm->operator_code:"",
 					imsi_fl, ch_gsm->flags.sim_inserted?(ch_gsm->imsi?ch_gsm->imsi:"unknown"):"",
 					rssi_fl, ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):"",
 					ber_fl, ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):"");
@@ -12897,6 +12962,110 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 }
 //------------------------------------------------------------------------------
 // end of pg_cli_show_netinfo()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_show_devinfo()
+//------------------------------------------------------------------------------
+static char *pg_cli_show_devinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	size_t count;
+	size_t total;
+	struct pg_channel_gsm *ch_gsm;
+
+	char buf[20];
+	int number_fl;
+	int alias_fl;
+	int device_fl;
+	int module_fl;
+	int status_fl;
+	int hw_fl;
+	int fw_fl;
+	int imei_fl;
+
+	switch (cmd)
+	{
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_INIT:
+			e->command = "polygator show devinfo";
+			e->usage = "Usage: polygator show devinfo\n";
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_GENERATE:
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_HANDLER:
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		default:
+			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
+			return CLI_FAILURE;
+	}
+
+	if (a->argc < 3)
+		return CLI_SHOWUSAGE;
+
+	total = 0;
+	count = 0;
+	number_fl = strlen("#");
+	alias_fl = strlen("Alias");
+	device_fl = strlen("Device");
+	module_fl = strlen("Module");
+	status_fl = strlen("Status");
+	hw_fl = strlen("Hardware");
+	fw_fl = strlen("Firmware");
+	imei_fl = strlen("IMEI");
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
+	{
+		ast_mutex_lock(&ch_gsm->lock);
+		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
+		alias_fl = mmax(alias_fl, strlen(ch_gsm->alias));
+		device_fl = mmax(device_fl, strlen(ch_gsm->device));
+		module_fl = mmax(module_fl, strlen(pg_gsm_module_type_to_string(ch_gsm->gsm_module_type)));
+		status_fl = mmax(status_fl, strlen(ch_gsm->flags.enable?"enabled":"disabled"));
+		hw_fl = mmax(hw_fl, strlen(ch_gsm->model?ch_gsm->model:""));
+		fw_fl = mmax(fw_fl, strlen(ch_gsm->firmware?ch_gsm->firmware:""));
+		imei_fl = mmax(imei_fl, strlen(ch_gsm->imei?ch_gsm->imei:""));
+		count++;
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	if (count) {
+		ast_cli(a->fd, "  GSM channel%s:\n", ESS(count));
+		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+				number_fl, "#",
+				alias_fl, "Alias",
+				device_fl, "Device",
+				module_fl, "Module",
+				status_fl, "Status",
+				hw_fl, "Hardware",
+				fw_fl, "Firmware",
+				imei_fl, "IMEI");
+		count = 0;
+		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
+		{
+			ast_mutex_lock(&ch_gsm->lock);
+			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+					number_fl, (unsigned long int)count++,
+					alias_fl, ch_gsm->alias,
+					device_fl, ch_gsm->device,
+					module_fl, pg_gsm_module_type_to_string(ch_gsm->gsm_module_type),
+					status_fl, ch_gsm->flags.enable?"enabled":"disabled",
+					hw_fl, ch_gsm->model?ch_gsm->model:"",
+					fw_fl, ch_gsm->firmware?ch_gsm->firmware:"",
+					imei_fl, ch_gsm->imei?ch_gsm->imei:"");
+			ast_mutex_unlock(&ch_gsm->lock);
+		}
+		total += count;
+		ast_cli(a->fd, "  Total %lu GSM channel%s\n", (unsigned long int)count, ESS(count));
+	}
+
+	if (!total)
+		ast_cli(a->fd, "  No channels found\n");
+
+	return CLI_SUCCESS;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_show_devinfo()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -13578,6 +13747,7 @@ static char *pg_cli_channel_gsm_action_suspend_resume(struct ast_cli_entry *e, i
 //------------------------------------------------------------------------------
 static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
+	int pos;
 	int tmpi;
 	float tmpf;
 	struct pg_channel_rtp *rtp;
@@ -13592,7 +13762,22 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 	struct pg_trunk_gsm *tr_gsm;
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold;
 	char *cp;
-	char buf[256];
+	unsigned char tmpchr;
+	char tmpbuf[256];
+	char imei_buf[16];
+	int imei_len;
+	char imei_check_digit;
+	struct x_timer timer;
+	int res;
+	struct timeval tv;
+#ifdef HAVE_ASTERISK_SELECT_H
+	ast_fdset fds;
+#else
+	fd_set fds;
+#endif
+	struct termios old_termios;
+	struct termios raw_termios;
+	int old_state;
 
 	switch (cmd)
 	{
@@ -13701,7 +13886,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NUMBER:
 							if (ch_gsm->subscriber_number.length)
-								ast_cli(a->fd, " -> %s\n", address_show(buf, &ch_gsm->subscriber_number, 1));
+								ast_cli(a->fd, " -> %s\n", address_show(tmpbuf, &ch_gsm->subscriber_number, 1));
 							else
 								ast_cli(a->fd, " -> unknown\n");
 							break;
@@ -13882,7 +14067,412 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_IMEI:
-							ast_cli(a->fd, " - command under working\n");
+							// check IMEI for valid length
+							imei_len = strlen(a->argv[6]);
+							if ((imei_len != 14) && (imei_len != 15)) {
+								ast_cli(a->fd, " - IMEI=%s has wrong length=%d\n", a->argv[6], imei_len);
+								break;
+							}
+							// copy IMEI
+							memset(imei_buf, 0, 16);
+							memcpy(imei_buf, a->argv[6], (imei_len < 15)?(imei_len):(15));
+							// calc IMEI check digit
+							if ((tmpi = imei_calc_check_digit(imei_buf)) < 0) {
+								if(tmpi == -2)
+									ast_cli(a->fd, " - IMEI is too short\n");
+								if(tmpi == -3)
+									ast_cli(a->fd, " - IMEI has illegal character\n");
+								else
+									ast_cli(a->fd, " - can't calc IMEI check digit\n");
+								break;
+							}
+							imei_check_digit = (char)tmpi;
+							if (imei_len == 15) {
+								if (imei_check_digit != imei_buf[14]) {
+									ast_cli(a->fd, " - IMEI=%s has wrong check digit \"%c\" must be \"%c\"\n", a->argv[6], imei_buf[14], imei_check_digit);
+									break;
+								}
+							}
+
+							ast_cli(a->fd, " - write IMEI=%.*s(%c)...\n", 14, a->argv[6], imei_check_digit);
+							imei_buf[14] = imei_check_digit;
+
+							// check channel state
+							if ((ch_gsm->state != PG_CHANNEL_GSM_STATE_RUN) &&
+									(ch_gsm->state != PG_CHANNEL_GSM_STATE_WAIT_SUSPEND) &&
+										(ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND)) {
+								ast_cli(a->fd, "  GSM channel=\"%s\": unaplicable state \"%s\" - must be \"run\", \"wait for suspend\" or \"suspend\"\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+								break;
+							}
+							// store initial state
+							old_state = ch_gsm->state;
+							// backup termios
+							if (tcgetattr(ch_gsm->tty_fd, &old_termios)) {
+								ast_cli(a->fd, "  GSM channel=\"%s\": tcgetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+								break;
+							}
+							if (tcgetattr(ch_gsm->tty_fd, &raw_termios)) {
+								ast_cli(a->fd, "  GSM channel=\"%s\": tcgetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+								break;
+							}
+							//  check for IMEI is the same
+							if (!strcmp(ch_gsm->imei, imei_buf)) {
+								ast_cli(a->fd, "  GSM channel=\"%s\": this IMEI value already set\n", ch_gsm->alias);
+								break;
+							}
+							ast_cli(a->fd, "  GSM channel=\"%s\": check for suspend...", ch_gsm->alias);
+							// action for RUN state
+							if (ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) {
+								// check channel for active calls
+								if (pg_channel_gsm_get_calls_count(ch_gsm)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": has active call - try later\n", ch_gsm->alias);
+									break;
+								}
+								// stop all timers
+								memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
+								pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+								ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
+								ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+								x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
+							}
+							// action for WAIT_SUSPEND state
+							if (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_SUSPEND) {
+								tmpi = 30;
+								while (tmpi-- > 0)
+								{
+									if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SUSPEND)
+										break;
+									// waiting
+									ast_mutex_unlock(&ch_gsm->lock);
+									sleep(1);
+									ast_mutex_lock(&ch_gsm->lock);
+								}
+							}
+							// check for SUSPEND state
+							if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND) {
+								ast_cli(a->fd, "failed\n");
+								break;
+							}
+							ast_cli(a->fd, "succeeded\n");
+
+							// hardware depend procedure
+							if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
+								// SIM300
+								// set raw termios
+								cfmakeraw(&raw_termios);
+								if (tcsetattr(ch_gsm->tty_fd, TCSANOW, &raw_termios)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+									goto pg_channel_gsm_imei_set_end;
+								}
+								// select AUXILARY channel of SERIAL port
+								ch_gsm->flags.main_tty = 0;
+								if (pg_channel_gsm_serial_set(ch_gsm, 1) < 0) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": can't switch serial port to auxilary channel: %s\n", ch_gsm->alias, strerror(errno));
+									goto pg_channel_gsm_imei_set_end;
+								}
+								if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
+									goto pg_channel_gsm_imei_set_end;
+								}
+								// imei data1
+								sim300_build_imei_data1(tmpbuf, &tmpi);
+								// write imei data1
+								pos = 0;
+								x_timer_set_second(timer, 10);
+								while (is_x_timer_active(timer))
+								{
+									tv.tv_sec = 1;
+									tv.tv_usec = 0;
+									FD_ZERO(&fds);
+									FD_SET(ch_gsm->tty_fd, &fds);
+									ast_mutex_unlock(&ch_gsm->lock);
+									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+									ast_mutex_lock(&ch_gsm->lock);
+									// check select result code
+									if (res > 0) {
+										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+											if ((res = write(ch_gsm->tty_fd, &tmpbuf[pos], tmpi)) < 0) {
+												ast_cli(a->fd, "  GSM channel=\"%s\": write(imei data1): %s\n", ch_gsm->alias, strerror(errno));
+												goto pg_channel_gsm_imei_set_end;
+											} else {
+												tmpi -= res;
+												pos += res;
+												if (tmpi <= 0) break;
+											}
+										}
+									} else if (res < 0) {
+										ast_cli(a->fd, "  GSM channel=\"%s\": select(write imei data1): %s\n", ch_gsm->alias, strerror(errno));
+										goto pg_channel_gsm_imei_set_end;
+									}
+								}
+								if (is_x_timer_fired(timer)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": write imei data1 - time is out\n", ch_gsm->alias);
+									goto pg_channel_gsm_imei_set_end;
+								}
+								// wait for 0x06 from GSM module
+								x_timer_set_second(timer, 10);
+								while (is_x_timer_active(timer))
+								{
+									tv.tv_sec = 1;
+									tv.tv_usec = 0;
+									FD_ZERO(&fds);
+									FD_SET(ch_gsm->tty_fd, &fds);
+									ast_mutex_unlock(&ch_gsm->lock);
+									res = ast_select(ch_gsm->tty_fd + 1, &fds, NULL, NULL, &tv);
+									ast_mutex_lock(&ch_gsm->lock);
+									// check select result code
+									if (res > 0) {
+										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+											if ((res = read(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+												if (errno != EAGAIN) {
+													ast_cli(a->fd, "  GSM channel=\"%s\": read(wait for 0x06 imei data1): %s\n", ch_gsm->alias, strerror(errno));
+													goto pg_channel_gsm_imei_set_end;
+												}
+											} else {
+												if (tmpchr == 0x06) break;
+											}
+										}
+									} else if (res < 0) {
+										ast_cli(a->fd, "  GSM channel=\"%s\": select(wait for 0x06 imei data1): %s\n", ch_gsm->alias, strerror(errno));
+										goto pg_channel_gsm_imei_set_end;
+									}
+								}
+								if (is_x_timer_fired(timer)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": wait for 0x06 imei data1 - time is out\n", ch_gsm->alias);
+									goto pg_channel_gsm_imei_set_end;
+								}
+								// imei data2
+								sim300_build_imei_data2(tmpbuf, &tmpi);
+								// write imei data2
+								pos = 0;
+								x_timer_set_second(timer, 10);
+								while (is_x_timer_active(timer))
+								{
+									tv.tv_sec = 1;
+									tv.tv_usec = 0;
+									FD_ZERO(&fds);
+									FD_SET(ch_gsm->tty_fd, &fds);
+									ast_mutex_unlock(&ch_gsm->lock);
+									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+									ast_mutex_lock(&ch_gsm->lock);
+									// check select result code
+									if (res > 0) {
+										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+											if ((res = write(ch_gsm->tty_fd, &tmpbuf[pos], tmpi)) < 0) {
+												ast_cli(a->fd, "  GSM channel=\"%s\": write(imei data2): %s\n", ch_gsm->alias, strerror(errno));
+												goto pg_channel_gsm_imei_set_end;
+											} else {
+												tmpi -= res;
+												pos += res;
+												if (tmpi <= 0) break;
+											}
+										}
+									} else if (res < 0) {
+										ast_cli(a->fd, "  GSM channel=\"%s\": select(write imei data2): %s\n", ch_gsm->alias, strerror(errno));
+										goto pg_channel_gsm_imei_set_end;
+									}
+								}
+								if (is_x_timer_fired(timer)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": write imei data2 - time is out\n", ch_gsm->alias);
+									goto pg_channel_gsm_imei_set_end;
+								}
+								// wait for 0x06 from GSM module
+								x_timer_set_second(timer, 10);
+								while (is_x_timer_active(timer))
+								{
+									tv.tv_sec = 1;
+									tv.tv_usec = 0;
+									FD_ZERO(&fds);
+									FD_SET(ch_gsm->tty_fd, &fds);
+									ast_mutex_unlock(&ch_gsm->lock);
+									res = ast_select(ch_gsm->tty_fd + 1, &fds, NULL, NULL, &tv);
+									ast_mutex_lock(&ch_gsm->lock);
+									// check select result code
+									if (res > 0) {
+										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+											if ((res = read(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+												if (errno != EAGAIN) {
+													ast_cli(a->fd, "  GSM channel=\"%s\": read(wait for 0x06 imei data2): %s\n", ch_gsm->alias, strerror(errno));
+													goto pg_channel_gsm_imei_set_end;
+												}
+											} else {
+												if (tmpchr == 0x06) break;
+											}
+										}
+									} else if (res < 0) {
+										ast_cli(a->fd, "  GSM channel=\"%s\": select(wait for 0x06 imei data2): %s\n", ch_gsm->alias, strerror(errno));
+										goto pg_channel_gsm_imei_set_end;
+									}
+								}
+								if (is_x_timer_fired(timer)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": wait for 0x06 imei data2 - time is out\n", ch_gsm->alias);
+									goto pg_channel_gsm_imei_set_end;
+								}
+								// write 0x06
+								tmpchr = 0x06;
+								x_timer_set_second(timer, 10);
+								while (is_x_timer_active(timer))
+								{
+									tv.tv_sec = 1;
+									tv.tv_usec = 0;
+									FD_ZERO(&fds);
+									FD_SET(ch_gsm->tty_fd, &fds);
+									ast_mutex_unlock(&ch_gsm->lock);
+									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+									ast_mutex_lock(&ch_gsm->lock);
+									// check select result code
+									if (res > 0) {
+										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+											if ((res = write(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+												ast_cli(a->fd, "  GSM channel=\"%s\": write(0x06 a): %s\n", ch_gsm->alias, strerror(errno));
+												goto pg_channel_gsm_imei_set_end;
+											} else
+												break;
+										}
+									} else if (res < 0) {
+										ast_cli(a->fd, "  GSM channel=\"%s\": select(write 0x06 a): %s\n", ch_gsm->alias, strerror(errno));
+										goto pg_channel_gsm_imei_set_end;
+									}
+								}
+								if (is_x_timer_fired(timer)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": write 0x06 a - time is out\n", ch_gsm->alias);
+									goto pg_channel_gsm_imei_set_end;
+								}
+								// build imei data3
+								sim300_build_imei_data3(imei_buf, imei_check_digit, tmpbuf, &tmpi);
+								// write imei data3
+								pos = 0;
+								x_timer_set_second(timer, 10);
+								while (is_x_timer_active(timer))
+								{
+									tv.tv_sec = 1;
+									tv.tv_usec = 0;
+									FD_ZERO(&fds);
+									FD_SET(ch_gsm->tty_fd, &fds);
+									ast_mutex_unlock(&ch_gsm->lock);
+									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+									ast_mutex_lock(&ch_gsm->lock);
+									// check select result code
+									if (res > 0) {
+										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+											if ((res = write(ch_gsm->tty_fd, &tmpbuf[pos], tmpi)) < 0) {
+												ast_cli(a->fd, "  GSM channel=\"%s\": write(imei data3): %s\n", ch_gsm->alias, strerror(errno));
+												goto pg_channel_gsm_imei_set_end;
+											} else {
+												tmpi -= res;
+												pos += res;
+												if (tmpi <= 0) break;
+											}
+										}
+									} else if (res < 0) {
+										ast_cli(a->fd, "  GSM channel=\"%s\": select(write imei data3): %s\n", ch_gsm->alias, strerror(errno));
+										goto pg_channel_gsm_imei_set_end;
+									}
+								}
+								if (is_x_timer_fired(timer)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": write imei data3 - time is out\n", ch_gsm->alias);
+									goto pg_channel_gsm_imei_set_end;
+								}
+								// wait for 0x06 from GSM module
+								x_timer_set_second(timer, 10);
+								while (is_x_timer_active(timer))
+								{
+									tv.tv_sec = 1;
+									tv.tv_usec = 0;
+									FD_ZERO(&fds);
+									FD_SET(ch_gsm->tty_fd, &fds);
+									ast_mutex_unlock(&ch_gsm->lock);
+									res = ast_select(ch_gsm->tty_fd + 1, &fds, NULL, NULL, &tv);
+									ast_mutex_lock(&ch_gsm->lock);
+									// check select result code
+									if (res > 0) {
+										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+											if ((res = read(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+												if (errno != EAGAIN) {
+													ast_cli(a->fd, "  GSM channel=\"%s\": read(wait for 0x06 imei data3): %s\n", ch_gsm->alias, strerror(errno));
+													goto pg_channel_gsm_imei_set_end;
+												}
+											} else {
+												if (tmpchr == 0x06) break;
+											}
+										}
+									} else if (res < 0) {
+										ast_cli(a->fd, "  GSM channel=\"%s\": select(wait for 0x06 imei data3): %s\n", ch_gsm->alias, strerror(errno));
+										goto pg_channel_gsm_imei_set_end;
+									}
+								}
+								if (is_x_timer_fired(timer)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": wait for 0x06 imei data3 - time is out\n", ch_gsm->alias);
+									goto pg_channel_gsm_imei_set_end;
+								}
+								// write 0x06
+								tmpchr = 0x06;
+								x_timer_set_second(timer, 10);
+								while (is_x_timer_active(timer))
+								{
+									tv.tv_sec = 1;
+									tv.tv_usec = 0;
+									FD_ZERO(&fds);
+									FD_SET(ch_gsm->tty_fd, &fds);
+									ast_mutex_unlock(&ch_gsm->lock);
+									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+									ast_mutex_lock(&ch_gsm->lock);
+									// check select result code
+									if (res > 0) {
+										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+											if ((res = write(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+												ast_cli(a->fd, "  GSM channel=\"%s\": write(0x06 b): %s\n", ch_gsm->alias, strerror(errno));
+												goto pg_channel_gsm_imei_set_end;
+											} else
+												break;
+										}
+									} else if (res < 0) {
+										ast_cli(a->fd, "  GSM channel=\"%s\": select(write 0x06 b): %s\n", ch_gsm->alias, strerror(errno));
+										goto pg_channel_gsm_imei_set_end;
+									}
+								}
+								if (is_x_timer_fired(timer)) {
+									ast_cli(a->fd, "  GSM channel=\"%s\": write 0x06 b - time is out\n", ch_gsm->alias);
+									goto pg_channel_gsm_imei_set_end;
+								}
+							} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
+								// M10
+								pg_atcommand_queue_append(ch_gsm, AT_M10_EGMR, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1,7,\"%s\"", imei_buf);
+							} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
+								// SIM900
+								ast_cli(a->fd, "  GSM channel=\"%s\": IMEI change command for SIM900 under working\n", ch_gsm->alias);
+								goto pg_channel_gsm_imei_set_end;
+							} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+								// SIM5215
+								ast_cli(a->fd, "  GSM channel=\"%s\": IMEI change command for SIM5215 under working\n", ch_gsm->alias);
+								goto pg_channel_gsm_imei_set_end;
+							} else {
+								// UNKNOWN
+								ast_cli(a->fd, "  GSM channel=\"%s\": unknown module type\n", ch_gsm->alias);
+								goto pg_channel_gsm_imei_set_end;
+							}
+							ch_gsm->imei[0] = '\0';
+							ast_cli(a->fd, "  GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
+pg_channel_gsm_imei_set_end:
+							// restore old termios
+							if (tcsetattr(ch_gsm->tty_fd, TCSANOW, &old_termios))
+								ast_cli(a->fd, "  GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+							// select MAIN channel of SERIAL port
+							ch_gsm->flags.main_tty = 1;
+							if (pg_channel_gsm_serial_set(ch_gsm, 0) < 0)
+								ast_cli(a->fd, "  GSM channel=\"%s\": can't switch serial port to main channel: %s\n", ch_gsm->alias, strerror(errno));
+							if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0)
+								ast_cli(a->fd, "  GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
+							// restore previous state
+							if (old_state == PG_CHANNEL_GSM_STATE_RUN) {
+								pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
+								pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
+								ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
+								ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+								ch_gsm->flags.resume_now = 1;
+								// start simpoll timer
+								x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NUMBER:

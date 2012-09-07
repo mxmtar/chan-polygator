@@ -5,6 +5,7 @@ nobase_astmod_LTLIBRARIES = chan_polygator.la
 chan_polygator_la_SOURCES = \
 		chan_polygator.c \
 		address.c \
+		imei.c \
 		sms.c \
 		strutil.c \
 		at.c \

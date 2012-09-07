@@ -1,0 +1,76 @@
+
+Installation chan-polygator.
+
+Requirements.
+
+1. asterisk with development files. verison 1.6.x.x and higher.
+2. polygator-linux.
+3. libvinetic.
+
+Installation.
+
+1. Install asterisk from source or packet manager (with development files).
+
+2. Install polygator-linux kernel modules.
+
+Compile and install from source directory by:
+
+# make
+# make install
+# depmod
+
+For K32 ISA boards is needed additional installation for sysvinit scripts:
+
+# make sysvinit_install
+
+3. Install libvinetic.
+
+Compile and install from source directory by:
+
+# ./configure --prefix=/usr
+# make
+# make install
+
+4. Install chan-polygator.
+
+Compile and install from source directory by:
+
+# ./configure --prefix=/path/to/asterisk/prefix
+# make
+# make install
+
+NOTE:
+1. chan-polygator try to discover asterisk data directory for installing firmware files.
+
+# ./configure --prefix=/path/to/asterisk/prefix
+...........
+checking for asterisk directory "astdatadir"... "/path/to/asterisk/datadir"
+...........
+
+It must be directory as shown by asterisk CLI command
+> core show settings
+...........
+* Directories
+  -------------
+...........
+  Data directory:              /path/to/asterisk/datadir
+...........
+
+If configuration script and asterisk paths is different, need specify asterisk
+data directory explicit in asterisk.conf.
+
+[directories]
+astdatadir => /path/to/asterisk/datadir
+...........
+
+Remove if exist exclamation mark (!) after [directories] to enable directories
+configuration sections.
+
+2. If asterisk run by user:group rather than root:root you must change
+ownership for polygator-linux device files.
+
+# chown -R user:group /dev/polygator
+
+and if exist
+
+# chown user:group /dev/ttyPG*
