@@ -18,6 +18,7 @@ chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic
 
 noinst_HEADERS = \
 		address.h \
+		imei.h \
 		at.h \
 		m10.h \
 		rtp.h \
