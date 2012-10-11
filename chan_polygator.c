@@ -11233,11 +11233,13 @@ pg_gsm_indicate_srcupdate_end:
 			}
 			res = 0;
 			break;
+#if 0
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_SRCCHANGE:
 			ast_debug(4, "GSM channel=\"%s\": call line=%d src change\n", ch_gsm->alias, call->line);
 			res = 0;
 			break;
+#endif
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case -1:
 			res = 0;
@@ -16133,7 +16135,7 @@ static int pg_load(void)
 			ast_log(LOG_ERROR, "unable to scan Polygator subsystem: %d %s\n", errno, strerror(errno));
 			goto pg_load_error;
 		} else
-			ast_verbose("Polygator: subsnameystem not found\n");
+			ast_verbose("Polygator: subsystem not found\n");
 	}
 	// scan polygator board
 	brd_num = 0;
