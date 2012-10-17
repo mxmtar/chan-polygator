@@ -4,7 +4,7 @@
 AC_PREREQ([2.60])
 
 # set project attribute
-AC_INIT([chan-polygator], [1.0.1])
+AC_INIT([chan-polygator], [1.0.2])
 
 AM_INIT_AUTOMAKE([-Wall -Werror])
 
@@ -26,7 +26,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([chan_polygator.c])
 
 AC_COPYRIGHT("Polygator")
-AC_REVISION(1.0.1)
+AC_REVISION(1.0.2)
 
 # prepare autoconfig header data
 AC_CONFIG_HEADER([autoconfig.h])
@@ -72,6 +72,7 @@ else
 fi
 
 # Checks for header files.
+AC_CHECK_HEADER([polygator/version.h], [], [echo "Polygator kernel module not installed" ; exit 1])
 AC_CHECK_HEADER([polygator/polygator-base.h], [], [echo "Polygator kernel module not installed" ; exit 1])
 AC_CHECK_HEADER([polygator/vinetic-def.h], [], [echo "Polygator kernel module not installed" ; exit 1])
 AC_CHECK_HEADER([polygator/vinetic-ioctl.h], [], [echo "Polygator kernel module not installed" ; exit 1])
@@ -80,6 +81,9 @@ AC_CHECK_HEADER([asterisk.h], [], [echo "asterisk not installed - please install
 AC_CHECK_HEADER([sqlite3.h], [], [echo "sqlite3 not installed - please install sqlite3 or sqlite3 development package" ; exit 1])
 
 # Checks for packages.
+# Checks for required polygator-linux version.
+PG_POLYGATOR_LINUX_VERSION_PREREQ([1.0.1])
+
 # Checks for required asterisk version.
 PG_ASTERISK_VERSION_PREREQ([1.6.0])
 

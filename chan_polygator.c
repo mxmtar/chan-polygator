@@ -106,7 +106,7 @@ struct pg_at_cmd {
 	struct at_command *at;
 	int id;
 	u_int32_t oper;
-	uintptr_t sub_cmd;
+	u_int32_t sub_cmd;
 	char cmd_buf[256];
 	int cmd_len;
 	int timeout;
@@ -288,6 +288,7 @@ enum {
 
 struct pg_call_gsm {
 	int line;
+	u_int32_t hash;
 	int clcc_stat;
 	int clcc_mpty;
 	int state;
@@ -3188,6 +3189,7 @@ static inline struct pg_call_gsm *pg_channel_gsm_get_new_call(struct pg_channel_
 			call->channel_gsm = ch_gsm;
 			call->state = PG_CALL_GSM_STATE_NULL;
 			gettimeofday(&call->start_time, NULL);
+			call->hash = ast_random();
 			AST_LIST_INSERT_TAIL(&ch_gsm->call_list, call, entry);
 		}
 		ast_mutex_unlock(&ch_gsm->lock);
@@ -3230,6 +3232,24 @@ static inline struct pg_call_gsm *pg_channel_gsm_get_call(struct pg_channel_gsm 
 }
 //------------------------------------------------------------------------------
 // end of pg_channel_gsm_get_call()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_channel_gsm_get_call_by_hash()
+//------------------------------------------------------------------------------
+static inline struct pg_call_gsm *pg_channel_gsm_get_call_by_hash(struct pg_channel_gsm *ch_gsm, u_int32_t hash)
+{
+	struct pg_call_gsm *call = NULL;
+	if (ch_gsm) {
+		ast_mutex_lock(&ch_gsm->lock);
+		AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
+			if (call->hash == hash) break;
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	return call;
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_gsm_get_call_by_hash()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -3292,7 +3312,7 @@ static int pg_atcommand_insert_spacer(struct pg_channel_gsm* ch_gsm, int timeout
 static int pg_atcommand_queue_prepend(struct pg_channel_gsm* ch_gsm,
 										int id,
 										u_int32_t oper,
-										uintptr_t subcmd,
+										u_int32_t subcmd,
 										int timeout,
 										int show,
 										const char *fmt, ...)
@@ -4339,7 +4359,6 @@ static void *pg_channel_gsm_workthread(void *data)
 		struct at_gen_clip_unsol *clip_un;
 	} parser_ptrs;
 
-	uintptr_t tuiptr;
 	char ts0[32], ts1[32];
 	unsigned int tu0, tu1, tu2, tu3, tu4, tu5;
 	char tmpbuf[512];
@@ -5108,8 +5127,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CEER:
 							if (is_str_begin_by(r_buf, "+CEER:")) {
-								if (ch_gsm->at_cmd->sub_cmd) memcpy(&call, &ch_gsm->at_cmd->sub_cmd, sizeof(uintptr_t));
-								else call = NULL;
+								call = pg_channel_gsm_get_call_by_hash(ch_gsm, ch_gsm->at_cmd->sub_cmd);
 								if (sscanf(r_buf, "+CEER: \"Cause Select:%u Cause:%u\"", &cause_select, &cause_value) == 2) { // SIM900
 									ast_verb(4, "GSM channel=\"%s\": CEER Cause Select=%u Cause=%u\n", ch_gsm->alias, cause_select, cause_value);
 									switch (cause_select)
@@ -7132,8 +7150,7 @@ static void *pg_channel_gsm_workthread(void *data)
 			  		// valid if call state OUTGOING_CALL_PROCEEDING || CALL_DELIVERED
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
 						call->cause = AST_CAUSE_USER_BUSY;
-						memcpy(&tuiptr, &call, sizeof(uintptr_t));
-						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
+						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, call->hash, pg_at_response_timeout, 0, NULL);
 					}
 				}
 			}
@@ -7143,13 +7160,11 @@ static void *pg_channel_gsm_workthread(void *data)
 				{
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
 						call->cause = AST_CAUSE_NO_ANSWER;
-						memcpy(&tuiptr, &call, sizeof(uintptr_t));
-						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
+						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, call->hash, pg_at_response_timeout, 0, NULL);
 					} else if (call->state == PG_CALL_GSM_STATE_ACTIVE) {
 						if (pg_channel_gsm_get_calls_count(ch_gsm) == 1) {
 							call->cause = AST_CAUSE_NORMAL_CLEARING;
-							memcpy(&tuiptr, &call, sizeof(uintptr_t));
-							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
+							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, call->hash, pg_at_response_timeout, 0, NULL);
 						}
 					}
 				}
@@ -7160,13 +7175,11 @@ static void *pg_channel_gsm_workthread(void *data)
 				{
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
 						call->cause = AST_CAUSE_NO_ANSWER;
-						memcpy(&tuiptr, &call, sizeof(uintptr_t));
-						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
+						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, call->hash, pg_at_response_timeout, 0, NULL);
 					} else if (call->state == PG_CALL_GSM_STATE_ACTIVE) {
 						if (pg_channel_gsm_get_calls_count(ch_gsm) == 1) {
 							call->cause = AST_CAUSE_NORMAL_CLEARING;
-							memcpy(&tuiptr, &call, sizeof(uintptr_t));
-							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
+							pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, call->hash, pg_at_response_timeout, 0, NULL);
 						}
 					}
 				}
@@ -7177,8 +7190,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				{
 					if ((call->state == PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING) || (call->state == PG_CALL_GSM_STATE_CALL_DELIVERED)) {
 						call->cause = AST_CAUSE_NO_ANSWER;
-						memcpy(&tuiptr, &call, sizeof(uintptr_t));
-						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, tuiptr, pg_at_response_timeout, 0, NULL);
+						pg_atcommand_queue_prepend(ch_gsm, AT_CEER, AT_OPER_EXEC, call->hash, pg_at_response_timeout, 0, NULL);
 					}
 				}
 			}
