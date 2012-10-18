@@ -2762,7 +2762,8 @@ static int pg_channel_gsm_vio_get(struct pg_channel_gsm *ch_gsm)
 				}
 			}
 			fclose(fp);
-		}
+		} else
+			errno = ENODEV;
 	} else
 		errno = ENODEV;
 
@@ -2777,22 +2778,16 @@ static int pg_channel_gsm_vio_get(struct pg_channel_gsm *ch_gsm)
 //------------------------------------------------------------------------------
 static int pg_channel_gsm_power_set(struct pg_channel_gsm *ch_gsm, int state)
 {
-	char cmd[64];
-	int cmdlen;
-	int fd;
+	FILE *fp;
 	int res = -1;
 
 	if (ch_gsm) {
-		if ((fd = open(ch_gsm->board->path, O_WRONLY)) > 0) {
-			cmdlen = snprintf(cmd, sizeof(cmd), "GSM%u PWR=%d", ch_gsm->position_on_board, state);
-			res = write(fd, cmd, cmdlen);
-			if ((res > 0) && (res == cmdlen))
-				res = 0;
-			else
-				res = -1;
-			fsync(fd);
-			close(fd);
-		}
+		if ((fp = fopen(ch_gsm->board->path, "w"))) {
+			fprintf(fp, "GSM%u PWR=%d", ch_gsm->position_on_board, state);
+			fclose(fp);
+			res = 0;
+		} else
+			errno = ENODEV;
 	} else
 		errno = ENODEV;
 
@@ -2807,22 +2802,16 @@ static int pg_channel_gsm_power_set(struct pg_channel_gsm *ch_gsm, int state)
 //------------------------------------------------------------------------------
 static int pg_channel_gsm_serial_set(struct pg_channel_gsm *ch_gsm, int serial)
 {
-	char cmd[64];
-	int cmdlen;
-	int fd;
+	FILE *fp;
 	int res = -1;
 
 	if (ch_gsm) {
-		if ((fd = open(ch_gsm->board->path, O_WRONLY)) > 0) {
-			cmdlen = snprintf(cmd, sizeof(cmd), "GSM%u SERIAL=%d", ch_gsm->position_on_board, serial);
-			res = write(fd, cmd, cmdlen);
-			if ((res > 0) && (res == cmdlen))
-				res = 0;
-			else
-				res = -1;
-			fsync(fd);
-			close(fd);
-		}
+		if ((fp = fopen(ch_gsm->board->path, "w"))) {
+			fprintf(fp, "GSM%u SERIAL=%d", ch_gsm->position_on_board, serial);
+			fclose(fp);
+			res = 0;
+		} else
+			errno = ENODEV;
 	} else
 		errno = ENODEV;
 
@@ -2837,22 +2826,16 @@ static int pg_channel_gsm_serial_set(struct pg_channel_gsm *ch_gsm, int serial)
 //------------------------------------------------------------------------------
 static int pg_channel_gsm_key_press(struct pg_channel_gsm *ch_gsm, int state)
 {
-	char cmd[64];
-	int cmdlen;
-	int fd;
+	FILE *fp;
 	int res = -1;
 
 	if (ch_gsm) {
-		if ((fd = open(ch_gsm->board->path, O_WRONLY)) > 0) {
-			cmdlen = snprintf(cmd, sizeof(cmd), "GSM%u KEY=%d", ch_gsm->position_on_board, state);
-			res = write(fd, cmd, cmdlen);
-			if ((res > 0) && (res == cmdlen))
-				res = 0;
-			else
-				res = -1;
-			fsync(fd);
-			close(fd);
-		}
+		if ((fp = fopen(ch_gsm->board->path, "w"))) {
+			fprintf(fp, "GSM%u KEY=%d", ch_gsm->position_on_board, state);
+			fclose(fp);
+			res = 0;
+		} else
+			errno = ENODEV;
 	} else
 		errno = ENODEV;
 
@@ -4382,6 +4365,13 @@ static void *pg_channel_gsm_workthread(void *data)
 
 	ast_mutex_lock(&ch_gsm->lock);
 	ch_gsm->power_sequence_number = -1;
+
+	// check GSM module type
+	if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_UNKNOWN) {
+		ast_log(LOG_ERROR, "GSM channel=\"%s\": unknown GSM module type\n", ch_gsm->alias);
+		ast_mutex_unlock(&ch_gsm->lock);
+		goto pg_channel_gsm_workthread_end;
+	}
 
 	// enable power suply
 	if (pg_channel_gsm_power_set(ch_gsm, 1)) {
