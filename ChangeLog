@@ -1,2 +1,4 @@
 18.10.12
 Stop execution of GSM channel thread when GSM module type is unknown.
+19.10.12
+Add control interface for VINETIC NE-LEC.

@@ -379,6 +379,12 @@ struct pg_channel_gsm {
 		unsigned int gain2;
 		unsigned int gainx;
 		unsigned int gainr;
+		int ali_nelec;
+		int ali_nelec_tm;
+		int ali_nelec_oldc;
+		int ali_nelec_as;
+		int ali_nelec_nlp;
+		int ali_nelec_nlpm;
 		int clir;
 		int callwait;
 		int reg_try_count;
@@ -718,6 +724,12 @@ enum {
 	PG_CHANNEL_GSM_PARAM_TRUNK,
 	PG_CHANNEL_GSM_PARAM_TRUNKONLY,
 	PG_CHANNEL_GSM_PARAM_CONFALLOW,
+	PG_CHANNEL_GSM_PARAM_NELEC,
+	PG_CHANNEL_GSM_PARAM_NELEC_TM,
+	PG_CHANNEL_GSM_PARAM_NELEC_OLDC,
+	PG_CHANNEL_GSM_PARAM_NELEC_AS,
+	PG_CHANNEL_GSM_PARAM_NELEC_NLP,
+	PG_CHANNEL_GSM_PARAM_NELEC_NLPM,
 };
 struct pg_cgannel_gsm_param {
 	int id;
@@ -764,6 +776,12 @@ static struct pg_cgannel_gsm_param pg_channel_gsm_params[] = {
 	PG_CHANNEL_GSM_PARAM("trunk", PG_CHANNEL_GSM_PARAM_TRUNK, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_DELETE),
 	PG_CHANNEL_GSM_PARAM("trunkonly", PG_CHANNEL_GSM_PARAM_TRUNKONLY, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
 	PG_CHANNEL_GSM_PARAM("confallow", PG_CHANNEL_GSM_PARAM_CONFALLOW, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
+	PG_CHANNEL_GSM_PARAM("ali.nelec", PG_CHANNEL_GSM_PARAM_NELEC, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
+	PG_CHANNEL_GSM_PARAM("ali.nelec.tm", PG_CHANNEL_GSM_PARAM_NELEC_TM, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
+	PG_CHANNEL_GSM_PARAM("ali.nelec.oldc", PG_CHANNEL_GSM_PARAM_NELEC_OLDC, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
+	PG_CHANNEL_GSM_PARAM("ali.nelec.as", PG_CHANNEL_GSM_PARAM_NELEC_AS, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
+	PG_CHANNEL_GSM_PARAM("ali.nelec.nlp", PG_CHANNEL_GSM_PARAM_NELEC_NLP, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
+	PG_CHANNEL_GSM_PARAM("ali.nelec.nlpm", PG_CHANNEL_GSM_PARAM_NELEC_NLPM, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
 };
 enum {
 	PG_CHANNEL_GSM_DEBUG_UNKNOWN = 0,
@@ -821,6 +839,11 @@ static struct pg_generic_param pg_call_gsm_progress_types[] = {
 	PG_GENERIC_PARAM("answer", PG_GSM_CALL_PROGRESS_TYPE_ANSWER),
 };
 
+static struct pg_generic_param pg_vinetic_ali_nelec_nlpms[] = {
+	PG_GENERIC_PARAM("limit", VIN_NLPM_LIMIT),
+	PG_GENERIC_PARAM("sign", VIN_NLPM_SIGN_NOISE),
+	PG_GENERIC_PARAM("white", VIN_NLPM_WHITE_NOISE),
+};
 
 static struct timeval waitrdy_timeout = {20, 0};
 static struct timeval waitsuspend_timeout = {30, 0};
@@ -2733,6 +2756,46 @@ static char *pg_call_gsm_outgoing_to_string(int outgoing)
 // end of pg_call_gsm_outgoing_to_string()
 //------------------------------------------------------------------------------
 
+
+//------------------------------------------------------------------------------
+// pg_vinetic_get_ali_nelec_nlpm()
+//------------------------------------------------------------------------------
+static int pg_vinetic_get_ali_nelec_nlpm(const char *mode)
+{
+	size_t i;
+	int out = -1;
+	if (mode) {
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++)
+		{
+			if (!strcmp(mode, pg_vinetic_ali_nelec_nlpms[i].name)) {
+				out = pg_vinetic_ali_nelec_nlpms[i].id;
+				break;
+			}
+		}
+	}
+	return out;
+}
+//------------------------------------------------------------------------------
+// end of pg_vinetic_get_ali_nelec_nlpm()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_vinetic_ali_nelec_nlpm_to_string()
+//------------------------------------------------------------------------------
+static char *pg_vinetic_ali_nelec_nlpm_to_string(int mode)
+{
+	size_t i;
+	for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++)
+	{
+		if (mode == pg_vinetic_ali_nelec_nlpms[i].id)
+			return pg_vinetic_ali_nelec_nlpms[i].name;
+	}
+	return "unknown";
+}
+//------------------------------------------------------------------------------
+// end of pg_vinetic_ali_nelec_nlpm_to_string()
+//------------------------------------------------------------------------------
+
 //------------------------------------------------------------------------------
 // pg_channel_gsm_vio_get()
 //------------------------------------------------------------------------------
@@ -3729,16 +3792,25 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_channel_enable(): line %d\n", vin->name, vin->context.errorline);
 				goto pg_channel_gsm_call_incoming_end;
 			}
-			// enable vinetic ALI Near End LEC
-			vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, VIN_DTM_ON);
-			vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, VIN_OLDC_ZERO);
-			vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, VIN_AS_RUN);
-			vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, VIN_ON);
-			vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, VIN_NLPM_SIGN_NOISE);
-			if ((res = vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
-				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
-				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): line %d\n", vin->name, vin->context.errorline);
-				goto pg_channel_gsm_call_incoming_end;
+			if (ch_gsm->config.ali_nelec == VIN_EN) {
+				// enable vinetic ALI Near End LEC
+				vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_tm);
+				vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_oldc);
+				vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_as);
+				vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlp);
+				vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlpm);
+				if ((res = vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): line %d\n", vin->name, vin->context.errorline);
+					goto pg_channel_gsm_call_incoming_end;
+				}
+			} else {
+				// disable vinetic ALI Near End LEC
+				if ((res = vin_ali_near_end_lec_disable(vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_disable(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_disable(): line %d\n", vin->name, vin->context.errorline);
+					goto pg_channel_gsm_call_incoming_end;
+				}
 			}
 			// set ALI channel operation mode ACTIVE_HIGH_VBATH
 			if ((res = vin_set_opmode(&vin->context, ch_gsm->vinetic_alm_slot, VIN_OP_MODE_ACTIVE_HIGH_VBATH)) < 0) {
@@ -10082,12 +10154,25 @@ static int pg_config_file_build(char *filename)
 			// sms.max.part
 			len += fprintf(fp, "sms.max.part=%d\n", ch_gsm->config.sms_max_part);
 
-			// sms_notify_enable
+			// sms.notify.enable
 			len += fprintf(fp, "sms.notify.enable=%s\n", ch_gsm->config.sms_notify_enable?"yes":"no");
-			// sms_notify_context
+			// sms.notify.context
 			len += fprintf(fp, "sms.notify.context=%s\n", ch_gsm->config.sms_notify_context);
-			// sms_notify_extension
+			// sms.notify.extension
 			len += fprintf(fp, "sms.notify.extension=%s\n", ch_gsm->config.sms_notify_extension);
+
+			// ali.nelec
+			len += fprintf(fp, "ali.nelec=%s\n", (ch_gsm->config.ali_nelec == VIN_DIS)?"inactive":"active");
+			// ali.nelec.tm
+			len += fprintf(fp, "ali.nelec.tm=%s\n", (ch_gsm->config.ali_nelec_tm == VIN_DTM_ON)?"on":"off");
+			// ali.nelec.oldc
+			len += fprintf(fp, "ali.nelec.oldc=%s\n", (ch_gsm->config.ali_nelec_oldc == VIN_OLDC_ZERO)?"zero":"old");
+			// ali.nelec.as
+			len += fprintf(fp, "ali.nelec.as=%s\n", (ch_gsm->config.ali_nelec_as == VIN_AS_RUN)?"run":"stop");
+			// ali.nelec.nlp
+			len += fprintf(fp, "ali.nelec.nlp=%s\n", (ch_gsm->config.ali_nelec_nlp == VIN_OFF)?"off":"on");
+			// ali.nelec.nlpm
+			len += fprintf(fp, "ali.nelec.nlpm=%s\n", pg_vinetic_ali_nelec_nlpm_to_string(ch_gsm->config.ali_nelec_nlpm));
 
 			// place separator
 			len += fprintf(fp, FORMAT_SEPARATOR_LINE);
@@ -10601,16 +10686,25 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_channel_enable(): line %d\n", vin->name, vin->context.errorline);
 				goto pg_gsm_requester_vinetic_end;
 			}
-			// enable vinetic ALI Near End LEC
-			vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, VIN_DTM_ON);
-			vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, VIN_OLDC_ZERO);
-			vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, VIN_AS_RUN);
-			vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, VIN_ON);
-			vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, VIN_NLPM_SIGN_NOISE);
-			if ((res = vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
-				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
-				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): line %d\n", vin->name, vin->context.errorline);
-				goto pg_gsm_requester_vinetic_end;
+			if (ch_gsm->config.ali_nelec == VIN_EN) {
+				// enable vinetic ALI Near End LEC
+				vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_tm);
+				vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_oldc);
+				vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_as);
+				vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlp);
+				vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlpm);
+				if ((res = vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): line %d\n", vin->name, vin->context.errorline);
+					goto pg_gsm_requester_vinetic_end;
+				}
+			} else {
+				// disable vinetic ALI Near End LEC
+				if ((res = vin_ali_near_end_lec_disable(vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_disable(): %s\n", vin->name, vin_error_str(&vin->context));
+					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_ali_near_end_lec_disable(): line %d\n", vin->name, vin->context.errorline);
+					goto pg_gsm_requester_vinetic_end;
+				}
 			}
 			// set ALI channel operation mode ACTIVE_HIGH_VBATH
 			if ((res = vin_set_opmode(&vin->context, ch_gsm->vinetic_alm_slot, VIN_OP_MODE_ACTIVE_HIGH_VBATH)) < 0) {
@@ -12215,6 +12309,195 @@ static char *pg_cli_generate_complete_channel_gsm_clir(const char *begin, int co
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_gsm_ali_nelec()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_gsm_ali_nelec(const char *begin, int count, const char *channel_gsm)
+{
+	char *res;
+	int beginlen;
+	int which;
+	struct pg_channel_gsm *ch_gsm;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
+		ast_mutex_lock(&ch_gsm->lock);
+		if (ch_gsm->config.ali_nelec == VIN_DIS) {
+			if((!strncmp(begin, "active", beginlen)) && (++which > count))
+				res = ast_strdup("active");
+		} else {
+			if ((!strncmp(begin, "inactive", beginlen)) && (++which > count))
+				res = ast_strdup("inactive");
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_gsm_ali_nelec()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_gsm_ali_nelec_tm()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_gsm_ali_nelec_tm(const char *begin, int count, const char *channel_gsm)
+{
+	char *res;
+	int beginlen;
+	int which;
+	struct pg_channel_gsm *ch_gsm;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
+		ast_mutex_lock(&ch_gsm->lock);
+		if (ch_gsm->config.ali_nelec_tm == VIN_DTM_ON) {
+			if((!strncmp(begin, "off", beginlen)) && (++which > count))
+				res = ast_strdup("off");
+		} else {
+			if ((!strncmp(begin, "on", beginlen)) && (++which > count))
+				res = ast_strdup("on");
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_gsm_ali_nelec_tm()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_gsm_ali_nelec_oldc()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_gsm_ali_nelec_oldc(const char *begin, int count, const char *channel_gsm)
+{
+	char *res;
+	int beginlen;
+	int which;
+	struct pg_channel_gsm *ch_gsm;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
+		ast_mutex_lock(&ch_gsm->lock);
+		if (ch_gsm->config.ali_nelec_oldc == VIN_OLDC_ZERO) {
+			if((!strncmp(begin, "oldc", beginlen)) && (++which > count))
+				res = ast_strdup("oldc");
+		} else {
+			if ((!strncmp(begin, "zero", beginlen)) && (++which > count))
+				res = ast_strdup("zero");
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_gsm_ali_nelec_oldc()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_gsm_ali_nelec_as()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_gsm_ali_nelec_as(const char *begin, int count, const char *channel_gsm)
+{
+	char *res;
+	int beginlen;
+	int which;
+	struct pg_channel_gsm *ch_gsm;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
+		ast_mutex_lock(&ch_gsm->lock);
+		if (ch_gsm->config.ali_nelec_as == VIN_AS_RUN) {
+			if((!strncmp(begin, "stop", beginlen)) && (++which > count))
+				res = ast_strdup("stop");
+		} else {
+			if ((!strncmp(begin, "run", beginlen)) && (++which > count))
+				res = ast_strdup("run");
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_gsm_ali_nelec_as()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_gsm_ali_nelec_nlp()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_gsm_ali_nelec_nlp(const char *begin, int count, const char *channel_gsm)
+{
+	char *res;
+	int beginlen;
+	int which;
+	struct pg_channel_gsm *ch_gsm;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
+		ast_mutex_lock(&ch_gsm->lock);
+		if (ch_gsm->config.ali_nelec_nlp == VIN_OFF) {
+			if((!strncmp(begin, "on", beginlen)) && (++which > count))
+				res = ast_strdup("on");
+		} else {
+			if ((!strncmp(begin, "off", beginlen)) && (++which > count))
+				res = ast_strdup("off");
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_gsm_ali_nelec_nlp()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_gsm_ali_nelec_nlpm()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_gsm_ali_nelec_nlpm(const char *begin, int count, const char *channel_gsm)
+{
+	char *res;
+	int beginlen;
+	int which;
+	size_t i;
+	struct pg_channel_gsm *ch_gsm;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
+		ast_mutex_lock(&ch_gsm->lock);
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++)
+		{
+			if ((pg_vinetic_ali_nelec_nlpms[i].id != ch_gsm->config.ali_nelec_nlpm) &&
+				(!strncmp(begin, pg_vinetic_ali_nelec_nlpms[i].name, beginlen)) &&
+					(++which > count)) {
+				res = ast_strdup(pg_vinetic_ali_nelec_nlpms[i].name);
+				break;
+			}
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_gsm_ali_nelec_nlpm()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_generate_complete_trunk_gsm()
 //------------------------------------------------------------------------------
 static char *pg_cli_generate_complete_trunk_gsm(const char *begin, int count)
@@ -13814,6 +14097,18 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						return pg_cli_generate_complete_context(a->word, a->n);
 					else if (!strcmp(gargv[5], "trunk"))
 						return pg_cli_generate_complete_trunk_gsm_channel_set(a->word, a->n, gargv[3]);
+					else if (!strcmp(gargv[5], "ali.nelec"))
+						return pg_cli_generate_complete_channel_gsm_ali_nelec(a->word, a->n, gargv[3]);
+					else if (!strcmp(gargv[5], "ali.nelec.tm"))
+						return pg_cli_generate_complete_channel_gsm_ali_nelec_tm(a->word, a->n, gargv[3]);
+					else if (!strcmp(gargv[5], "ali.nelec.oldc"))
+						return pg_cli_generate_complete_channel_gsm_ali_nelec_oldc(a->word, a->n, gargv[3]);
+					else if (!strcmp(gargv[5], "ali.nelec.as"))
+						return pg_cli_generate_complete_channel_gsm_ali_nelec_as(a->word, a->n, gargv[3]);
+					else if (!strcmp(gargv[5], "ali.nelec.nlp"))
+						return pg_cli_generate_complete_channel_gsm_ali_nelec_nlp(a->word, a->n, gargv[3]);
+					else if (!strcmp(gargv[5], "ali.nelec.nlpm"))
+						return pg_cli_generate_complete_channel_gsm_ali_nelec_nlpm(a->word, a->n, gargv[3]);
 				} else if ((a->pos == 6) && (!strcmp(gargv[4], "delete"))) {
 					if (!strcmp(gargv[5], "trunk"))
 						return pg_cli_generate_complete_trunk_gsm_channel_delete(a->word, a->n, gargv[3]);
@@ -14019,6 +14314,30 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CONFALLOW:
 							ast_cli(a->fd, " -> %s\n", ch_gsm->config.conference_allowed?"yes":"no");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC:
+							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec == VIN_DIS)?"inactive":"active");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_TM:
+							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec_tm == VIN_DTM_ON)?"on":"off");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_OLDC:
+							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec_oldc == VIN_OLDC_ZERO)?"zero":"old");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_AS:
+							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec_as == VIN_AS_RUN)?"run":"stop");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_NLP:
+							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec_nlp == VIN_OFF)?"off":"on");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_NLPM:
+							ast_cli(a->fd, " -> %s\n", pg_vinetic_ali_nelec_nlpm_to_string(ch_gsm->config.ali_nelec_nlpm));
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						default:
@@ -14873,6 +15192,254 @@ pg_channel_gsm_imei_set_end:
 							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC:
+							ch_gsm->config.ali_nelec = str_true(a->argv[6])?VIN_EN:VIN_DIS;
+							// apply to vinetic
+							if ((rtp = ch_gsm->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									ast_cli(a->fd, "vinetic=\"%s\": vin_reset_status(): %s\n", vin->name, vin_error_str(&vin->context));
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_gsm->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(vin->context)) {
+										// disable vinetic ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+											ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_gsm->config.ali_nelec == VIN_EN) {
+											// enable vinetic ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+												ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_TM:
+							ch_gsm->config.ali_nelec_tm = str_true(a->argv[6])?VIN_DTM_ON:VIN_DTM_OFF;
+							// apply to vinetic
+							if ((rtp = ch_gsm->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									ast_cli(a->fd, "vinetic=\"%s\": vin_reset_status(): %s\n", vin->name, vin_error_str(&vin->context));
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_gsm->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(vin->context)) {
+										// disable vinetic ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+											ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_gsm->config.ali_nelec == VIN_EN) {
+											// enable vinetic ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+												ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_OLDC:
+							if (!strcmp(a->argv[6], "oldc"))
+								ch_gsm->config.ali_nelec_oldc = VIN_OLDC_NO;
+							else
+								ch_gsm->config.ali_nelec_oldc = VIN_OLDC_ZERO;
+							// apply to vinetic
+							if ((rtp = ch_gsm->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									ast_cli(a->fd, "vinetic=\"%s\": vin_reset_status(): %s\n", vin->name, vin_error_str(&vin->context));
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_gsm->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(vin->context)) {
+										// disable vinetic ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+											ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_gsm->config.ali_nelec == VIN_EN) {
+											// enable vinetic ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+												ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_AS:
+							ch_gsm->config.ali_nelec_as = str_true(a->argv[6])?VIN_AS_RUN:VIN_AS_STOP;
+							// apply to vinetic
+							if ((rtp = ch_gsm->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									ast_cli(a->fd, "vinetic=\"%s\": vin_reset_status(): %s\n", vin->name, vin_error_str(&vin->context));
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_gsm->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(vin->context)) {
+										// disable vinetic ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+											ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_gsm->config.ali_nelec == VIN_EN) {
+											// enable vinetic ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+												ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_NLP:
+							ch_gsm->config.ali_nelec_nlp = str_true(a->argv[6])?VIN_ON:VIN_OFF;
+							// apply to vinetic
+							if ((rtp = ch_gsm->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									ast_cli(a->fd, "vinetic=\"%s\": vin_reset_status(): %s\n", vin->name, vin_error_str(&vin->context));
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_gsm->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(vin->context)) {
+										// disable vinetic ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+											ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_gsm->config.ali_nelec == VIN_EN) {
+											// enable vinetic ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+												ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_NLPM:
+							tmpi = pg_vinetic_get_ali_nelec_nlpm(a->argv[6]);
+							if (tmpi < 0) {
+								ast_cli(a->fd, " - unknown nlp mode\n");
+								break;
+							}
+							ch_gsm->config.ali_nelec_nlpm = tmpi;
+							// apply to vinetic
+							if ((rtp = ch_gsm->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									ast_cli(a->fd, "vinetic=\"%s\": vin_reset_status(): %s\n", vin->name, vin_error_str(&vin->context));
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_gsm->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(vin->context)) {
+										// disable vinetic ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+											ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_gsm->config.ali_nelec == VIN_EN) {
+											// enable vinetic ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(vin->context, ch_gsm->vinetic_alm_slot, ch_gsm->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(vin->context, ch_gsm->vinetic_alm_slot) < 0) {
+												ast_cli(a->fd, "vinetic=\"%s\": vin_ali_near_end_lec_enable(): %s\n", vin->name, vin_error_str(&vin->context));
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						default:
 							ast_cli(a->fd, " - unknown parameter\n");
 							break;
@@ -15033,6 +15600,30 @@ pg_channel_gsm_imei_set_end:
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_EXTENSION:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_TM:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_OLDC:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_AS:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_NLP:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_NELEC_NLPM:
 							ast_cli(a->fd, " - unsupported operation\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -16393,6 +16984,43 @@ static int pg_load(void)
 				ch_gsm->config.conference_allowed = 0;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "confallow")))
 					ch_gsm->config.conference_allowed = -ast_true(cvar);
+
+				// ali.nelec
+				ch_gsm->config.ali_nelec = VIN_EN;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "ali.nelec")))
+					ch_gsm->config.ali_nelec = str_true(cvar)?VIN_EN:VIN_DIS;
+
+				// ali.nelec.tm
+				ch_gsm->config.ali_nelec_tm = VIN_DTM_ON;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "ali.nelec.tm")))
+					ch_gsm->config.ali_nelec_tm = str_true(cvar)?VIN_DTM_ON:VIN_DTM_OFF;
+
+				// ali.nelec.oldc
+				ch_gsm->config.ali_nelec_oldc = VIN_OLDC_ZERO;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "ali.nelec.oldc"))) {
+					if (!strcmp(cvar, "oldc"))
+						ch_gsm->config.ali_nelec_oldc = VIN_OLDC_NO;
+					else
+						ch_gsm->config.ali_nelec_oldc = VIN_OLDC_ZERO;
+				}
+
+				// ali.nelec.as
+				ch_gsm->config.ali_nelec_as = VIN_AS_RUN;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "ali.nelec.as")))
+					ch_gsm->config.ali_nelec_as = str_true(cvar)?VIN_AS_RUN:VIN_AS_STOP;
+
+				// ali.nelec.nlp
+				ch_gsm->config.ali_nelec_nlp = VIN_ON;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "ali.nelec.nlp")))
+					ch_gsm->config.ali_nelec_nlp = str_true(cvar)?VIN_ON:VIN_OFF;
+
+				// ali.nelec.nlpm
+				ch_gsm->config.ali_nelec_nlpm = VIN_NLPM_SIGN_NOISE;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "ali.nelec.nlpm"))) {
+					ch_gsm->config.ali_nelec_nlpm = pg_vinetic_get_ali_nelec_nlpm(cvar);
+					if (ch_gsm->config.ali_nelec_nlpm < 0)
+						ch_gsm->config.ali_nelec_nlpm = VIN_NLPM_SIGN_NOISE;
+				}
 
 				if (ch_gsm->config.enable) {
 					// start GSM channel workthread
