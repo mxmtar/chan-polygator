@@ -2,3 +2,7 @@
 Stop execution of GSM channel thread when GSM module type is unknown.
 19.10.12
 Add control interface for VINETIC NE-LEC.
+23.10.12
+Add initial support of call stat info.
+shown by command
+CLI> polygator show gsm call stat out
