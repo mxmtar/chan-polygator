@@ -6,3 +6,12 @@ Add control interface for VINETIC NE-LEC.
 Add initial support of call stat info.
 shown by command
 CLI> polygator show gsm call stat out
+24.10.12
+Improved call stat info getting command
+CLI> polygator show gsm call stat out - total stat
+CLI> polygator show gsm call stat out hour - last hour stat
+CLI> polygator show gsm call stat out day - last day stat
+CLI> polygator show gsm call stat out week - last week stat
+CLI> polygator show gsm call stat out week begin - stat of period from begin time to yet time.
+CLI> polygator show gsm call stat out week begin end - stat of period from begin time to end time.
+begin, end format is y-m-d h:m:s or shorter.

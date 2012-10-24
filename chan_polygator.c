@@ -2454,7 +2454,7 @@ static void pg_cdr_table_insert_record(const char *channel, const char *imsi, st
 //------------------------------------------------------------------------------
 // pg_cdr_table_get_out_total_call_count()
 //------------------------------------------------------------------------------
-static int64_t pg_cdr_table_get_out_total_call_count(const char *key, const char *value, ast_mutex_t *lock)
+static int64_t pg_cdr_table_get_out_total_call_count(const char *key, const char *value, time_t begin, time_t end, ast_mutex_t *lock)
 {
 	char *str0;
 	int res;
@@ -2469,7 +2469,7 @@ static int64_t pg_cdr_table_get_out_total_call_count(const char *key, const char
 	ast_mutex_lock(&pg_cdr_db_lock);
 
 	count = 0;
-	str0 = sqlite3_mprintf("SELECT COUNT(id) FROM 'cdr' WHERE %q='%q' AND direction=%d;", key, value, PG_CALL_GSM_DIRECTION_OUTGOING);
+	str0 = sqlite3_mprintf("SELECT COUNT(id) FROM 'cdr' WHERE %q='%q' AND direction=%d AND starttime>%ld AND starttime<%ld;", key, value, PG_CALL_GSM_DIRECTION_OUTGOING, begin, end);
 	res = sqlite3_prepare_fun(pg_cdr_db, str0, strlen(str0), &sql0, NULL);
 	if (res == SQLITE_OK) {
 		row = 0;
@@ -2508,7 +2508,7 @@ static int64_t pg_cdr_table_get_out_total_call_count(const char *key, const char
 //------------------------------------------------------------------------------
 // pg_cdr_table_get_out_answered_call_count()
 //------------------------------------------------------------------------------
-static int64_t pg_cdr_table_get_out_answered_call_count(const char *key, const char *value, ast_mutex_t *lock)
+static int64_t pg_cdr_table_get_out_answered_call_count(const char *key, const char *value, time_t begin, time_t end, ast_mutex_t *lock)
 {
 	char *str0;
 	int res;
@@ -2523,7 +2523,7 @@ static int64_t pg_cdr_table_get_out_answered_call_count(const char *key, const c
 	ast_mutex_lock(&pg_cdr_db_lock);
 
 	count = 0;
-	str0 = sqlite3_mprintf("SELECT COUNT(id) FROM 'cdr' WHERE %q='%q' AND direction=%d AND answertime>0;", key, value, PG_CALL_GSM_DIRECTION_OUTGOING);
+	str0 = sqlite3_mprintf("SELECT COUNT(id) FROM 'cdr' WHERE %q='%q' AND direction=%d AND answertime>0 AND starttime>%ld AND starttime<%ld;", key, value, PG_CALL_GSM_DIRECTION_OUTGOING, begin, end);
 	res = sqlite3_prepare_fun(pg_cdr_db, str0, strlen(str0), &sql0, NULL);
 	if (res == SQLITE_OK) {
 		row = 0;
@@ -2562,15 +2562,15 @@ static int64_t pg_cdr_table_get_out_answered_call_count(const char *key, const c
 //------------------------------------------------------------------------------
 // pg_cdr_table_get_out_active_call_duration()
 //------------------------------------------------------------------------------
-static time_t pg_cdr_table_get_out_active_call_duration(const char *key, const char *value, ast_mutex_t *lock)
+static time_t pg_cdr_table_get_out_active_call_duration(const char *key, const char *value, time_t begin, time_t end, ast_mutex_t *lock)
 {
 	char *str0;
 	int res;
 	int row;
 	sqlite3_stmt *sql0;
 
-	time_t answer;
-	time_t end;
+	time_t answer_time;
+	time_t end_time;
 	time_t duration;
 
 	if (!key || !value)
@@ -2579,7 +2579,7 @@ static time_t pg_cdr_table_get_out_active_call_duration(const char *key, const c
 	ast_mutex_lock(&pg_cdr_db_lock);
 
 	duration = 0;
-	str0 = sqlite3_mprintf("SELECT answertime, endtime FROM 'cdr' WHERE %q='%q' AND direction=%d AND answertime>0;", key, value, PG_CALL_GSM_DIRECTION_OUTGOING);
+	str0 = sqlite3_mprintf("SELECT answertime, endtime FROM 'cdr' WHERE %q='%q' AND direction=%d AND answertime>0 AND starttime>%ld AND starttime<%ld;", key, value, PG_CALL_GSM_DIRECTION_OUTGOING, begin, end);
 	res = sqlite3_prepare_fun(pg_cdr_db, str0, strlen(str0), &sql0, NULL);
 	if (res == SQLITE_OK) {
 		row = 0;
@@ -2588,9 +2588,9 @@ static time_t pg_cdr_table_get_out_active_call_duration(const char *key, const c
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
 				row++;
-				answer = sqlite3_column_int64(sql0, 0);
-				end = sqlite3_column_int64(sql0, 1);
-				duration += end - answer;
+				answer_time = sqlite3_column_int64(sql0, 0);
+				end_time = sqlite3_column_int64(sql0, 1);
+				duration += end_time - answer_time;
 			} else if (res == SQLITE_DONE)
 				break;
 			else if(res == SQLITE_BUSY) {
@@ -13505,9 +13505,15 @@ static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_
 static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	struct pg_channel_gsm *ch_gsm;
-	
+
+	struct timeval tv_begin, tv_end;
+	struct ast_tm tm_begin, tm_end;
+
 	size_t count;
 	size_t total;
+	
+	char frombuf[40];
+	char tobuf[40];
 
 	char numbuf[20];
 	char totbuf[20];
@@ -13540,6 +13546,35 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 	if(a->argc < 6)
 		return CLI_SHOWUSAGE;
 
+	tv_set(tv_begin, 0, 0);
+	gettimeofday(&tv_end, NULL);
+
+	if (a->argc == 7) {
+		if (!strcmp(a->argv[6], "hour")) {
+			tv_begin.tv_sec = tv_end.tv_sec - 60 * 60;
+		} else if (!strcmp(a->argv[6], "day")) {
+			tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * 24;
+		} else if (!strcmp(a->argv[6], "week")) {
+			tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * 24 * 7;
+		} else {
+			ast_strptime(a->argv[6], "%Y-%m-%d %H:%M:%S", &tm_begin);
+			tv_begin = ast_mktime(&tm_begin, NULL); 
+		}
+	} else if (a->argc == 8) {
+		ast_strptime(a->argv[6], "%Y-%m-%d %H:%M:%S", &tm_begin);
+		tv_begin = ast_mktime(&tm_begin, NULL); 
+		ast_strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", &tm_end);
+		tv_end = ast_mktime(&tm_end, NULL); 
+	}
+
+	if (tv_begin.tv_sec) {
+		ast_localtime(&tv_begin, &tm_begin, NULL);
+		ast_strftime(frombuf, sizeof(frombuf), "%Y-%m-%d %H:%M:%S", &tm_begin);
+	} else
+		snprintf(frombuf, sizeof(frombuf), "begin");
+	ast_localtime(&tv_end, &tm_end, NULL);
+	ast_strftime(tobuf, sizeof(tobuf), "%Y-%m-%d %H:%M:%S", &tm_end);
+
 	total = 0;
 	count = 0;
 	number_fl = strlen("#");
@@ -13555,13 +13590,13 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 		ast_mutex_lock(&ch_gsm->lock);
 
 		if (ch_gsm->imsi) {
-			ch_gsm->out_total_call_count = pg_cdr_table_get_out_total_call_count("imsi", ch_gsm->imsi, NULL);
-			ch_gsm->out_answered_call_count = pg_cdr_table_get_out_answered_call_count("imsi", ch_gsm->imsi, NULL);
-			ch_gsm->out_active_call_duration = pg_cdr_table_get_out_active_call_duration("imsi", ch_gsm->imsi, NULL);
+			ch_gsm->out_total_call_count = pg_cdr_table_get_out_total_call_count("imsi", ch_gsm->imsi, tv_begin.tv_sec, tv_end.tv_sec, NULL);
+			ch_gsm->out_answered_call_count = pg_cdr_table_get_out_answered_call_count("imsi", ch_gsm->imsi, tv_begin.tv_sec, tv_end.tv_sec, NULL);
+			ch_gsm->out_active_call_duration = pg_cdr_table_get_out_active_call_duration("imsi", ch_gsm->imsi, tv_begin.tv_sec, tv_end.tv_sec, NULL);
 		} else {
-			ch_gsm->out_total_call_count = pg_cdr_table_get_out_total_call_count("channel", ch_gsm->device, NULL);
-			ch_gsm->out_answered_call_count = pg_cdr_table_get_out_answered_call_count("channel", ch_gsm->device, NULL);
-			ch_gsm->out_active_call_duration = pg_cdr_table_get_out_active_call_duration("channel", ch_gsm->device, NULL);
+			ch_gsm->out_total_call_count = pg_cdr_table_get_out_total_call_count("channel", ch_gsm->device, tv_begin.tv_sec, tv_end.tv_sec, NULL);
+			ch_gsm->out_answered_call_count = pg_cdr_table_get_out_answered_call_count("channel", ch_gsm->device, tv_begin.tv_sec, tv_end.tv_sec, NULL);
+			ch_gsm->out_active_call_duration = pg_cdr_table_get_out_active_call_duration("channel", ch_gsm->device, tv_begin.tv_sec, tv_end.tv_sec, NULL);
 		}
 
 		if (ch_gsm->out_answered_call_count)
@@ -13587,6 +13622,7 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 	}
 
 	if (count) {
+		ast_cli(a->fd, "  Outgoing GSM call statistic from %s to %s\n", frombuf, tobuf);
 		ast_cli(a->fd, "  GSM channel%s:\n", ESS(count));
 		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
 				number_fl, "#",
