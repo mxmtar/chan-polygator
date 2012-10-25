@@ -15,3 +15,5 @@ CLI> polygator show gsm call stat out week - last week stat
 CLI> polygator show gsm call stat out week begin - stat of period from begin time to yet time.
 CLI> polygator show gsm call stat out week begin end - stat of period from begin time to end time.
 begin, end format is y-m-d h:m:s or shorter.
+25.10.12
+Fix SMS PDU receiving function.

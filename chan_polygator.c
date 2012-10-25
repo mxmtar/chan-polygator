@@ -8393,7 +8393,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				}
 				// reset wait flag
 				ch_gsm->pdu_cmt_wait = 0;
-				}
+			}
 			// CDS
 			else if (strstr(r_buf, "+CDS:")) {
 				if ((str0 = strchr(r_buf, SP))) {
@@ -8465,11 +8465,12 @@ static void *pg_channel_gsm_workthread(void *data)
 				ch_gsm->pdu_cds_wait = 0;
 			}
 			//------------------------------------------------------------------
+			if (!strstr(r_buf, "+CMT:") && !strstr(r_buf, "+CDS:"))
+				r_buf_active = 0;
 			r_buf[0] = '\0';
 			r_cptr = r_buf;
 			r_buf_len = 0;
 			r_buf_valid = 0;
-			r_buf_active = 0;
 		}
 
 		// try to send at command
