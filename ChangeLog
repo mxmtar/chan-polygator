@@ -17,3 +17,6 @@ CLI> polygator show gsm call stat out week begin end - stat of period from begin
 begin, end format is y-m-d h:m:s or shorter.
 25.10.12
 Fix SMS PDU receiving function.
+26.10.12
+Add SMS management command support.
+CLI> polygator channel gsm <alias> sms ...
