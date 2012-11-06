@@ -3875,7 +3875,10 @@ static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 	//
 	res = 0;
 	// check access to queue
-	if ((ch_gsm->cmd_done) && ((ch_gsm->at_cmd) || (ch_gsm->at_cmd = AST_LIST_REMOVE_HEAD(&ch_gsm->cmd_queue, entry)))) {
+	if ((ch_gsm->cmd_done) &&
+		(!ch_gsm->pdu_cmt_wait) &&
+		(!ch_gsm->pdu_cds_wait) &&
+		((ch_gsm->at_cmd) || (ch_gsm->at_cmd = AST_LIST_REMOVE_HEAD(&ch_gsm->cmd_queue, entry)))) {
 		// check for spacer
 		if (ch_gsm->at_cmd->id > -1) {
 			if (write(ch_gsm->tty_fd, ch_gsm->at_cmd->cmd_buf, ch_gsm->at_cmd->cmd_len) < 0) {
@@ -4739,6 +4742,8 @@ static void *pg_channel_gsm_workthread(void *data)
 	size_t conference;
 	size_t count;
 
+	int mr;
+
 	unsigned int cause_select;
 	unsigned int cause_value;
 
@@ -4822,6 +4827,13 @@ static void *pg_channel_gsm_workthread(void *data)
 	// open TTY device
 	if ((ch_gsm->tty_fd = open(ch_gsm->tty_path, O_RDWR | O_NONBLOCK)) < 0) {
 		ast_log(LOG_ERROR, "GSM channel=\"%s\": can't open \"%s\": %s\n", ch_gsm->alias, ch_gsm->tty_path, strerror(errno));
+		ast_mutex_unlock(&ch_gsm->lock);
+		goto pg_channel_gsm_workthread_end;
+	}
+	// set raw termios
+	cfmakeraw(&termios);
+	if (tcsetattr(ch_gsm->tty_fd, TCSANOW, &termios)) {
+		ast_log(LOG_ERROR, "GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
 		ast_mutex_unlock(&ch_gsm->lock);
 		goto pg_channel_gsm_workthread_end;
 	}
@@ -6284,7 +6296,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								if ((str0 = strchr(r_buf, SP))) {
 									str0++;
 									if (is_str_digit(str0)) {
-										res = atoi(str0);
+										mr = atoi(str0);
 										// copy sent pdu from preparing to sent
 										char *p2s_owner = NULL;
 										int p2s_scatype = 0;
@@ -6461,7 +6473,7 @@ static void *pg_channel_gsm_workthread(void *data)
 															p2s_owner, // owner TEXT
 															msgid, // msgid INTEGER
 															0, // status INTEGER
-															res, // mr INTEGER
+															mr, // mr INTEGER
 															p2s_scatype, // scatype INTEGER
 															p2s_scaname, // scaname TEXT
 															p2s_datype, // datype INTEGER
@@ -8090,6 +8102,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (is_str_digit(str0)) {
 						ch_gsm->pdu_len = atoi(str0);
 						ch_gsm->pdu_cmt_wait = 1;
+						tcflush(ch_gsm->tty_fd, TCIOFLUSH);
 					}
 				}
 			}
@@ -8447,6 +8460,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (is_str_digit(str0)) {
 						ch_gsm->pdu_len = atoi(str0);
 						ch_gsm->pdu_cds_wait = 1;
+						tcflush(ch_gsm->tty_fd, TCIOFLUSH);
 					}
 				}
 			}
@@ -9320,7 +9334,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->pdu_send_len = strlen(ch_gsm->pdu_send_buf);
 											// send message command
 											pg_atcommand_insert_spacer(ch_gsm, 1);
-											pg_atcommand_queue_prepend(ch_gsm, AT_CMGS, AT_OPER_WRITE, 0, 30, 0, "%d", sqlite3_column_int(sql0, 3));
+											pg_atcommand_queue_prepend(ch_gsm, AT_CMGS, AT_OPER_WRITE, 0, 20, 0, "%d", sqlite3_column_int(sql0, 3));
 											ast_verb(4, "GSM channel=\"%s\": send pdu to \"%s%s\"\n", ch_gsm->alias, (sqlite3_column_int(sql0, 4) == 145)?("+"):(""), sqlite3_column_text(sql0, 5));
 										}
 									}
@@ -11782,7 +11796,7 @@ pg_gsm_indicate_srcupdate_end:
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		default:
-			ast_verb(4, "GSM channel=\"%s\": call line=%d unknown=%d\n", ch_gsm->alias, call->line, condition);
+			ast_verb(4, "GSM channel=\"%s\": call line=%d unknown indicate=%d\n", ch_gsm->alias, call->line, condition);
 			res = -1;
 			break;
 	}

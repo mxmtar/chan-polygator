@@ -4,7 +4,7 @@
 AC_PREREQ([2.60])
 
 # set project attribute
-AC_INIT([chan-polygator], [1.0.3])
+AC_INIT([chan-polygator], [1.0.4])
 
 AM_INIT_AUTOMAKE([-Wall -Werror])
 
