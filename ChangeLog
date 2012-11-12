@@ -20,3 +20,5 @@ Fix SMS PDU receiving function.
 26.10.12
 Add SMS management command support.
 CLI> polygator channel gsm <alias> sms ...
+12.11.12
+Improved SIM card poll functionality - preparing to SIM bank/server.

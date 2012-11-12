@@ -37,6 +37,18 @@ do { \
 	} \
 } while(0)
 
+#define tv_sub(_tv_1, _tv_2) \
+({ \
+	struct timeval __res; \
+	__res.tv_sec = _tv_1.tv_sec - _tv_2.tv_sec; \
+	__res.tv_usec = _tv_1.tv_usec - _tv_2.tv_usec; \
+	if (__res.tv_usec < 0) { \
+		__res.tv_usec += 1000000; \
+		__res.tv_sec -= 1; \
+	} \
+	__res; \
+})
+
 #define tv_cmp(_tv_1, _tv_2) \
 ({ \
 	int __res = 0; \
@@ -96,7 +108,7 @@ do { \
 	int __res = 0; \
 	struct timeval __curr_time; \
 	gettimeofday(&__curr_time, NULL); \
-	if ((tv_cmp(_timer.expires, __curr_time) > 0) && (tv_cmp(_timer.start, __curr_time) < 0)) \
+	if ((tv_cmp(_timer.expires, __curr_time) > 0) && (tv_cmp(_timer.start, __curr_time) <= 0)) \
 		__res = 1; \
 	else \
 		__res = 0; \
@@ -108,7 +120,7 @@ do { \
 	int __res = 0; \
 	struct timeval __curr_time; \
 	gettimeofday(&__curr_time, NULL); \
-	if ((tv_cmp(_timer.expires, __curr_time) > 0) && (tv_cmp(_timer.start, __curr_time) < 0)) \
+	if ((tv_cmp(_timer.expires, __curr_time) > 0) && (tv_cmp(_timer.start, __curr_time) <= 0)) \
 		__res = 0; \
 	else \
 		__res = 1; \

@@ -879,7 +879,7 @@ static struct timeval testviodown_timeout = {1, 0};
 static struct timeval onesec_timeout = {1, 0};
 static struct timeval zero_timeout = {0, 1000};
 static struct timeval simpoll_timeout = {2, 0};
-static struct timeval pinwait_timeout = {8, 0};
+static struct timeval pinwait_timeout = {16, 0};	// {8, 0}
 static struct timeval registering_timeout = {60, 0};
 
 static struct timeval proceeding_timeout = {5, 0};
@@ -5742,12 +5742,15 @@ static void *pg_channel_gsm_workthread(void *data)
 													ch_gsm->iccid_ban = ast_strdup(ch_gsm->iccid_ban);
 												}
 											}
+
 											// disable GSM module functionality
 											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-											//
+
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-											// start simpoll timer
+
+											// wake up SIM
+											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 											x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 										} else if ((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) {
 											// "1" home network, "5" roaming
@@ -5838,7 +5841,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CPIN:
-							if (!strncasecmp(r_buf, "+CPIN:", 6)) {
+							if (is_str_begin_by(r_buf, "+CPIN:")) {
 								// stop pinwait timer
 								x_timer_stop(ch_gsm->timers.pinwait);
 								// processing response
@@ -5898,12 +5901,15 @@ static void *pg_channel_gsm_workthread(void *data)
 										//
 										if (ch_gsm->flags.sim_change)
 											ch_gsm->flags.sim_test = 1;
-										//
+
+										// disable GSM module functionality
 										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-										//
+
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+
 										// start simpoll timer
+										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 										x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 									} else if (!strcasecmp(r_buf, "+CPIN: READY")) {
 										// - PIN ready
@@ -5935,10 +5941,14 @@ static void *pg_channel_gsm_workthread(void *data)
 											// start waitsuspend timer
 											x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
 										} else if (ch_gsm->flags.sim_change) {
+											// disable GSM module functionality
 											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+
 											// start simpoll timer
+											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 											x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 										} else {
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_CALL_READY;
@@ -5981,12 +5991,14 @@ static void *pg_channel_gsm_workthread(void *data)
 										else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
 											pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 									} else if (!strcasecmp(r_buf, "+CPIN: SIM ERROR")) {
-										// - SIM ERROR
+										// disable GSM module functionality
 										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-										//
+
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-										// start simpoll timer
+
+										// wake up SIM
+										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 										x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 									}
 								} else if (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_SUSPEND) {
@@ -6087,9 +6099,14 @@ static void *pg_channel_gsm_workthread(void *data)
 										// start waitsuspend timer
 										x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
 									} else if (ch_gsm->flags.sim_change) {
+										// disable GSM module functionality
 										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
-										// start simpoll timer
+										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+
+										// wake up SIM
+										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 										x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 									} else {
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_CALL_READY;
@@ -6112,10 +6129,14 @@ static void *pg_channel_gsm_workthread(void *data)
 										// start waitsuspend timer
 										x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
 									} else if (ch_gsm->flags.sim_change) {
+										// disable GSM module functionality
 										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-										// start simpoll timer
+
+										// wake up SIM
+										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 										x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 									} else {
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_CALL_READY;
@@ -7155,11 +7176,14 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->ber = 99;
 // 												// reset attempts count
 // 												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
-												if(ch_gsm->flags.sim_change)
+												if (ch_gsm->flags.sim_change)
 													ch_gsm->flags.sim_test = 1;
 												// start simpoll timer
-												if(ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND)
+												if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND) {
+													// wake up SIM
+													pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 													x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+												}
 											}
 										}
 										ch_gsm->flags.sim_inserted = parser_ptrs.sim300_csmins_rd->sim_inserted;
@@ -7530,7 +7554,7 @@ static void *pg_channel_gsm_workthread(void *data)
 												if(ch_gsm->flags.sim_change)
 													ch_gsm->flags.sim_test = 1;
 												// start simpoll timer
-												if(ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND)
+												if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND)
 													x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 											}
 										}
@@ -7871,7 +7895,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				}
 			} // end of CFUN
 			// CPIN
-			else if (!strncasecmp(r_buf, "+CPIN:", 6)) {
+			else if (is_str_begin_by(r_buf, "+CPIN:")) {
 				// stop pinwait timer
 				x_timer_stop(ch_gsm->timers.pinwait);
 				//
@@ -7931,12 +7955,15 @@ static void *pg_channel_gsm_workthread(void *data)
 						//
 						if (ch_gsm->flags.sim_change)
 							ch_gsm->flags.sim_test = 1;
+
 						//
 						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-						//
+
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-						// start simpoll timer
+
+						// wake up SIM
+						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 						x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 					} else if (!strcasecmp(r_buf, "+CPIN: READY")) {
 						// - PIN ready
@@ -7968,10 +7995,13 @@ static void *pg_channel_gsm_workthread(void *data)
 							// start waitsuspend timer
 							x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
 						} else if (ch_gsm->flags.sim_change) {
+							//
 							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+							//
 							ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-							// start simpoll timer
+							// wake up SIM
+							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 							x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 						} else {
 							ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_CALL_READY;
@@ -8019,13 +8049,15 @@ static void *pg_channel_gsm_workthread(void *data)
 						else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
 							pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					} else if (!strcasecmp(r_buf, "+CPIN: SIM ERROR")) {
-						// - SIM ERROR
+
 						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-						//
+
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-						// start simpoll timer
+
+						// wake up SIM
 						x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 					}
 				} else if (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_SUSPEND) {
 					if (!strcasecmp(r_buf, "+CPIN: NOT READY")) {
@@ -8586,13 +8618,13 @@ static void *pg_channel_gsm_workthread(void *data)
 			if (is_x_timer_fired(ch_gsm->timers.callready)) {
 				// callready timer fired
 				ast_log(LOG_WARNING, "GSM channel=\"%s\": callready timer fired\n", ch_gsm->alias);
+				// stop callready timer
+				x_timer_stop(ch_gsm->timers.callready);
 				// set restart flag
 				if (!ch_gsm->flags.shutdown_now && !ch_gsm->flags.restart_now) {
 					ch_gsm->flags.restart = 1;
 					ch_gsm->flags.restart_now = 1;
 				}
-				// stop callready timer
-				x_timer_stop(ch_gsm->timers.callready);
 			}
 		}
 		// registering
@@ -8604,14 +8636,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				x_timer_stop(ch_gsm->timers.registering);
 				// try to disable GSM module full functionality
 				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-				// check is sim present
-				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
-					pg_atcommand_queue_append(ch_gsm, AT_SIM300_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-					pg_atcommand_queue_append(ch_gsm, AT_SIM900_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				else if(ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
-					pg_atcommand_queue_append(ch_gsm, AT_M10_QSIMSTAT, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				//
+
 				if (ch_gsm->flags.suspend_now) {
 					// stop all timers
 					memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
@@ -8621,8 +8646,11 @@ static void *pg_channel_gsm_workthread(void *data)
 					ch_gsm->flags.suspend_now = 0;
 				}
 				// start simpoll timer
-				if(ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND)
+				if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND) {
+					// wake up SIM
+					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+				}
 			}
 		}
 		// testfun
@@ -8818,12 +8846,15 @@ static void *pg_channel_gsm_workthread(void *data)
 				// stop waitsuspend timer
 				x_timer_stop(ch_gsm->timers.waitsuspend);
 				//
-				if(ch_gsm->flags.sim_inserted) // start pinwait timer
+				if (ch_gsm->flags.sim_inserted) // start pinwait timer
 					x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
-				else // start simpoll timer
+				else {
+					// wake up SIM
+					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 				}
 			}
+		}
 		// call timers
 		AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
 		{
@@ -8884,6 +8915,29 @@ static void *pg_channel_gsm_workthread(void *data)
 					ast_verbose("GSM channel=\"%s\": module return from suspend state\n", ch_gsm->alias);
 					ch_gsm->flags.resume_now = 0;
 				}
+				// check PIN status
+				pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
+				// next mgmt state -- check for SIM is READY
+				if (ch_gsm->state != PG_CHANNEL_GSM_STATE_CHECK_PIN) {
+					ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
+					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+				}
+				// start pinwait timer
+				x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
+			}
+		}
+		// simpoll
+		if (is_x_timer_enable(ch_gsm->timers.simpoll)) {
+			if (is_x_timer_fired(ch_gsm->timers.simpoll)) {
+				// simpoll timer fired
+				ast_verb(5, "GSM channel=\"%s\": simpoll timer fired\n", ch_gsm->alias);
+				// stop simpoll timer
+				x_timer_stop(ch_gsm->timers.simpoll);
+				//
+				if (ch_gsm->flags.resume_now) {
+					ast_verbose("GSM channel=\"%s\": module return from suspend state\n", ch_gsm->alias);
+					ch_gsm->flags.resume_now = 0;
+				}
 				// check is sim present
 				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
 					pg_atcommand_queue_append(ch_gsm, AT_SIM300_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
@@ -8912,14 +8966,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				x_timer_stop(ch_gsm->timers.pinwait);
 				// try to disable GSM module full functionality
 				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-				// check is sim present
-				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
-					pg_atcommand_queue_append(ch_gsm, AT_SIM300_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-					pg_atcommand_queue_append(ch_gsm, AT_SIM900_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				else if(ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
-					pg_atcommand_queue_append(ch_gsm, AT_M10_QSIMSTAT, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				//
+
 				if (ch_gsm->flags.suspend_now) {
 					// stop all timers
 					memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
@@ -8928,9 +8975,12 @@ static void *pg_channel_gsm_workthread(void *data)
 					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 					ch_gsm->flags.suspend_now = 0;
 				}
-				// start simpoll timer
-				if(ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND)
+
+				if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND) {
+					// wake up SIM
+					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+				}
 			}
 		}
 		// smssend
@@ -9712,13 +9762,12 @@ static void *pg_channel_gsm_workthread(void *data)
 				ast_verb(4, "GSM channel=\"%s\": serial port work at speed = %d baud\n", ch_gsm->alias, ch_gsm->baudrate);
 // 				pg_atcommand_queue_append(ch_gsm, AT_UNKNOWN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "AT+IPR=%d;&W", ch_gsm->baudrate);
 
-				// disable GSM module functionality
 				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 
-				// try to run normal functionality
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-				// start simpoll timer
+				// wake up SIM
+				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 				x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 				break;
 			//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -12952,6 +13001,28 @@ static char *pg_cli_generate_complete_channel_gsm_ali_nelec_nlpm(const char *beg
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_gsm_show_detail()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_gsm_show_detail(const char *begin, int count)
+{
+	char *res;
+	int beginlen;
+	int which;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	if ((!res) && (!strncmp(begin, "timers", beginlen)) && (++which > count))
+		res = ast_strdup("timers");
+
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_gsm_show_detail()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_generate_complete_sms_group()
 //------------------------------------------------------------------------------
 static char *pg_cli_generate_complete_sms_group(const char *begin, int count)
@@ -14156,13 +14227,15 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator show channel gsm";
-			e->usage = "Usage: polygator show channel gsm <channel>\n";
+			e->usage = "Usage: polygator show channel gsm <channel> [<detail>]\n";
 			return NULL;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_GENERATE:
 			// try to generate complete channel name
 			if (a->pos == 4)
 				return pg_cli_generate_complete_channel_gsm_name(a->word, a->n, 0);
+			else if (a->pos == 5)
+				return pg_cli_generate_complete_channel_gsm_show_detail(a->word, a->n);
 			return NULL;
 	}
 
@@ -14174,61 +14247,99 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 		ast_mutex_lock(&ch_gsm->lock);
 
 		ast_cli(a->fd, "  Channel \"%s\"\n", ch_gsm->alias);
-		ast_cli(a->fd, "  -- device = %s\n", ch_gsm->device);
-		ast_cli(a->fd, "  -- TTY device = %s\n", ch_gsm->tty_path);
-		ast_cli(a->fd, "  -- SIM device = %s\n", ch_gsm->sim_path);
-		ast_cli(a->fd, "  -- module = %s\n", pg_gsm_module_type_to_string(ch_gsm->gsm_module_type));
-		ast_cli(a->fd, "  -- power = %s\n", ch_gsm->flags.power?"on":"off");
-		ast_cli(a->fd, "  -- status = %s\n", ch_gsm->flags.enable?"enabled":"disabled");
-		ast_cli(a->fd, "  -- state = %s\n",  pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-#if 0
-		sprintf(buf, "%p", (void *)chnl->channel_thread);
-		ast_cli(a->fd, "  -- thread = %s\n", (chnl->channel_thread == AST_PTHREADT_NULL)?("null"):(buf));
-#endif
-		ast_cli(a->fd, "  -- IMEI = %s\n", strlen(ch_gsm->imei)?ch_gsm->imei:"unknown");
-		ast_cli(a->fd, "  -- SIM = %s\n", ch_gsm->flags.sim_inserted?"inserted":"removed");
-		ast_cli(a->fd, "  -- ICCID = %s\n", ch_gsm->iccid?ch_gsm->iccid:"unknown");
-		ast_cli(a->fd, "  -- IMSI = %s\n", ch_gsm->imsi?ch_gsm->imsi:"unknown");
-		ast_cli(a->fd, "  -- operator = %s (%s)\n", ch_gsm->operator_name?ch_gsm->operator_name:"unknown", ch_gsm->operator_code?ch_gsm->operator_code:"unknown");
-		ast_cli(a->fd, "  -- registration status = %s\n", ch_gsm->flags.sim_inserted?reg_status_print(ch_gsm->reg_stat):"unknown");
-		ast_cli(a->fd, "  -- number = %s\n", ch_gsm->flags.sim_inserted?address_show(buf, &ch_gsm->subscriber_number, 1):"unknown");
-		ast_cli(a->fd, "  -- RSSI = %s\n", ch_gsm->flags.sim_inserted?rssi_print(buf, ch_gsm->rssi):"unknown");
-		ast_cli(a->fd, "  -- BER = %s\n", ch_gsm->flags.sim_inserted?ber_print(ch_gsm->ber):"unknown");
-		ast_cli(a->fd, "  -- call wait state = %s\n", ch_gsm->flags.sim_inserted?pg_callwait_state_to_string(ch_gsm->callwait):"unknown");
-		ast_cli(a->fd, "  -- CLIR state = %s\n", ch_gsm->flags.sim_inserted?pg_clir_state_to_string(ch_gsm->clir):"unknown");
-		ast_cli(a->fd, "  -- CLIR status = %s\n", ch_gsm->flags.sim_inserted?pg_clir_status_to_string(ch_gsm->clir_status):"unknown");
-// 		ast_cli(a->fd, "  -- balance request string = %s\n", ch_gsm->config.balance_request?ch_gsm->config.balance_request:"unknown");
-// 		ast_cli(a->fd, "  -- balance = [%s]\n", ch_gsm->balance?ch_gsm->balance:"unknown");
-		ast_cli(a->fd, "  -- outgoing = %s\n", pg_call_gsm_outgoing_to_string(ch_gsm->config.outgoing_type));
-		ast_cli(a->fd, "  -- incoming = %s\n", pg_call_gsm_incoming_type_to_string(ch_gsm->config.incoming_type));
-		if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_SPEC)
-		  ast_cli(a->fd, "  -- incomingto = %s\n", ch_gsm->config.gsm_call_extension);
-		ast_cli(a->fd, "  -- context = %s\n", ch_gsm->config.gsm_call_context);
 
+		if (a->argc == 5) {
+			// summary
+			ast_cli(a->fd, "  -- device = %s\n", ch_gsm->device);
+			ast_cli(a->fd, "  -- TTY device = %s\n", ch_gsm->tty_path);
+			ast_cli(a->fd, "  -- SIM device = %s\n", ch_gsm->sim_path);
+			ast_cli(a->fd, "  -- module = %s\n", pg_gsm_module_type_to_string(ch_gsm->gsm_module_type));
+			ast_cli(a->fd, "  -- power = %s\n", ch_gsm->flags.power?"on":"off");
+			ast_cli(a->fd, "  -- status = %s\n", ch_gsm->flags.enable?"enabled":"disabled");
+			ast_cli(a->fd, "  -- state = %s\n",  pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 #if 0
-		ast_cli(a->fd, "  -- last incoming call time = %s (%ld sec)\n",
+			sprintf(buf, "%p", (void *)chnl->channel_thread);
+			ast_cli(a->fd, "  -- thread = %s\n", (chnl->channel_thread == AST_PTHREADT_NULL)?("null"):(buf));
+#endif
+			ast_cli(a->fd, "  -- IMEI = %s\n", strlen(ch_gsm->imei)?ch_gsm->imei:"unknown");
+			ast_cli(a->fd, "  -- SIM = %s\n", ch_gsm->flags.sim_inserted?"inserted":"removed");
+			ast_cli(a->fd, "  -- ICCID = %s\n", ch_gsm->iccid?ch_gsm->iccid:"unknown");
+			ast_cli(a->fd, "  -- IMSI = %s\n", ch_gsm->imsi?ch_gsm->imsi:"unknown");
+			ast_cli(a->fd, "  -- operator = %s (%s)\n", ch_gsm->operator_name?ch_gsm->operator_name:"unknown", ch_gsm->operator_code?ch_gsm->operator_code:"unknown");
+			ast_cli(a->fd, "  -- registration status = %s\n", ch_gsm->flags.sim_inserted?reg_status_print(ch_gsm->reg_stat):"unknown");
+			ast_cli(a->fd, "  -- number = %s\n", ch_gsm->flags.sim_inserted?address_show(buf, &ch_gsm->subscriber_number, 1):"unknown");
+			ast_cli(a->fd, "  -- RSSI = %s\n", ch_gsm->flags.sim_inserted?rssi_print(buf, ch_gsm->rssi):"unknown");
+			ast_cli(a->fd, "  -- BER = %s\n", ch_gsm->flags.sim_inserted?ber_print(ch_gsm->ber):"unknown");
+			ast_cli(a->fd, "  -- call wait state = %s\n", ch_gsm->flags.sim_inserted?pg_callwait_state_to_string(ch_gsm->callwait):"unknown");
+			ast_cli(a->fd, "  -- CLIR state = %s\n", ch_gsm->flags.sim_inserted?pg_clir_state_to_string(ch_gsm->clir):"unknown");
+			ast_cli(a->fd, "  -- CLIR status = %s\n", ch_gsm->flags.sim_inserted?pg_clir_status_to_string(ch_gsm->clir_status):"unknown");
+// 			ast_cli(a->fd, "  -- balance request string = %s\n", ch_gsm->config.balance_request?ch_gsm->config.balance_request:"unknown");
+// 			ast_cli(a->fd, "  -- balance = [%s]\n", ch_gsm->balance?ch_gsm->balance:"unknown");
+			ast_cli(a->fd, "  -- outgoing = %s\n", pg_call_gsm_outgoing_to_string(ch_gsm->config.outgoing_type));
+			ast_cli(a->fd, "  -- incoming = %s\n", pg_call_gsm_incoming_type_to_string(ch_gsm->config.incoming_type));
+			if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_SPEC)
+			  ast_cli(a->fd, "  -- incomingto = %s\n", ch_gsm->config.gsm_call_extension);
+			ast_cli(a->fd, "  -- context = %s\n", ch_gsm->config.gsm_call_context);
+#if 0
+			ast_cli(a->fd, "  -- last incoming call time = %s (%ld sec)\n",
 				eggsm_second_to_dhms(buf, chnl->last_time_incoming), chnl->last_time_incoming);
-		ast_cli(a->fd, "  -- last outgoing call time = %s (%ld sec)\n",
+			ast_cli(a->fd, "  -- last outgoing call time = %s (%ld sec)\n",
 				eggsm_second_to_dhms(buf, chnl->last_time_outgoing), chnl->last_time_outgoing);
 
-		ast_cli(a->fd, "  -- total incoming call time = %s (%ld sec)\n",
+			ast_cli(a->fd, "  -- total incoming call time = %s (%ld sec)\n",
 				eggsm_second_to_dhms(buf, chnl->call_time_incoming), chnl->call_time_incoming);
-		ast_cli(a->fd, "  -- total outgoing call time = %s (%ld sec)\n",
+			ast_cli(a->fd, "  -- total outgoing call time = %s (%ld sec)\n",
 				eggsm_second_to_dhms(buf, chnl->call_time_outgoing), chnl->call_time_outgoing);
-		ast_cli(a->fd, "  -- total call time = %s (%ld sec)\n",
-				eggsm_second_to_dhms(buf, (chnl->call_time_incoming + chnl->call_time_outgoing)),
-										(chnl->call_time_incoming + chnl->call_time_outgoing));
+			ast_cli(a->fd, "  -- total call time = %s (%ld sec)\n",
+				eggsm_second_to_dhms(buf, (chnl->call_time_incoming + chnl->call_time_outgoing)), (chnl->call_time_incoming + chnl->call_time_outgoing));
 
-		ast_cli(a->fd, "  -- TX pass (last) = %u frames\n", chnl->send_frame_curr);
-		ast_cli(a->fd, "  -- TX drop (last) = %u frames\n", chnl->send_drop_curr);
-		ast_cli(a->fd, "  -- TX sid (last) = %u frames\n", chnl->send_sid_curr);
-		ast_cli(a->fd, "  -- RX (last) = %u frames\n", chnl->recv_frame_curr);
+			ast_cli(a->fd, "  -- TX pass (last) = %u frames\n", chnl->send_frame_curr);
+			ast_cli(a->fd, "  -- TX drop (last) = %u frames\n", chnl->send_drop_curr);
+			ast_cli(a->fd, "  -- TX sid (last) = %u frames\n", chnl->send_sid_curr);
+			ast_cli(a->fd, "  -- RX (last) = %u frames\n", chnl->recv_frame_curr);
 
-		ast_cli(a->fd, "  -- TX pass (total) = %u frames\n", chnl->send_frame_total);
-		ast_cli(a->fd, "  -- TX drop (total) = %u frames\n", chnl->send_drop_total);
-		ast_cli(a->fd, "  -- TX sid (total) = %u frames\n", chnl->send_sid_total);
-		ast_cli(a->fd, "  -- RX (total) = %u frames\n", chnl->recv_frame_total);
+			ast_cli(a->fd, "  -- TX pass (total) = %u frames\n", chnl->send_frame_total);
+			ast_cli(a->fd, "  -- TX drop (total) = %u frames\n", chnl->send_drop_total);
+			ast_cli(a->fd, "  -- TX sid (total) = %u frames\n", chnl->send_sid_total);
+			ast_cli(a->fd, "  -- RX (total) = %u frames\n", chnl->recv_frame_total);
 #endif
+		} else if ((a->argc >= 6) && (!strcmp(a->argv[5], "timers"))) {
+			ast_cli(a->fd, "  -- timers:\n");
+
+#define CHANNEL_GSM_TIMER_INFO(_timer) \
+do { \
+		if (is_x_timer_enable(ch_gsm->timers._timer)) { \
+			ast_cli(a->fd, "  --   %s: run", #_timer); \
+			if (is_x_timer_active(ch_gsm->timers._timer)) { \
+				struct timeval __sub_tv; \
+				struct timeval __cur_tv; \
+				gettimeofday(&__cur_tv, NULL); \
+				__sub_tv = tv_sub(ch_gsm->timers._timer.expires, __cur_tv); \
+				ast_cli(a->fd, " expire at %ld.%ld\n", __sub_tv.tv_sec, __sub_tv.tv_usec); \
+			} else \
+				ast_cli(a->fd, " fired\n"); \
+		} else \
+			ast_cli(a->fd, "  --   %s: stop\n", #_timer); \
+} while (0)
+
+			CHANNEL_GSM_TIMER_INFO(waitrdy);
+			CHANNEL_GSM_TIMER_INFO(waitsuspend);
+			CHANNEL_GSM_TIMER_INFO(testfun);
+			CHANNEL_GSM_TIMER_INFO(testfunsend);
+			CHANNEL_GSM_TIMER_INFO(callready);
+			CHANNEL_GSM_TIMER_INFO(runquartersecond);
+			CHANNEL_GSM_TIMER_INFO(runhalfsecond);
+			CHANNEL_GSM_TIMER_INFO(runonesecond);
+			CHANNEL_GSM_TIMER_INFO(runfivesecond);
+			CHANNEL_GSM_TIMER_INFO(runhalfminute);
+			CHANNEL_GSM_TIMER_INFO(runoneminute);
+			CHANNEL_GSM_TIMER_INFO(waitviodown);
+			CHANNEL_GSM_TIMER_INFO(testviodown);
+			CHANNEL_GSM_TIMER_INFO(smssend);
+			CHANNEL_GSM_TIMER_INFO(simpoll);
+			CHANNEL_GSM_TIMER_INFO(pinwait);
+			CHANNEL_GSM_TIMER_INFO(registering);
+		}
 		ast_mutex_unlock(&ch_gsm->lock);
 	} else
 		ast_cli(a->fd, "  Channel <%s> not found\n", a->argv[4]);
@@ -14704,13 +14815,13 @@ static char *pg_cli_channel_gsm_action_suspend_resume(struct ast_cli_entry *e, i
 				// resume
 				ast_cli(a->fd, "resume...\n");
 				if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SUSPEND) {
+					// wake up SIM
+					ch_gsm->flags.resume_now = 1;
 					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
-					pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
+					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+					// set new state
 					ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
 					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-					ch_gsm->flags.resume_now = 1;
-					// start simpoll timer
-					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 				} else
 					ast_cli(a->fd, " switching to run state from \"%s\" not allowed\n", pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 			}
@@ -15486,12 +15597,11 @@ pg_channel_gsm_imei_set_end:
 								ast_cli(a->fd, "  GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
 							// restore previous state
 							if (old_state == PG_CHANNEL_GSM_STATE_RUN) {
-								pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
-								pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
 								ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
 								ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 								ch_gsm->flags.resume_now = 1;
-								// start simpoll timer
+								// wake up SIM
+								pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 								x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 							}
 							break;
