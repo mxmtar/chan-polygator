@@ -22,3 +22,5 @@ Add SMS management command support.
 CLI> polygator channel gsm <alias> sms ...
 12.11.12
 Improved SIM card poll functionality - preparing to SIM bank/server.
+13.11.12
+Fix SMS corruption on AT+CMD and +CMT +CDS send/recv simultaneously.

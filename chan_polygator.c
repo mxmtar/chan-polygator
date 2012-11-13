@@ -2619,6 +2619,57 @@ static time_t pg_cdr_table_get_out_active_call_duration(const char *key, const c
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cdr_table_get_out_call_starttime()
+//------------------------------------------------------------------------------
+static time_t pg_cdr_table_get_out_call_starttime(const char *key, const char *value, ast_mutex_t *lock)
+{
+	char *str0;
+	int res;
+	sqlite3_stmt *sql0;
+
+	time_t start_time;
+
+	if (!key || !value)
+		return 0;
+
+	ast_mutex_lock(&pg_cdr_db_lock);
+
+	start_time = 0;
+	str0 = sqlite3_mprintf("SELECT starttime FROM 'cdr' WHERE %q='%q' AND direction=%d ORDER BY starttime;", key, value, PG_CALL_GSM_DIRECTION_OUTGOING);
+	res = sqlite3_prepare_fun(pg_cdr_db, str0, strlen(str0), &sql0, NULL);
+	if (res == SQLITE_OK) {
+		while (1)
+		{
+			res = sqlite3_step(sql0);
+			if (res == SQLITE_ROW) {
+				start_time = sqlite3_column_int64(sql0, 0);
+				break;
+			} else if (res == SQLITE_DONE)
+				break;
+			else if(res == SQLITE_BUSY) {
+				if (lock) ast_mutex_unlock(lock);
+				usleep(1000);
+				if (lock) ast_mutex_lock(lock);
+				continue;
+			} else {
+				ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_cdr_db));
+				break;
+			}
+		}
+		sqlite3_finalize(sql0);
+	} else
+		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_cdr_db));
+	sqlite3_free(str0);
+
+	ast_mutex_unlock(&pg_cdr_db_lock);
+
+	return start_time;
+}
+//------------------------------------------------------------------------------
+// end of pg_cdr_table_get_out_call_starttime()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_get_board_by_name()
 //------------------------------------------------------------------------------
 static struct pg_board *pg_get_board_by_name(const char *name)
@@ -5025,6 +5076,11 @@ static void *pg_channel_gsm_workthread(void *data)
 				} else if (r_len < 0) {
 					if (errno != EAGAIN) {
 						ast_log(LOG_ERROR, "GSM channel=\"%s\": read error: %s\n", ch_gsm->alias, strerror(errno));
+						r_buf[0] = '\0';
+						r_cptr = r_buf;
+						r_buf_len = 0;
+						r_buf_valid = 0;
+						r_buf_active = 0;
 					}
 				}
 			}
@@ -8134,7 +8190,6 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (is_str_digit(str0)) {
 						ch_gsm->pdu_len = atoi(str0);
 						ch_gsm->pdu_cmt_wait = 1;
-						tcflush(ch_gsm->tty_fd, TCIOFLUSH);
 					}
 				}
 			}
@@ -8492,7 +8547,6 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (is_str_digit(str0)) {
 						ch_gsm->pdu_len = atoi(str0);
 						ch_gsm->pdu_cds_wait = 1;
-						tcflush(ch_gsm->tty_fd, TCIOFLUSH);
 					}
 				}
 			}
@@ -13736,8 +13790,12 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 {
 	struct pg_channel_gsm *ch_gsm;
 
+	char *key, *value;
+
 	struct timeval tv_begin, tv_end;
 	struct ast_tm tm_begin, tm_end;
+
+	time_t start_time, tmp_time;
 
 	size_t count;
 	size_t total;
@@ -13776,6 +13834,7 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 	if(a->argc < 6)
 		return CLI_SHOWUSAGE;
 
+	start_time = 0;
 	tv_set(tv_begin, 0, 0);
 	gettimeofday(&tv_end, NULL);
 
@@ -13797,14 +13856,6 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 		tv_end = ast_mktime(&tm_end, NULL); 
 	}
 
-	if (tv_begin.tv_sec) {
-		ast_localtime(&tv_begin, &tm_begin, NULL);
-		ast_strftime(frombuf, sizeof(frombuf), "%Y-%m-%d %H:%M:%S", &tm_begin);
-	} else
-		snprintf(frombuf, sizeof(frombuf), "begin");
-	ast_localtime(&tv_end, &tm_end, NULL);
-	ast_strftime(tobuf, sizeof(tobuf), "%Y-%m-%d %H:%M:%S", &tm_end);
-
 	total = 0;
 	count = 0;
 	number_fl = strlen("#");
@@ -13820,13 +13871,25 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 		ast_mutex_lock(&ch_gsm->lock);
 
 		if (ch_gsm->imsi) {
-			ch_gsm->out_total_call_count = pg_cdr_table_get_out_total_call_count("imsi", ch_gsm->imsi, tv_begin.tv_sec, tv_end.tv_sec, NULL);
-			ch_gsm->out_answered_call_count = pg_cdr_table_get_out_answered_call_count("imsi", ch_gsm->imsi, tv_begin.tv_sec, tv_end.tv_sec, NULL);
-			ch_gsm->out_active_call_duration = pg_cdr_table_get_out_active_call_duration("imsi", ch_gsm->imsi, tv_begin.tv_sec, tv_end.tv_sec, NULL);
+			key = "imsi";
+			value = ch_gsm->imsi;
 		} else {
-			ch_gsm->out_total_call_count = pg_cdr_table_get_out_total_call_count("channel", ch_gsm->device, tv_begin.tv_sec, tv_end.tv_sec, NULL);
-			ch_gsm->out_answered_call_count = pg_cdr_table_get_out_answered_call_count("channel", ch_gsm->device, tv_begin.tv_sec, tv_end.tv_sec, NULL);
-			ch_gsm->out_active_call_duration = pg_cdr_table_get_out_active_call_duration("channel", ch_gsm->device, tv_begin.tv_sec, tv_end.tv_sec, NULL);
+			key = "channel";
+			value = ch_gsm->device;
+		}
+
+		ch_gsm->out_total_call_count = pg_cdr_table_get_out_total_call_count(key, value, tv_begin.tv_sec, tv_end.tv_sec, NULL);
+		ch_gsm->out_answered_call_count = pg_cdr_table_get_out_answered_call_count(key, value, tv_begin.tv_sec, tv_end.tv_sec, NULL);
+		ch_gsm->out_active_call_duration = pg_cdr_table_get_out_active_call_duration(key, value, tv_begin.tv_sec, tv_end.tv_sec, NULL);
+
+		if (!tv_begin.tv_sec) {
+			tmp_time = pg_cdr_table_get_out_call_starttime(key, value, NULL);
+			if (tmp_time) {
+				if (start_time)
+					start_time = mmin(start_time, tmp_time);
+				else
+					start_time = tmp_time;
+			}
 		}
 
 		if (ch_gsm->out_answered_call_count)
@@ -13852,6 +13915,14 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 	}
 
 	if (count) {
+
+		if (!tv_begin.tv_sec && start_time) tv_begin.tv_sec = start_time;
+
+		ast_localtime(&tv_begin, &tm_begin, NULL);
+		ast_strftime(frombuf, sizeof(frombuf), "%Y-%m-%d %H:%M:%S", &tm_begin);
+		ast_localtime(&tv_end, &tm_end, NULL);
+		ast_strftime(tobuf, sizeof(tobuf), "%Y-%m-%d %H:%M:%S", &tm_end);
+
 		ast_cli(a->fd, "  Outgoing GSM call statistic from %s to %s\n", frombuf, tobuf);
 		ast_cli(a->fd, "  GSM channel%s:\n", ESS(count));
 		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
