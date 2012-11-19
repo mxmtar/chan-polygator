@@ -13797,6 +13797,8 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 
 	time_t start_time, tmp_time;
 
+	int amount;
+
 	size_t count;
 	size_t total;
 	
@@ -13818,6 +13820,15 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 	int acd_fl;
 	int asr_fl;
 
+	char *gline;
+	char *gargv[AST_MAX_ARGS];
+	int gargc;
+
+	static const char * const choices_pos6[] = { "last",  "from", "to", NULL };
+	static const char * const choices_pos7[] = { "hour", "day", "week", NULL };
+	static const char * const choices_pos8_from[] = { "to", NULL };
+	static const char * const choices_pos8_last[] = { "minutes", "hours", "days", "weeks", NULL };
+
 	switch (cmd)
 	{
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -13827,7 +13838,27 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 			return NULL;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_GENERATE:
-			return NULL;
+			gline = ast_strdupa(a->line);
+			if (!(pg_cli_generating_prepare(gline, &gargc, gargv))) {
+
+				if (a->pos == 6)
+    	    		return ast_cli_complete(a->word, choices_pos6, a->n);
+				else if (a->pos == 7)
+					return ast_cli_complete(a->word, choices_pos7, a->n);
+				else if (a->pos == 8) {
+					if (!strcmp(gargv[6], "last") && is_str_digit(gargv[7]))
+						return ast_cli_complete(a->word, choices_pos8_last, a->n);
+					else if (!strcmp(gargv[6], "from"))
+						return ast_cli_complete(a->word, choices_pos8_from, a->n);
+					else
+						return NULL;
+				} else
+					return NULL;
+			} else
+				return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		default:
+			break;
 	}
 
 	// check args count
@@ -13838,22 +13869,43 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 	tv_set(tv_begin, 0, 0);
 	gettimeofday(&tv_end, NULL);
 
-	if (a->argc == 7) {
-		if (!strcmp(a->argv[6], "hour")) {
-			tv_begin.tv_sec = tv_end.tv_sec - 60 * 60;
-		} else if (!strcmp(a->argv[6], "day")) {
-			tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * 24;
-		} else if (!strcmp(a->argv[6], "week")) {
-			tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * 24 * 7;
-		} else {
-			ast_strptime(a->argv[6], "%Y-%m-%d %H:%M:%S", &tm_begin);
+	if (a->argc == 8) {
+		if (!strcmp(a->argv[6], "last")) {
+			if (!strcmp(a->argv[7], "hour")) {
+				tv_begin.tv_sec = tv_end.tv_sec - 60 * 60;
+			} else if (!strcmp(a->argv[7], "day")) {
+				tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * 24;
+			} else if (!strcmp(a->argv[7], "week")) {
+				tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * 24 * 7;
+			}
+		} else if (!strcmp(a->argv[6], "from")) {
+			ast_strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", &tm_begin);
 			tv_begin = ast_mktime(&tm_begin, NULL); 
+		} else if (!strcmp(a->argv[6], "to")) {
+			ast_strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", &tm_end);
+			tv_end = ast_mktime(&tm_begin, NULL); 
 		}
-	} else if (a->argc == 8) {
-		ast_strptime(a->argv[6], "%Y-%m-%d %H:%M:%S", &tm_begin);
-		tv_begin = ast_mktime(&tm_begin, NULL); 
-		ast_strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", &tm_end);
-		tv_end = ast_mktime(&tm_end, NULL); 
+	} else if (a->argc == 9) {
+		if (!strcmp(a->argv[6], "last") && is_str_digit(a->argv[7])) {
+			if (sscanf(a->argv[7], "%d", &amount) == 1) {
+				if (!strcmp(a->argv[8], "minutes")) {
+					tv_begin.tv_sec = tv_end.tv_sec - 60 * amount;
+				} else if (!strcmp(a->argv[8], "hours")) {
+					tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * amount;
+				} else if (!strcmp(a->argv[8], "days")) {
+					tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * 24 * amount;
+				} else if (!strcmp(a->argv[8], "weeks")) {
+					tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * 24 * 7 * amount;
+				}
+			}
+		}
+	} else if (a->argc == 10) {
+		if ((!strcmp(a->argv[6], "from")) && (!strcmp(a->argv[8], "to"))) {
+			ast_strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", &tm_begin);
+			tv_begin = ast_mktime(&tm_begin, NULL); 
+			ast_strptime(a->argv[9], "%Y-%m-%d %H:%M:%S", &tm_end);
+			tv_end = ast_mktime(&tm_end, NULL); 
+		}
 	}
 
 	total = 0;

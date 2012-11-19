@@ -11,9 +11,9 @@ Improved call stat info getting command
 CLI> polygator show gsm call stat out - total stat
 CLI> polygator show gsm call stat out hour - last hour stat
 CLI> polygator show gsm call stat out day - last day stat
-CLI> polygator show gsm call stat out week - last week stat
-CLI> polygator show gsm call stat out week begin - stat of period from begin time to yet time.
-CLI> polygator show gsm call stat out week begin end - stat of period from begin time to end time.
+CLI> polygator show gsm call stat out - last week stat
+CLI> polygator show gsm call stat out begin - stat of period from begin time to yet time.
+CLI> polygator show gsm call stat out begin end - stat of period from begin time to end time.
 begin, end format is y-m-d h:m:s or shorter.
 25.10.12
 Fix SMS PDU receiving function.
@@ -24,3 +24,18 @@ CLI> polygator channel gsm <alias> sms ...
 Improved SIM card poll functionality - preparing to SIM bank/server.
 13.11.12
 Fix SMS corruption on AT+CMD and +CMT +CDS send/recv simultaneously.
+19.11.12
+Change CLI command interface gsm call stat info.
+CLI> polygator show gsm call stat out - total stat
+CLI> polygator show gsm call stat out last hour - last hour stat
+CLI> polygator show gsm call stat out last day - last day stat
+CLI> polygator show gsm call stat out last week - last week stat
+CLI> polygator show gsm call stat out last n minutes - last n minutes stat
+CLI> polygator show gsm call stat out last n hours - last n hours stat
+CLI> polygator show gsm call stat out last n days - last n days stat
+CLI> polygator show gsm call stat out last n weeks - last n weeks stat
+CLI> polygator show gsm call stat out from begin - stat of period from begin time to yet time.
+CLI> polygator show gsm call stat out to end - stat of period from stat begin time to end time.
+CLI> polygator show gsm call stat out from begin to end - stat of period from begin time to end time.
+n is integer value,
+begin, end format is y-m-d h:m:s or shorter.
