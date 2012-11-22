@@ -39,3 +39,5 @@ CLI> polygator show gsm call stat out to end - stat of period from stat begin ti
 CLI> polygator show gsm call stat out from begin to end - stat of period from begin time to end time.
 n is integer value,
 begin, end format is y-m-d h:m:s or shorter.
+22.11.12
+Improved SIM removing detection.

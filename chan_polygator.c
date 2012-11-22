@@ -4845,7 +4845,7 @@ static void *pg_channel_gsm_workthread(void *data)
 	struct pg_channel_gsm *ch_gsm = (struct pg_channel_gsm *)data;
 
 	ast_debug(4, "GSM channel=\"%s\": thread start\n", ch_gsm->alias);
-	ast_verbose("Polygator: GSM channel=\"%s\" enabled\n", ch_gsm->alias);
+	ast_verbose("%s: GSM channel=\"%s\" enabled\n", AST_MODULE, ch_gsm->alias);
 
 	ast_mutex_lock(&ch_gsm->lock);
 	res = ch_gsm->power_sequence_number;
@@ -5383,7 +5383,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 								// check for query
 								if (chnl->querysig.imei) {
-									ast_verbose("Polygator: GSM channel=\"%s\": qwery(imei): %s\n", ch_gsm->alias, chnl->imei);
+									ast_verbose("%s: GSM channel=\"%s\": qwery(imei): %s\n", ch_gsm->alias, chnl->imei);
 									chnl->querysig.imei = 0;
 								}
 #endif
@@ -5391,7 +5391,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 								// check for query
 								if (chnl->querysig.imei) {
-									ast_verbose("Polygator: GSM channel=\"%s\": qwery(imei): error\n", ch_gsm->alias);
+									ast_verbose("%s: GSM channel=\"%s\": qwery(imei): error\n", ch_gsm->alias);
 									chnl->querysig.imei = 0;
 								}
 #endif
@@ -5686,7 +5686,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 									// check for query
 									if(chnl->querysig.hidenum){
-										ast_verbose("Polygator: GSM channel=\"%s\": qwery(hidenum): error\n", ch_gsm->alias);
+										ast_verbose("%s: GSM channel=\"%s\": qwery(hidenum): error\n", ch_gsm->alias);
 										chnl->querysig.hidenum = 0;
 										}
 #endif
@@ -5696,7 +5696,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 									// check for query
 									if(chnl->querysig.hidenum){
-										ast_verbose("Polygator: GSM channel=\"%s\": qwery(hidenum): %s\n",
+										ast_verbose("%s: GSM channel=\"%s\": qwery(hidenum): %s\n",
 											ch_gsm->alias,
 											eggsm_hidenum_settings_str(chnl->hidenum_set));
 										chnl->querysig.hidenum = 0;
@@ -5714,7 +5714,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 								// check for query
 								if(chnl->querysig.hidenum){
-									ast_verbose("Polygator: GSM channel=\"%s\": qwery(hidenum): error\n", ch_gsm->alias);
+									ast_verbose("%s: GSM channel=\"%s\": qwery(hidenum): error\n", ch_gsm->alias);
 									chnl->querysig.hidenum = 0;
 									}
 #endif
@@ -5749,7 +5749,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								} else {
 									ch_gsm->reg_stat = parser_ptrs.creg_rd->stat;
 									if (ch_gsm->reg_stat_old != ch_gsm->reg_stat) {
-										ast_verbose("Polygator: GSM channel=\"%s\": registration status - %s\n", ch_gsm->alias, reg_status_print(ch_gsm->reg_stat));
+										ast_verbose("%s: GSM channel=\"%s\": registration status - %s\n", AST_MODULE, ch_gsm->alias, reg_status_print(ch_gsm->reg_stat));
 										// processing registaration status
 										if ((ch_gsm->reg_stat == REG_STAT_NOTREG_NOSEARCH) || (ch_gsm->reg_stat == REG_STAT_REG_DENIED)) {
 											// "0" no search, "3" denied
@@ -5786,11 +5786,11 @@ static void *pg_channel_gsm_workthread(void *data)
 													ch_gsm->reg_try_count--;
 												// check rest of attempt count
 												if (ch_gsm->reg_try_count != 0) {
-													ast_verbose("Polygator: GSM channel=\"%s\": try next attempt registration on BTS\n", ch_gsm->alias);
+													ast_verbose("%s: GSM channel=\"%s\": try next attempt registration on BTS\n", AST_MODULE, ch_gsm->alias);
 													if (ch_gsm->reg_try_count > 0)
-														ast_verbose("Polygator: GSM channel=\"%s\": remaining %d attempts\n", ch_gsm->alias, ch_gsm->reg_try_count);
+														ast_verbose("%s: GSM channel=\"%s\": remaining %d attempts\n", AST_MODULE, ch_gsm->alias, ch_gsm->reg_try_count);
 												} else { // attempts count fired
-													ast_verbose("Polygator: GSM channel=\"%s\": registration attempts count fired\n", ch_gsm->alias);
+													ast_verbose("%s: GSM channel=\"%s\": registration attempts count fired\n", AST_MODULE, ch_gsm->alias);
 													// set change sim signal
 													ch_gsm->flags.sim_change = 1;
 													// mark baned sim id
@@ -5837,7 +5837,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 										// check for query
 										if (chnl->querysig.gainin) {
-											ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainin): %d\n", ch_gsm->alias, rc);
+											ast_verbose("%s: GSM channel=\"%s\": qwery(gainin): %d\n", ch_gsm->alias, rc);
 											chnl->querysig.gainin = 0;
 										}
 #endif
@@ -5845,7 +5845,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 										// check for query
 										if(chnl->querysig.gainin){
-											ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainin): error\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": qwery(gainin): error\n", ch_gsm->alias);
 											chnl->querysig.gainin = 0;
 											}
 #endif
@@ -5855,7 +5855,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 								// check for query
 								if(chnl->querysig.gainin){
-									ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainin): error\n", ch_gsm->alias);
+									ast_verbose("%s: GSM channel=\"%s\": qwery(gainin): error\n", ch_gsm->alias);
 									chnl->querysig.gainin = 0;
 									}
 #endif
@@ -5948,9 +5948,9 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 											ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
 
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM removed\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": SIM removed\n", AST_MODULE, ch_gsm->alias);
 										} else if (!ch_gsm->flags.sim_startup)
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM not inserted\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": SIM not inserted\n", AST_MODULE, ch_gsm->alias);
 										//
 										ch_gsm->flags.sim_startup = 1;
 										ch_gsm->flags.sim_inserted = 0;
@@ -5970,9 +5970,9 @@ static void *pg_channel_gsm_workthread(void *data)
 									} else if (!strcasecmp(r_buf, "+CPIN: READY")) {
 										// - PIN ready
 										if (!ch_gsm->flags.sim_inserted)
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM inserted\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": SIM inserted\n", AST_MODULE, ch_gsm->alias);
 										if (!ch_gsm->flags.pin_accepted)
-											ast_verbose("Polygator: GSM channel=\"%s\": PIN ready\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": PIN ready\n", AST_MODULE, ch_gsm->alias);
 										// set SIM present flag
 										ch_gsm->flags.sim_startup = 1;
 										ch_gsm->flags.sim_inserted = 1;
@@ -6015,7 +6015,7 @@ static void *pg_channel_gsm_workthread(void *data)
 									} else if (!strcasecmp(r_buf, "+CPIN: SIM PIN")) {
 										// - PIN is required
 										if (!ch_gsm->flags.sim_inserted)
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM inserted\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": SIM inserted\n", AST_MODULE, ch_gsm->alias);
 											// set SIM present flag
 											ch_gsm->flags.sim_startup = 1;
 											ch_gsm->flags.sim_inserted = 1;
@@ -6032,7 +6032,7 @@ static void *pg_channel_gsm_workthread(void *data)
 									} else if (!strcasecmp(r_buf, "+CPIN: SIM PUK")) {
 										// - PUK is required
 										if (!ch_gsm->flags.sim_inserted)
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM inserted\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": SIM inserted\n", AST_MODULE, ch_gsm->alias);
 										// set SIM present flag
 										ch_gsm->flags.sim_startup = 1;
 										ch_gsm->flags.sim_inserted = 1;
@@ -6062,7 +6062,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										// stop waitsuspend timer
 										x_timer_stop(ch_gsm->timers.waitsuspend);
 										//
-										ast_verbose("GSM channel=\"%s\": module switch to suspend state\n", ch_gsm->alias);
+										ast_verbose("%s: GSM channel=\"%s\": module switch to suspend state\n", AST_MODULE, ch_gsm->alias);
 										//
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -6098,7 +6098,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 									// check for query
 									if(chnl->querysig.callwait){
-										ast_verbose("Polygator: GSM channel=\"%s\": qwery(callwait): error\n", ch_gsm->alias);
+										ast_verbose("%s: GSM channel=\"%s\": qwery(callwait): error\n", ch_gsm->alias);
 										chnl->querysig.callwait = 0;
 										}
 #endif
@@ -6108,7 +6108,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 										// check for query
 										if(chnl->querysig.callwait){
-											ast_verbose("Polygator: GSM channel=\"%s\": qwery(callwait): %s\n",
+											ast_verbose("%s: GSM channel=\"%s\": qwery(callwait): %s\n",
 												ch_gsm->alias,
 												eggsm_callwait_status_str(chnl->callwait));
 											chnl->querysig.callwait = 0;
@@ -6128,7 +6128,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 								// check for query
 								if (chnl->querysig.callwait) {
-									ast_verbose("Polygator: GSM channel=\"%s\": qwery(callwait): error\n", ch_gsm->alias);
+									ast_verbose("%s: GSM channel=\"%s\": qwery(callwait): error\n", ch_gsm->alias);
 									chnl->querysig.callwait = 0;
 								}
 #endif
@@ -6142,7 +6142,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						case AT_CPIN:
 							if (strstr(r_buf, "OK")) {
 								if (ch_gsm->flags.pin_required) {
-									ast_verbose("Polygator: GSM channel=\"%s\": PIN accepted\n", ch_gsm->alias);
+									ast_verbose("%s: GSM channel=\"%s\": PIN accepted\n", AST_MODULE, ch_gsm->alias);
 									ch_gsm->flags.pin_required = 0;
 									ch_gsm->flags.pin_accepted = 1;
 									if (ch_gsm->flags.suspend_now) {
@@ -6171,7 +6171,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										x_timer_set(ch_gsm->timers.callready, callready_timeout);
 									}
 								} else if (ch_gsm->flags.puk_required) {
-									ast_verbose("Polygator: GSM channel=\"%s\": PUK accepted - PIN set to \"%s\"\n", ch_gsm->alias, ch_gsm->pin);
+									ast_verbose("%s: GSM channel=\"%s\": PUK accepted - PIN set to \"%s\"\n", AST_MODULE, ch_gsm->alias, ch_gsm->pin);
 									pg_set_pin_by_iccid(ch_gsm->iccid, ch_gsm->pin, &ch_gsm->lock);
 									ch_gsm->flags.puk_required = 0;
 									ch_gsm->flags.pin_accepted = 1;
@@ -6205,9 +6205,9 @@ static void *pg_channel_gsm_workthread(void *data)
 								res = -1;
 								sscanf(r_buf, "+CME ERROR: %d", &res);
 								if (ch_gsm->flags.pin_required) {
-									ast_verbose("Polygator: GSM channel=\"%s\": ICCID=\"%s\" PIN=\"%s\" not accepted: %s\n", ch_gsm->alias, ch_gsm->iccid?ch_gsm->iccid:"unknown", ch_gsm->pin?ch_gsm->pin:"unknown", cme_error_print(res));
+									ast_verbose("%s: GSM channel=\"%s\": ICCID=\"%s\" PIN=\"%s\" not accepted: %s\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid?ch_gsm->iccid:"unknown", ch_gsm->pin?ch_gsm->pin:"unknown", cme_error_print(res));
 								} else if (ch_gsm->flags.puk_required) {
-									ast_verbose("Polygator: GSM channel=\"%s\": ICCID=\"%s\" PUK=\"%s\" not accepted: %s\n", ch_gsm->alias, ch_gsm->iccid?ch_gsm->iccid:"unknown", ch_gsm->puk?ch_gsm->puk:"unknown", cme_error_print(res));
+									ast_verbose("%s: GSM channel=\"%s\": ICCID=\"%s\" PUK=\"%s\" not accepted: %s\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid?ch_gsm->iccid:"unknown", ch_gsm->puk?ch_gsm->puk:"unknown", cme_error_print(res));
 								}
 							}
 							break;
@@ -7106,7 +7106,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										} else {
 											// old SIM
 											if (ch_gsm->flags.sim_test) {
-												ast_verbose("Polygator: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", ch_gsm->alias);
+												ast_verbose("%s: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", AST_MODULE, ch_gsm->alias);
 												ch_gsm->flags.sim_test = 0;
 											}
 										}
@@ -7115,7 +7115,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										if ((ch_gsm->pin = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock))) {
 											pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\"", ch_gsm->pin);
 										} else {
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM ICCID=\"%s\" PIN required\n", ch_gsm->alias, ch_gsm->iccid);
+											ast_verbose("%s: GSM channel=\"%s\": SIM ICCID=\"%s\" PIN required\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid);
 										}
 									} else if (ch_gsm->flags.puk_required) {
 										if (ch_gsm->puk) ast_free(ch_gsm->puk);
@@ -7124,7 +7124,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											if (!ch_gsm->pin) ch_gsm->pin = ast_strdup("0000");
 											pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\",\"%s\"", ch_gsm->puk, ch_gsm->pin);
 										} else {
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM ICCID=\"%s\" PUK required\n", ch_gsm->alias, ch_gsm->iccid);
+											ast_verbose("%s: GSM channel=\"%s\": SIM ICCID=\"%s\" PUK required\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid);
 										}
 									}
 								}
@@ -7156,7 +7156,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 										// check for query
 										if(chnl->querysig.gainout){
-											ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
 											chnl->querysig.gainout = 0;
 											}
 #endif
@@ -7165,7 +7165,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 										// check for query
 										if(chnl->querysig.gainout){
-											ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainout): %d\n", ch_gsm->alias, chnl->gainout);
+											ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): %d\n", ch_gsm->alias, chnl->gainout);
 											chnl->querysig.gainout = 0;
 											}
 #endif
@@ -7174,7 +7174,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 									// check for query
 									if(chnl->querysig.gainout){
-										ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
+										ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
 										chnl->querysig.gainout = 0;
 										}
 #endif
@@ -7189,7 +7189,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										ast_log(LOG_ERROR, "GSM channel=\"%s\": at_sim300_csmins_read_parse(%.*s) error\n", ch_gsm->alias, r_buf_len, r_buf);
 									} else {
 										if (parser_ptrs.sim300_csmins_rd->sim_inserted != ch_gsm->flags.sim_inserted) {
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM %s\n", ch_gsm->alias, (parser_ptrs.sim300_csmins_rd->sim_inserted)?("inserted"):("removed"));
+											ast_verbose("%s: GSM channel=\"%s\": SIM %s\n", AST_MODULE, ch_gsm->alias, (parser_ptrs.sim300_csmins_rd->sim_inserted)?("inserted"):("removed"));
 											if (!parser_ptrs.sim300_csmins_rd->sim_inserted) {
 												// reset channel phone number
 												ast_copy_string(ch_gsm->subscriber_number.value, "unknown", MAX_ADDRESS_LENGTH);
@@ -7230,16 +7230,12 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->rssi = 99;
 												// reset ber value
 												ch_gsm->ber = 99;
-// 												// reset attempts count
-// 												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
+#if 0
+												// reset attempts count
+												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
+#endif
 												if (ch_gsm->flags.sim_change)
 													ch_gsm->flags.sim_test = 1;
-												// start simpoll timer
-												if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND) {
-													// wake up SIM
-													pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
-													x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
-												}
 											}
 										}
 										ch_gsm->flags.sim_inserted = parser_ptrs.sim300_csmins_rd->sim_inserted;
@@ -7293,7 +7289,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										} else {
 											// old SIM
 											if (ch_gsm->flags.sim_test) {
-												ast_verbose("Polygator: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", ch_gsm->alias);
+												ast_verbose("%s: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", AST_MODULE, ch_gsm->alias);
 												ch_gsm->flags.sim_test = 0;
 											}
 										}
@@ -7302,7 +7298,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										if ((ch_gsm->pin = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock))) {
 											pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\"", ch_gsm->pin);
 										} else {
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM ICCID=\"%s\" PIN required\n", ch_gsm->alias, ch_gsm->iccid);
+											ast_verbose("%s: GSM channel=\"%s\": SIM ICCID=\"%s\" PIN required\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid);
 										}
 									} else if (ch_gsm->flags.puk_required) {
 										if (ch_gsm->puk) ast_free(ch_gsm->puk);
@@ -7311,7 +7307,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											if (!ch_gsm->pin) ch_gsm->pin = ast_strdup("0000");
 											pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\",\"%s\"", ch_gsm->puk, ch_gsm->pin);
 										} else {
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM ICCID=\"%s\" PUK required\n", ch_gsm->alias, ch_gsm->iccid);
+											ast_verbose("%s: GSM channel=\"%s\": SIM ICCID=\"%s\" PUK required\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid);
 										}
 									}
 								}
@@ -7347,7 +7343,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 										// check for query
 										if(chnl->querysig.gainout){
-											ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
 											chnl->querysig.gainout = 0;
 											}
 #endif
@@ -7356,7 +7352,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 										// check for query
 										if(chnl->querysig.gainout){
-											ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainout): %d\n", ch_gsm->alias, chnl->gainout_curr);
+											ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): %d\n", ch_gsm->alias, chnl->gainout_curr);
 											chnl->querysig.gainout = 0;
 											}
 #endif
@@ -7365,7 +7361,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0									
 									// check for query
 									if(chnl->querysig.gainout){
-										ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
+										ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
 										chnl->querysig.gainout = 0;
 										}
 #endif
@@ -7380,7 +7376,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										ast_log(LOG_ERROR, "GSM channel=\"%s\": at_sim900_csmins_read_parse(%.*s) error\n", ch_gsm->alias, r_buf_len, r_buf);
 									} else {
 										if (parser_ptrs.sim900_csmins_rd->sim_inserted != ch_gsm->flags.sim_inserted) {
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM %s\n", ch_gsm->alias, (parser_ptrs.sim900_csmins_rd->sim_inserted)?("inserted"):("removed"));
+											ast_verbose("%s: GSM channel=\"%s\": SIM %s\n", AST_MODULE, ch_gsm->alias, (parser_ptrs.sim900_csmins_rd->sim_inserted)?("inserted"):("removed"));
 											if (!parser_ptrs.sim900_csmins_rd->sim_inserted) {
 												// reset channel phone number
 												ast_copy_string(ch_gsm->subscriber_number.value, "unknown", MAX_ADDRESS_LENGTH);
@@ -7421,13 +7417,12 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->rssi = 99;
 												// reset ber value
 												ch_gsm->ber = 99;
-// 												// reset attempts count
-// 												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
-												if(ch_gsm->flags.sim_change)
+#if 0
+												// reset attempts count
+												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
+#endif
+												if (ch_gsm->flags.sim_change)
 													ch_gsm->flags.sim_test = 1;
-												// start simpoll timer
-												if(ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND)
-													x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 											}
 										}
 										ch_gsm->flags.sim_inserted = parser_ptrs.sim900_csmins_rd->sim_inserted;
@@ -7481,7 +7476,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										} else {
 											// old SIM
 											if (ch_gsm->flags.sim_test) {
-												ast_verbose("Polygator: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", ch_gsm->alias);
+												ast_verbose("%s: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", AST_MODULE, ch_gsm->alias);
 												ch_gsm->flags.sim_test = 0;
 											}
 										}
@@ -7490,7 +7485,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										if ((ch_gsm->pin = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock))) {
 											pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\"", ch_gsm->pin);
 										} else {
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM ICCID=\"%s\" PIN required\n", ch_gsm->alias, ch_gsm->iccid);
+											ast_verbose("%s: GSM channel=\"%s\": SIM ICCID=\"%s\" PIN required\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid);
 										}
 									} else if (ch_gsm->flags.puk_required) {
 										if (ch_gsm->puk) ast_free(ch_gsm->puk);
@@ -7499,7 +7494,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											if (!ch_gsm->pin) ch_gsm->pin = ast_strdup("0000");
 											pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\",\"%s\"", ch_gsm->puk, ch_gsm->pin);
 										} else {
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM ICCID=\"%s\" PUK required\n", ch_gsm->alias, ch_gsm->iccid);
+											ast_verbose("%s: GSM channel=\"%s\": SIM ICCID=\"%s\" PUK required\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid);
 										}
 									}
 								}
@@ -7531,7 +7526,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 										// check for query
 										if(chnl->querysig.gainout){
-											ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
+											ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
 											chnl->querysig.gainout = 0;
 											}
 #endif
@@ -7540,7 +7535,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 										// check for query
 										if(chnl->querysig.gainout){
-											ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainout): %d\n", ch_gsm->alias, chnl->gainout_curr);
+											ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): %d\n", ch_gsm->alias, chnl->gainout_curr);
 											chnl->querysig.gainout = 0;
 											}
 #endif
@@ -7549,7 +7544,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #if 0
 									// check for query
 									if(chnl->querysig.gainout){
-										ast_verbose("Polygator: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
+										ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
 										chnl->querysig.gainout = 0;
 										}
 #endif
@@ -7564,7 +7559,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										ast_log(LOG_ERROR, "GSM channel=\"%s\": at_m10_qsimstat_read_parse(%.*s) error\n", ch_gsm->alias, r_buf_len, r_buf);
 									} else {
 										if(parser_ptrs.m10_qsimstat_rd->sim_inserted != ch_gsm->flags.sim_inserted) {
-											ast_verbose("Polygator: GSM channel=\"%s\": SIM %s\n", ch_gsm->alias, (parser_ptrs.m10_qsimstat_rd->sim_inserted)?("inserted"):("removed"));
+											ast_verbose("%s: GSM channel=\"%s\": SIM %s\n", AST_MODULE, ch_gsm->alias, (parser_ptrs.m10_qsimstat_rd->sim_inserted)?("inserted"):("removed"));
 											if (!parser_ptrs.m10_qsimstat_rd->sim_inserted) {
 												// reset channel phone number
 												ast_copy_string(ch_gsm->subscriber_number.value, "unknown", MAX_ADDRESS_LENGTH);
@@ -7605,13 +7600,12 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->rssi = 99;
 												// reset ber value
 												ch_gsm->ber = 99;
-// 												// reset attempts count
-// 												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
-												if(ch_gsm->flags.sim_change)
+#if 0
+												// reset attempts count
+												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
+#endif
+												if (ch_gsm->flags.sim_change)
 													ch_gsm->flags.sim_test = 1;
-												// start simpoll timer
-												if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND)
-													x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 											}
 										}
 										ch_gsm->flags.sim_inserted = parser_ptrs.m10_qsimstat_rd->sim_inserted;
@@ -8002,17 +7996,16 @@ static void *pg_channel_gsm_workthread(void *data)
 
 							ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
 							ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
-							ast_verbose("Polygator: GSM channel=\"%s\": SIM removed\n", ch_gsm->alias);
+							ast_verbose("%s: GSM channel=\"%s\": SIM removed\n", AST_MODULE, ch_gsm->alias);
 						} else if (!ch_gsm->flags.sim_startup)
-							ast_verbose("Polygator: GSM channel=\"%s\": SIM not inserted\n", ch_gsm->alias);
-						//
+							ast_verbose("%s: GSM channel=\"%s\": SIM not inserted\n", AST_MODULE, ch_gsm->alias);
+
 						ch_gsm->flags.sim_startup = 1;
 						ch_gsm->flags.sim_inserted = 0;
-						//
+
 						if (ch_gsm->flags.sim_change)
 							ch_gsm->flags.sim_test = 1;
 
-						//
 						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
@@ -8024,9 +8017,9 @@ static void *pg_channel_gsm_workthread(void *data)
 					} else if (!strcasecmp(r_buf, "+CPIN: READY")) {
 						// - PIN ready
 						if (!ch_gsm->flags.sim_inserted)
-							ast_verbose("Polygator: GSM channel=\"%s\": SIM inserted\n", ch_gsm->alias);
+							ast_verbose("%s: GSM channel=\"%s\": SIM inserted\n", AST_MODULE, ch_gsm->alias);
 						if (!ch_gsm->flags.pin_accepted)
-							ast_verbose("Polygator: GSM channel=\"%s\": PIN ready\n", ch_gsm->alias);
+							ast_verbose("%s: GSM channel=\"%s\": PIN ready\n", AST_MODULE, ch_gsm->alias);
 						// set SIM present flag
 						ch_gsm->flags.sim_startup = 1;
 						ch_gsm->flags.sim_inserted = 1;
@@ -8068,7 +8061,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					} else if (!strcasecmp(r_buf, "+CPIN: SIM PIN")) {
 						// - PIN is required
 						if (!ch_gsm->flags.sim_inserted)
-							ast_verbose("Polygator: GSM channel=\"%s\": SIM inserted\n", ch_gsm->alias);
+							ast_verbose("%s: GSM channel=\"%s\": SIM inserted\n", AST_MODULE, ch_gsm->alias);
 						// set SIM present flag
 						ch_gsm->flags.sim_startup = 1;
 						ch_gsm->flags.sim_inserted = 1;
@@ -8085,12 +8078,12 @@ static void *pg_channel_gsm_workthread(void *data)
 							if (ch_gsm->pin)
 								pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\"", ch_gsm->pin);
 							else
-								ast_verbose("Polygator: GSM channel=\"%s\": PIN required\n", ch_gsm->alias);
+								ast_verbose("%s: GSM channel=\"%s\": PIN required\n", AST_MODULE, ch_gsm->alias);
 						}
 					} else if (!strcasecmp(r_buf, "+CPIN: SIM PUK")) {
 						// - PUK is required
 						if (!ch_gsm->flags.sim_inserted)
-							ast_verbose("Polygator: GSM channel=\"%s\": SIM inserted\n", ch_gsm->alias);
+							ast_verbose("%s: GSM channel=\"%s\": SIM inserted\n", AST_MODULE, ch_gsm->alias);
 						// set SIM present flag
 						ch_gsm->flags.sim_startup = 1;
 						ch_gsm->flags.sim_inserted = 1;
@@ -8119,7 +8112,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (!strcasecmp(r_buf, "+CPIN: NOT READY")) {
 						// stop waitsuspend timer
 						x_timer_stop(ch_gsm->timers.waitsuspend);
-						ast_verbose("Polygator: GSM channel=\"%s\": module switch to suspend state\n", ch_gsm->alias);
+						ast_verbose("%s: GSM channel=\"%s\": module switch to suspend state\n", AST_MODULE, ch_gsm->alias);
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 						// reset registaration status
@@ -8969,29 +8962,6 @@ static void *pg_channel_gsm_workthread(void *data)
 					ast_verbose("GSM channel=\"%s\": module return from suspend state\n", ch_gsm->alias);
 					ch_gsm->flags.resume_now = 0;
 				}
-				// check PIN status
-				pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				// next mgmt state -- check for SIM is READY
-				if (ch_gsm->state != PG_CHANNEL_GSM_STATE_CHECK_PIN) {
-					ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
-					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-				}
-				// start pinwait timer
-				x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
-			}
-		}
-		// simpoll
-		if (is_x_timer_enable(ch_gsm->timers.simpoll)) {
-			if (is_x_timer_fired(ch_gsm->timers.simpoll)) {
-				// simpoll timer fired
-				ast_verb(5, "GSM channel=\"%s\": simpoll timer fired\n", ch_gsm->alias);
-				// stop simpoll timer
-				x_timer_stop(ch_gsm->timers.simpoll);
-				//
-				if (ch_gsm->flags.resume_now) {
-					ast_verbose("GSM channel=\"%s\": module return from suspend state\n", ch_gsm->alias);
-					ch_gsm->flags.resume_now = 0;
-				}
 				// check is sim present
 				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
 					pg_atcommand_queue_append(ch_gsm, AT_SIM300_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
@@ -8999,8 +8969,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					pg_atcommand_queue_append(ch_gsm, AT_SIM900_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
 				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
 					pg_atcommand_queue_append(ch_gsm, AT_M10_QSIMSTAT, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				// try to enable GSM module full functionality
-				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
+				// check PIN
 				pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
 				// next mgmt state -- check for SIM is READY
 				if (ch_gsm->state != PG_CHANNEL_GSM_STATE_CHECK_PIN) {
@@ -10085,7 +10054,7 @@ pg_channel_gsm_workthread_end:
 	}
 	ch_gsm->thread = AST_PTHREADT_NULL;
 	ast_debug(4, "GSM channel=\"%s\": thread stop\n", ch_gsm->alias);
-	ast_verbose("Polygator: GSM channel=\"%s\" disabled\n", ch_gsm->alias);
+	ast_verbose("%s: GSM channel=\"%s\" disabled\n", AST_MODULE, ch_gsm->alias);
 	ast_mutex_unlock(&ch_gsm->lock);
 	return NULL;
 }
@@ -18527,7 +18496,7 @@ static void pg_cleanup(void)
 	// unregistering Polygator CLI interface
 	if (pg_cli_registered) {
 		ast_cli_unregister_multiple(pg_cli, sizeof(pg_cli)/sizeof(pg_cli[0]));
-		ast_verbose("Polygator: CLI unregistered\n");
+		ast_verbose("%s: CLI unregistered\n", AST_MODULE);
 	}
 
 	// unregistering PGGSM channel technology
@@ -18737,7 +18706,7 @@ static int pg_load(void)
 
 	ast_mutex_lock(&pg_lock);
 
-	ast_verbose("Polygator: module \"%s\" loading...\n", VERSION);
+	ast_verbose("%s: module \"%s\" loading...\n", AST_MODULE, VERSION);
 	gettimeofday(&pg_start_time, NULL);
 	// retrieve configuration from file
 	ast_cfg_flags.flags = 0;
@@ -18786,7 +18755,7 @@ static int pg_load(void)
 			if (sscanf(buf, "%[0-9a-z-] %[0-9a-z/!-]", type, name) == 2) {
 				str_xchg(name, '!', '/');
 				cp =  strrchr(name, '/');
-				ast_verbose("Polygator: found board type=\"%s\" name=\"%s\"\n", type, (cp)?(cp+1):(name));
+				ast_verbose("%s: found board type=\"%s\" name=\"%s\"\n", AST_MODULE, type, (cp)?(cp+1):(name));
 				if (!(brd = ast_calloc(1, sizeof(struct pg_board)))) {
 					ast_log(LOG_ERROR, "can't get memory for struct pg_board\n");
 					goto pg_load_error;
@@ -18808,7 +18777,7 @@ static int pg_load(void)
 			ast_log(LOG_ERROR, "unable to scan Polygator subsystem: %d %s\n", errno, strerror(errno));
 			goto pg_load_error;
 		} else
-			ast_verbose("Polygator: subsystem not found\n");
+			ast_verbose("%s: subsystem not found\n", AST_MODULE);
 	}
 	// scan polygator board
 	brd_num = 0;
@@ -18823,7 +18792,7 @@ static int pg_load(void)
 		{
 			if (sscanf(buf, "GSM%u %[0-9A-Za-z-] %[0-9A-Za-z/!-] %[0-9A-Za-z/!-] VIN%u%[ACMLP]%u VIO=%u", &pos, type, name, sim, &vin_num, vc_type, &vc_slot, &vio) == 8) {
 				snprintf(buf, sizeof(buf), "%s-gsm%u", brd->name, pos);
-				ast_verbose("Polygator: found GSM channel=\"%s\"\n", buf);
+				ast_verbose("%s: found GSM channel=\"%s\"\n", AST_MODULE, buf);
 				if (!(ch_gsm = ast_calloc(1, sizeof(struct pg_channel_gsm)))) {
 					ast_log(LOG_ERROR, "can't get memory for struct pg_channel_gsm\n");
 					goto pg_load_error;
@@ -19033,7 +19002,7 @@ static int pg_load(void)
 								// init trunk channel list
 								AST_LIST_HEAD_SET_NOLOCK(&tr_gsm->channel_gsm_list, NULL);
 								tr_gsm->channel_gsm_last = NULL;
-								ast_verbose("Polygator: registered GSM trunk=\"%s\"\n", tr_gsm->name);
+								ast_verbose("%s: registered GSM trunk=\"%s\"\n", AST_MODULE, tr_gsm->name);
 							}
 							if (tr_gsm) {
 								// check for channel already in trunk
@@ -19116,7 +19085,7 @@ static int pg_load(void)
 			} else if (sscanf(buf, "VIN%uRTP%u %[0-9A-Za-z/!-]", &index, &pos, name) == 3) {
 				str_xchg(name, '!', '/');
 				cp =  strrchr(name, '/');
-				ast_verbose("Polygator: found RTP channel=\"%s\"\n", (cp)?(cp+1):(name));
+				ast_verbose("%s: found RTP channel=\"%s\"\n", AST_MODULE, (cp)?(cp+1):(name));
 				if ((vin = pg_get_vinetic_from_board(brd, index))) {
 					if (!(rtp = ast_calloc(1, sizeof(struct pg_channel_rtp)))) {
 						ast_log(LOG_ERROR, "can't get memory for struct pg_channel_rtp\n");
@@ -19136,7 +19105,7 @@ static int pg_load(void)
 			} else if (sscanf(buf, "VIN%u %[0-9A-Za-z/!-]", &pos, name) == 2) {
 				str_xchg(name, '!', '/');
 				cp =  strrchr(name, '/');
-				ast_verbose("Polygator: found vinetic=\"%s\"\n", (cp)?(cp+1):(name));
+				ast_verbose("%s: found vinetic=\"%s\"\n", AST_MODULE, (cp)?(cp+1):(name));
 				if (!(vin = ast_calloc(1, sizeof(struct pg_vinetic)))) {
 					ast_log(LOG_ERROR, "can't get memory for struct pg_vinetic\n");
 					goto pg_load_error;
@@ -19207,13 +19176,13 @@ static int pg_load(void)
 
 	// registering Polygator CLI interface
 	ast_cli_register_multiple(pg_cli, sizeof(pg_cli)/sizeof(pg_cli[0]));
-	ast_verbose("Polygator: CLI registered\n");
+	ast_verbose("%s: CLI registered\n", AST_MODULE);
 	pg_cli_registered = 1;
 
 	// destroy configuration environments
 	if (ast_cfg) ast_config_destroy(ast_cfg);
 
-	ast_verbose("Polygator: module loaded successfull\n");
+	ast_verbose("%s: module loaded successfull\n", AST_MODULE);
 	ast_mutex_unlock(&pg_lock);
 	return AST_MODULE_LOAD_SUCCESS;
 
@@ -19243,7 +19212,7 @@ static int pg_unload(void)
 	// perform module cleanup
 	pg_cleanup();
 
-	ast_verbose("Polygator: module unloaded successfull\n");
+	ast_verbose("%s: module unloaded successfull\n", AST_MODULE);
 	return 0;
 }
 //------------------------------------------------------------------------------
@@ -19254,7 +19223,7 @@ static int pg_unload(void)
 AST_MODULE_INFO(
 	ASTERISK_GPL_KEY,
 	AST_MODFLAG_DEFAULT,
-	"Polygator",
+	AST_MODULE,
 	.load = pg_load,
 	.unload = pg_unload,
 );
