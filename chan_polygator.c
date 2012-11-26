@@ -2703,7 +2703,7 @@ static struct pg_channel_gsm *pg_get_channel_gsm_by_name(const char *name)
 		{
 			ast_mutex_lock(&ch_gsm->lock);
 			// compare name strings
-			if (!strcmp(name, ch_gsm->alias)) {
+			if (ch_gsm->alias && !strcmp(name, ch_gsm->alias)) {
 				ast_mutex_unlock(&ch_gsm->lock);
 				break;
 			}
@@ -4863,7 +4863,7 @@ static void *pg_channel_gsm_workthread(void *data)
 	char tmpbuf[512];
 	struct pdu *pdu, *curr;
 
-	struct pg_call_gsm *call;
+	struct pg_call_gsm *call = NULL;
 
 	struct ast_channel *ast_ch_tmp = NULL;
 
@@ -7833,6 +7833,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							address_classify("unknown", &call->calling_name);
 							// run call state machine
 							pg_call_gsm_sm(call, PG_CALL_GSM_MSG_INFO_IND, 0);
+							break;
 						}
 					} else {
 						// outgoing
@@ -7872,6 +7873,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								address_classify("unknown", &call->calling_name);
 							// run call state machine
 							pg_call_gsm_sm(call, PG_CALL_GSM_MSG_INFO_IND, 0);
+							break;
 						}
 					}
 				}
@@ -18895,7 +18897,12 @@ static int pg_load(void)
 				ch_gsm->position_on_board = pos;
 				ch_gsm->board = brd;
 				ch_gsm->device = ast_strdup(buf);
-				snprintf(buf, sizeof(buf), "chan-%u%u", brd_num, pos);
+				pos = 0;
+				for (;;)
+				{
+					snprintf(buf, sizeof(buf), "chan-%u%u", brd_num, pos++);
+					if (!pg_get_channel_gsm_by_name(buf)) break;
+				}
 				ch_gsm->alias = ast_strdup(buf);
 				str_xchg(name, '!', '/');
 				snprintf(path, sizeof(path), "/dev/%s", name);
@@ -18928,8 +18935,21 @@ static int pg_load(void)
 				// get config variables
 				// alias
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "alias"))) {
-					ast_free(ch_gsm->alias);
-					ch_gsm->alias = ast_strdup(cvar);
+					if (pg_get_channel_gsm_by_name(cvar)) {
+						ast_free(ch_gsm->alias);
+						ch_gsm->alias = NULL;
+						pos = 0;
+						for (;;)
+						{
+							snprintf(buf, sizeof(buf), "chan-%u%u", brd_num, pos++);
+							if (!pg_get_channel_gsm_by_name(buf)) break;
+						}
+						
+						ch_gsm->alias = ast_strdup(buf);
+					} else {
+						ast_free(ch_gsm->alias);
+						ch_gsm->alias = ast_strdup(cvar);
+					}
 				}
 				// enable
 				ch_gsm->config.enable = 0;

@@ -262,13 +262,13 @@ enum {
 };
 //------------------------------------------------------------------------------
 // AT command operation
-enum{
+enum {
 	AT_OPER_EXEC = (1 << 0),
 	AT_OPER_TEST = (1 << 1),
 	AT_OPER_READ = (1 << 2),
 	AT_OPER_WRITE = (1 << 3),
 	AT_OPER_COUNT,
-	};
+};
 //------------------------------------------------------------------------------
 // at command
 #define MAX_AT_CMD_RESP 2
@@ -316,14 +316,14 @@ struct at_gen_clcc_exec {
 	int type;	// number type
 };
 // csq exec
-struct at_gen_csq_exec{
+struct at_gen_csq_exec {
 	// integer (mandatory)
 	int rssi;	// rssi level
 	// integer (mandatory)
 	int ber;		// ber level
-	};
+};
 // cnum exec
-struct at_gen_cnum_exec{
+struct at_gen_cnum_exec {
 	// string
 	char *alpha;	// optional name
 	int alpha_len;
@@ -338,17 +338,17 @@ struct at_gen_cnum_exec{
 	int service;	// service related to phone number
 	// integer
 	int itc;		// information transfer capability
-	};
+};
 // read
 // clir read
-struct at_gen_clir_read{
+struct at_gen_clir_read {
 	// integer (mandatory)
 	int n;	// CLIR setting
 	// integer (mandatory)
 	int m;	// CLIR status
-	};
+};
 // cops read
-struct at_gen_cops_read{
+struct at_gen_cops_read {
 	// integer (mandatory)
 	int mode;	// mode of registration
 	// integer
@@ -356,9 +356,9 @@ struct at_gen_cops_read{
 	// string
 	char *oper;	// operator presented in format above
 	int oper_len;
-	};
+};
 // creg read
-struct at_gen_creg_read{
+struct at_gen_creg_read {
 	// integer (mandatory)
 	int n;			// unsolicited result enable
 	// integer (mandatory)
@@ -369,25 +369,25 @@ struct at_gen_creg_read{
 	// string
 	char *ci;		// cell ID
 	int ci_len;
-	};
+};
 // csca read
-struct at_gen_csca_read{
+struct at_gen_csca_read {
 	// string (mandatory)
 	char *sca;		// service center address
 	int sca_len;
 	// integer (mandatory)
 	int tosca;		// type of service center address
-	};
+};
 // write
 // ccwa write
-struct at_gen_ccwa_write{
+struct at_gen_ccwa_write {
 	// integer (mandatory)
 	int status;	// call wait status
 	// integer (mandatory)
 	int class;	// call class
-	};
+};
 // cusd write
-struct at_gen_cusd_write{
+struct at_gen_cusd_write {
 	// integer (mandatory)
 	int n;	// control of registration
 	// string (optional)
@@ -395,9 +395,9 @@ struct at_gen_cusd_write{
 	int str_len;
 	// integer (optional)
 	int dcs;	// Cell Broadcast Data Coding Scheme
-	};
+};
 // cmgr write
-struct at_gen_cmgr_write{
+struct at_gen_cmgr_write {
 	// integer (mandatory)
 	int stat;
 	// string (optional)
@@ -405,10 +405,10 @@ struct at_gen_cmgr_write{
 	int alpha_len;
 	// integer (mandatory)
 	int length;
-	};
+};
 // unsolicited
 // clip unsolicited
-struct at_gen_clip_unsol{
+struct at_gen_clip_unsol {
 	// string (mandatory)
 	char *number;	// phone number
 	int number_len;
@@ -419,7 +419,7 @@ struct at_gen_clip_unsol{
 	int alphaid_len;
 	// integer (mandatory)
 	int cli_validity;	// information of CLI validity
-	};
+};
 //------------------------------------------------------------------------------
 // prototype
 extern struct at_command *get_at_com_by_id(int id, const struct at_command *list, int maxnum);
