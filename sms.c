@@ -1,10 +1,6 @@
 /******************************************************************************/
 /* sms.c                                                                      */
 /******************************************************************************/
-/* $Rev:: 150                        $                                        */
-/* $Author:: maksym                  $                                        */
-/* $Date:: 2012-05-17 11:04:12 +0300#$                                        */
-/******************************************************************************/
 
 #include <sys/types.h>
 #include <sys/time.h>
@@ -157,7 +153,7 @@ static const unsigned short gsm_to_unicode_le[128] = {
 	0x00F1,		// ñ - 7D
 	0x00FC,		// ü - 7E
 	0x00E0,		// à - 7F
-	};
+};
 //------------------------------------------------------------------------------
 static const unsigned short gsm_to_unicode_be[128] = {
 	// 000xxxx
@@ -296,22 +292,24 @@ static const unsigned short gsm_to_unicode_be[128] = {
 	0xF100,		// ñ - 7D
 	0xFC00,		// ü - 7E
 	0xE000,		// à - 7F
-	};
+};
 #define UCS2_UNKNOWN_SYMBOL 0x3F00
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
 // pdu_parser()
 //------------------------------------------------------------------------------
-struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, int *err)
+struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t ltime, int *err)
 {
-	struct pdu *pdu;
-
 	char *ip, *op;
 	int ilen, olen;
 	char *cp;
 	char *tp;
 	int tlen;
+
+	struct pdu *pdu = NULL;
+
+	char *lpdu = NULL;
 
 	char ucs2data[320];
 
@@ -321,26 +319,26 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 	// check for valid input
 	if (!pduhex || !pduhexlen || !pdulen) {
 		if (err) *err = __LINE__;
-		return NULL;
+		goto pdu_parser_error;
 	}
+	lpdu = strdup(pduhex);
 	// create storage
 	if (!(pdu = malloc(sizeof(struct pdu)))){
 		if (err) *err = __LINE__;
-		return NULL;
+		goto pdu_parser_error;
 	}
 	memset(pdu, 0, sizeof(struct pdu));
 
 	// set PDU length
 	pdu->len = pdulen;
 	// convert PDU from hex to bin
-	ip = pduhex;
+	ip = lpdu;
 	ilen = pduhexlen;
 	op = pdu->buf;
 	olen = MAX_PDU_BIN_SIZE;
 	if (str_hex_to_bin(&ip, &ilen, &op, &olen)) {
-		free(pdu);
 		if (err) *err = __LINE__;
-		return NULL;
+		goto pdu_parser_error;
 	}
 	pdu->full_len = MAX_PDU_BIN_SIZE - olen;
 
@@ -349,9 +347,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 	// check for SCA present in PDU
 	if (pdu->len > pdu->full_len) {
 		// is abnormally - sanity check
-		free(pdu);
 		if (err) *err = __LINE__;
-		return NULL;
+		goto pdu_parser_error;
 	}
 /*
 	else if (pdu->len == pdu->full_len) {
@@ -367,9 +364,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 		// SCA present in PDU
 		tlen = *cp++ & 0xff;
 		if ((cp - pdu->buf) > pdu->full_len) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		if (tlen) {
 			pdu->scaddr.type.full = *cp++; // get type of sms center address
@@ -391,9 +387,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 				tlen--;
 				cp++;
 				if ((cp - pdu->buf) > pdu->full_len) {
-					free(pdu);
 					if (err) *err = __LINE__;
-					return NULL;
+					goto pdu_parser_error;
 				}
 			}
 		} else {
@@ -407,33 +402,33 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 	}
 	// check PDU length
 	if ((cp - pdu->buf) > pdu->full_len) {
-		free(pdu);
 		if (err) *err = __LINE__;
-		return NULL;
+		goto pdu_parser_error;
 	}
 	// get first byte of PDU
 	pdu->fb.full = *cp++;
 	// check PDU length
 	if ((cp - pdu->buf) > pdu->full_len) {
-		free(pdu);
 		if (err) *err = __LINE__;
-		return NULL;
+		goto pdu_parser_error;
 	}
 	// select PDU type
 	if (pdu->fb.general.mti == MTI_SMS_DELIVER) {
 		// originating address
 		tlen = pdu->raddr.length = (int)(*cp++ & 0xff); // get length
-		if ((cp - pdu->buf) > pdu->full_len) {
-			free(pdu);
+		if (tlen > 20) {
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
+		}		
+		if ((cp - pdu->buf) > pdu->full_len) {
+			if (err) *err = __LINE__;
+			goto pdu_parser_error;
 		}
 		if (tlen) {
 			pdu->raddr.type.full = *cp++; // get type
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			tp = pdu->raddr.value;
 			if (pdu->raddr.type.bits.typenumb == TYPE_OF_NUMBER_ALPHANUMGSM7) {
@@ -455,9 +450,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 				cp += tlen/2;
 				if (tlen%2) cp++;
 				if ((cp - pdu->buf) > pdu->full_len) {
-					free(pdu);
 					if (err) *err = __LINE__;
-					return NULL;
+					goto pdu_parser_error;
 				}
 			} else {
 				while (tlen > 0)
@@ -471,9 +465,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 					tlen -= 2;
 					cp++;
 					if ((cp - pdu->buf) > pdu->full_len) {
-						free(pdu);
 						if (err) *err = __LINE__;
-						return NULL;
+						goto pdu_parser_error;
 					}
 				}
 			}
@@ -488,30 +481,26 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 		address_normalize(&pdu->raddr);
 		// check PDU length
 		if ((cp - pdu->buf) > pdu->full_len) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		// protocol identifier
 		pdu->pid = (unsigned char)(*cp++ & 0xff);
 		// check PDU length
 		if ((cp - pdu->buf) > pdu->full_len) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		// data coding scheme
 		pdu->dacosc = (unsigned char)(*cp++ & 0xff);
 		// check PDU length
 		if ((cp - pdu->buf) > pdu->full_len) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		if (dcs_parser(pdu->dacosc, &pdu->dcs)) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		// service centre time stamp
 		gettimeofday(&tv, NULL);
@@ -521,57 +510,50 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 			cp++;
 			// check PDU length
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// month
 			tmc.tm_mon = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f)) - 1;
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// day of the month
 			tmc.tm_mday = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// hours
 			tmc.tm_hour = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// minutes
 			tmc.tm_min = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// seconds
 			tmc.tm_sec = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// timezone - daylight savings
 // 			tmc.tm_isdst = 0;
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// make time_t data
 			pdu->sent = mktime(&tmc);
@@ -579,17 +561,15 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 			pdu->sent = tv.tv_sec;
 			cp += 7;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 		}
 		// user data length
 		pdu->udl = (int)(*cp++ & 0xff);
 		if ((cp - pdu->buf) > pdu->full_len) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		//----------------------------------------------------------------------
 		//
@@ -605,23 +585,20 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 		// message reference
 		pdu->mr = (int)(*cp++ & 0xff);
 		if ((cp - pdu->buf) > pdu->full_len) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		// recipient address
 		tlen = pdu->raddr.length = (int)(*cp++ & 0xff); // get length
 		if ((cp - pdu->buf) > pdu->full_len) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		if (tlen) {
 			pdu->raddr.type.full = *cp++; // get type
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			tp = pdu->raddr.value;
 			if (pdu->raddr.type.bits.typenumb == TYPE_OF_NUMBER_ALPHANUMGSM7) {
@@ -643,9 +620,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 				cp += tlen/2;
 				if (tlen%2) cp++;
 				if ((cp - pdu->buf) > pdu->full_len) {
-					free(pdu);
 					if (err) *err = __LINE__;
-					return NULL;
+					goto pdu_parser_error;
 				}
 			} else {
 				while (tlen > 0)
@@ -659,9 +635,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 					tlen -= 2;
 					cp++;
 					if ((cp - pdu->buf) > pdu->full_len) {
-						free(pdu);
 						if (err) *err = __LINE__;
-						return NULL;
+						goto pdu_parser_error;
 					}
 				}
 			}
@@ -676,9 +651,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 		address_normalize(&pdu->raddr);
 		// check PDU length
 		if ((cp - pdu->buf) > pdu->full_len) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		// service centre time stamp
 		gettimeofday(&tv, NULL);
@@ -688,57 +662,50 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 			cp++;
 			// check PDU length
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// month
 			tmc.tm_mon = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f)) - 1;
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// day of the month
 			tmc.tm_mday = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// hours
 			tmc.tm_hour = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// minutes
 			tmc.tm_min = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// seconds
 			tmc.tm_sec = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// timezone - daylight savings
 // 			tmc.tm_isdst = 0;
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// make time_t data
 			pdu->sent = mktime(&tmc);
@@ -746,9 +713,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 			pdu->sent = tv.tv_sec;
 			cp += 7;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 		}
 		// discharge time
@@ -758,57 +724,50 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 			cp++;
 			// check PDU length
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// month
 			tmc.tm_mon = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f)) - 1;
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// day of the month
 			tmc.tm_mday = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// hours
 			tmc.tm_hour = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// minutes
 			tmc.tm_min = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// seconds
 			tmc.tm_sec = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// timezone - daylight savings
 // 			tmc.tm_isdst = 0;
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			// make time_t data
 			pdu->delivered = mktime(&tmc);
@@ -816,9 +775,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 			pdu->sent = tv.tv_sec;
 			cp += 7;
 			if ((cp - pdu->buf) > pdu->full_len) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 		}
 		// status
@@ -838,9 +796,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 				pdu->dacosc = (unsigned char)(*cp++ & 0xff);
 		}
 		if (dcs_parser(pdu->dacosc, &pdu->dcs)) {
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 		// user data length (optional)
 		if (pdu->paramind.bits.udl) {
@@ -848,9 +805,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 				pdu->udl = (int)(*cp++ & 0xff);
 		}
 	} else {
-		free(pdu);
 		if (err) *err = __LINE__;
-		return NULL;
+		goto pdu_parser_error;
 	}
 	// processing user data
 	pdu->concat_ref = 0;
@@ -897,9 +853,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 			op = ucs2data;
 			olen = 320;
 			if (gsm7_to_ucs2(&ip, &ilen, tlen, &op, &olen)) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			tlen = 320 - olen;
 			// convert to utf8
@@ -908,9 +863,8 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 			op = pdu->ud;
 			olen = 640;
 			if (from_ucs2_to_specset("UTF-8", &ip, &ilen, &op, &olen)) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			pdu->udl = 640 - olen;
 		} else if (pdu->dcs.charset == DCS_CS_8BIT) {
@@ -940,21 +894,26 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 			op = pdu->ud;
 			olen = 640;
 			if (from_ucs2_to_specset("UTF-8", &ip, &ilen, &op, &olen)) {
-				free(pdu);
 				if (err) *err = __LINE__;
-				return NULL;
+				goto pdu_parser_error;
 			}
 			pdu->udl = 640 - olen;
 		} else {
 			// reserved
-			free(pdu);
 			if (err) *err = __LINE__;
-			return NULL;
+			goto pdu_parser_error;
 		}
 	}
+
 	// return on success
 	if (err) *err = 0;
+	if (lpdu) free(lpdu);
 	return pdu;
+
+pdu_parser_error:
+	if (lpdu) free(lpdu);
+	if (pdu) free(pdu);
+	return NULL;
 }
 //------------------------------------------------------------------------------
 // end of pdu_parser()
@@ -963,34 +922,31 @@ struct pdu *pdu_parser(char *pduhex, int pduhexlen, int pdulen, time_t ltime, in
 //------------------------------------------------------------------------------
 // dcs_parser()
 //------------------------------------------------------------------------------
-int dcs_parser(unsigned char inp, struct dcs *dcs){
-	//
+int dcs_parser(unsigned char inp, struct dcs *dcs)
+{
 	if(!dcs) return -1;
-	//
-	if(inp == 0x00){ // 0000 0000
+
+	if (inp == 0x00) { // 0000 0000
 		// Special Case
 		dcs->group = DCS_GROUP_GENERAL;
 		dcs->charset = DCS_CS_GSM7;
 		dcs->isclass = 0;
 		dcs->compres = 0;
-		}
-	else if((inp & 0xC0) == 0x00){ // 00xx xxxx
+	} else if ((inp & 0xC0) == 0x00) { // 00xx xxxx
 		// General Data Coding indication
 		dcs->group = DCS_GROUP_GENERAL;
 		dcs->charset = (inp >> 2) & 0x03;
 		dcs->isclass = (inp >> 4) & 0x01;
 		dcs->classid = inp & 0x03;
 		dcs->compres = (inp >> 5) & 0x01;
-		}
-	else if((inp & 0xC0) == 0x40){ // 01xx xxxx
+	} else if ((inp & 0xC0) == 0x40) { // 01xx xxxx
 		// Automatic Deletion Group
 		dcs->group = DCS_GROUP_AUTODEL;
 		dcs->charset = (inp >> 2) & 0x03;
 		dcs->isclass = (inp >> 4) & 0x01;
 		dcs->classid = inp & 0x03;
 		dcs->compres = (inp >> 5) & 0x01;
-		}
-	else if((inp & 0xF0) == 0xC0){ // 1100 xxxx
+	} else if ((inp & 0xF0) == 0xC0) { // 1100 xxxx
 		// Message Waiting Indication: Discard Message
 		dcs->group = DCS_GROUP_MWI;
 		dcs->charset = DCS_CS_GSM7;
@@ -999,8 +955,7 @@ int dcs_parser(unsigned char inp, struct dcs *dcs){
 		dcs->mwistore = 0;
 		dcs->mwiind = (inp >> 3) & 0x01;
 		dcs->mwitype = inp & 0x03;
-		}
-	else if((inp & 0xF0) == 0xD0){ // 1101 xxxx
+	} else if ((inp & 0xF0) == 0xD0) { // 1101 xxxx
 		// Message Waiting Indication: Store Message
 		dcs->group = DCS_GROUP_MWI;
 		dcs->charset = DCS_CS_GSM7;
@@ -1009,8 +964,7 @@ int dcs_parser(unsigned char inp, struct dcs *dcs){
 		dcs->mwistore = 1;
 		dcs->mwiind = (inp >> 3) & 0x01;
 		dcs->mwitype = inp & 0x03;
-		}
-	else if((inp & 0xF0) == 0xE0){ // 1110 xxxx
+	} else if ((inp & 0xF0) == 0xE0) { // 1110 xxxx
 		// Message Waiting Indication: Store Message
 		dcs->group = DCS_GROUP_MWI;
 		dcs->charset = DCS_CS_UCS2;
@@ -1019,19 +973,18 @@ int dcs_parser(unsigned char inp, struct dcs *dcs){
 		dcs->mwistore = 1;
 		dcs->mwiind = (inp >> 3) & 0x01;
 		dcs->mwitype = inp & 0x03;
-		}
-	else if((inp & 0xF0) == 0xF0){ // 1111 xxxx
+	} else if ((inp & 0xF0) == 0xF0) { // 1111 xxxx
 		// Data coding/message class
 		dcs->group = DCS_GROUP_DCMC;
 		dcs->charset = (inp >> 2) & 0x01;
 		dcs->isclass = 1;
 		dcs->classid = inp & 0x03;
 		dcs->compres = 0;
-		}
-	else
+	} else
 		return -1;
+
 	return 0;
-	}
+}
 //------------------------------------------------------------------------------
 // end of dcs_parser()
 //------------------------------------------------------------------------------
@@ -1039,8 +992,8 @@ int dcs_parser(unsigned char inp, struct dcs *dcs){
 //------------------------------------------------------------------------------
 // gsm7_to_ucs2()
 //------------------------------------------------------------------------------
-int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen){
-
+int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen)
+{
 	int len;
 	int rest;
 	char *rdpos;
@@ -1051,7 +1004,7 @@ int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen
 	unsigned int sym4grp;
 
 	// check input
-	if(!instr || !*instr || !inlen || !outstr || !*outstr || !outlen)
+	if (!instr || !*instr || !inlen || !outstr || !*outstr || !outlen)
 		return -1;
 
 	len = *inlen;
@@ -1062,17 +1015,16 @@ int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen
 	memset(wrpos, 0, rest);
 
 	i = start;
-	while(len > 0){
-		//
-		if(i%8 < 4){
+	while (len > 0)
+	{
+		if (i%8 < 4) {
 			memcpy(&sym4grp, (rdpos+((i/8)*7)), 4);
 			chridx = (sym4grp >> ((i%4)*7)) & 0x7f;
-			}
-		else{
+		} else {
 			memcpy(&sym4grp, (rdpos+((i/8)*7)+3), 4);
 			sym4grp >>= 4;
 			chridx = (sym4grp >> ((i%4)*7)) & 0x7f;
-			}
+		}
 		//
 		*wrpos = gsm_to_unicode_be[chridx];
 		//
@@ -1080,7 +1032,7 @@ int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen
 		wrpos++;
 		i++;
 		len--;
-		}
+	}
 
 	*instr = rdpos;
 	*inlen = len;
@@ -1088,7 +1040,7 @@ int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen
 	*outlen = rest;
 
 	return 0;
-	}
+}
 //------------------------------------------------------------------------------
 // end of gsm7_to_ucs2()
 //------------------------------------------------------------------------------
@@ -1096,8 +1048,8 @@ int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen
 //------------------------------------------------------------------------------
 // ucs2_to_gsm7()
 //------------------------------------------------------------------------------
-int ucs2_to_gsm7(char **instr, int *inlen, int start, char **outstr, int *outlen){
-
+int ucs2_to_gsm7(char **instr, int *inlen, int start, char **outstr, int *outlen)
+{
 	int len;
 	int rest;
 	unsigned short *rdpos;
@@ -1109,7 +1061,7 @@ int ucs2_to_gsm7(char **instr, int *inlen, int start, char **outstr, int *outlen
 	char *tbuf;
 
 	// check input
-	if(!instr || !*instr || !inlen || !outstr || !*outstr || !outlen)
+	if (!instr || !*instr || !inlen || !outstr || !*outstr || !outlen)
 		return -1;
 	//
 	len = *inlen;
@@ -1118,42 +1070,44 @@ int ucs2_to_gsm7(char **instr, int *inlen, int start, char **outstr, int *outlen
 	wrpos = *outstr;
 
 	// create temp buffer
-	if(!(tbuf = malloc(len/2)))
+	if (!(tbuf = malloc(len/2)))
 		return -1;
 	memset(tbuf, 0, len/2);
 	// get gsm7 alphabet symbols
-	for(i=0; i<(len/2); i++){
-		for(j=0; j<128; j++){
-			if(*(rdpos+i) == gsm_to_unicode_be[j]){
+	for (i=0; i<(len/2); i++)
+	{
+		for (j=0; j<128; j++)
+		{
+			if (*(rdpos+i) == gsm_to_unicode_be[j]) {
 				*(tbuf+i) = (char)j;
 				break;
-				}
 			}
 		}
+	}
 	// pack into output buffer
 	len /= 2;
 	i=start;
-	while(len){
+	while (len)
+	{
 		//
-		if(i%8 < 4){
+		if (i%8 < 4) {
 			memcpy(&sym4grp, (wrpos+((i/8)*7)), 4);
 			sym4grp |= ((*(tbuf+(i-start)) & 0x7f) << ((i%4)*7));
 			memcpy((wrpos+((i/8)*7)), &sym4grp, 4);
-			}
-		else{
+		} else {
 			memcpy(&sym4grp, (wrpos+((i/8)*7)+3), 4);
 			sym4grp |= ((*(tbuf+(i-start)) & 0x7f) << (((i%4)*7) + 4));
 			memcpy((wrpos+((i/8)*7)+3), &sym4grp, 4);
-			}
+		}
 		len--;
 		i++;
-		}
+	}
 	// insert stuff CR symbol
-	if((i&7) == 7){
+	if ((i&7) == 7) {
 		memcpy(&sym4grp, (wrpos+((i/8)*7)+3), 4);
 		sym4grp |= ( 0x0d << (((i%4)*7) + 4));
 		memcpy((wrpos+((i/8)*7)+3), &sym4grp, 4);
-		}
+	}
 	//
 	*instr = (char *)rdpos;
 	*inlen = len;
@@ -1162,7 +1116,7 @@ int ucs2_to_gsm7(char **instr, int *inlen, int start, char **outstr, int *outlen
 
 	free(tbuf);
 	return 0;
-	}
+}
 //------------------------------------------------------------------------------
 // end of ucs2_to_gsm7()
 //------------------------------------------------------------------------------
@@ -1170,8 +1124,8 @@ int ucs2_to_gsm7(char **instr, int *inlen, int start, char **outstr, int *outlen
 //------------------------------------------------------------------------------
 // is_gsm7_string()
 //------------------------------------------------------------------------------
-int is_gsm7_string(char *buf){
-
+int is_gsm7_string (char *buf)
+{
 	int res;
 
 	iconv_t tc;
@@ -1188,43 +1142,44 @@ int is_gsm7_string(char *buf){
 	ibuf = buf;
 	ilen = strlen(ibuf);
 	ucs2len = olen = ilen * 2;
-	if(!(obuf = malloc(olen)))
+	if (!(obuf = malloc(olen)))
 		return -1;
 	ucs2buf = (unsigned short *)obuf;
 	// convert from utf-8 to ucs-2be - prepare converter
 	tc = iconv_open("UCS-2BE", "UTF-8");
-	if(tc == (iconv_t)-1){
+	if (tc == (iconv_t)-1) {
 		// converter not created
 		free(obuf);
 		return -1;
-		}
+	}
 	res = iconv(tc, &ibuf, &ilen, &obuf, &olen);
-	if(res == (size_t)-1){
+	if (res == (size_t)-1) {
 		free(obuf);
 		return -1;
-		}
+	}
 	ucs2len -= olen;
 	// close converter
 	iconv_close(tc);
 
 	res = 1;
 	// test for data in gsm7 default alphabet
-	for(i=0; i<ucs2len; i++){
-		j = 0;
-		for(j=0; j<128; j++){
-			if(*(ucs2buf+i) == gsm_to_unicode_be[j])
+	for (i=0; i<ucs2len; i++)
+	{
+		for (j=0; j<128; j++)
+		{
+			if (*(ucs2buf+i) == gsm_to_unicode_be[j])
 				break;
-			}
-		if(j >= 128){
+		}
+		if (j >= 128) {
 			res = 0;
 			break;
-			}
-		if(!res) break;
 		}
+		if (!res) break;
+	}
 
 	free(obuf);
 	return res;
-	}
+}
 //------------------------------------------------------------------------------
 // end of is_gsm7_string()
 //------------------------------------------------------------------------------
@@ -1232,8 +1187,8 @@ int is_gsm7_string(char *buf){
 //------------------------------------------------------------------------------
 // get_parts_count()
 //------------------------------------------------------------------------------
-int get_parts_count(char *buf){
-
+int get_parts_count(char *buf)
+{
 	int isgsm7;
 
 	iconv_t tc;
@@ -1250,62 +1205,62 @@ int get_parts_count(char *buf){
 	ibuf = buf;
 	ilen = strlen(ibuf);
 	ucs2len = olen = ilen * 2;
-	if(!(obuf = malloc(olen)))
+	if (!(obuf = malloc(olen)))
 		return -1;
 	ucs2buf = (unsigned short *)obuf;
 	// convert from utf-8 to ucs-2be - prepare converter
 	tc = iconv_open("UCS-2BE", "UTF-8");
-	if(tc == (iconv_t)-1){
+	if (tc == (iconv_t)-1) {
 		// converter not created
 		free(obuf);
 		return -1;
-		}
+	}
 	isgsm7 = iconv(tc, &ibuf, &ilen, &obuf, &olen);
-	if(isgsm7 == (size_t)-1){
+	if (isgsm7 == (size_t)-1) {
 		free(obuf);
 		return -1;
-		}
+	}
 	ucs2len -= olen;
 	// close converter
 	iconv_close(tc);
 
 	isgsm7 = 1;
 	// test for data in gsm7 default alphabet
-	for(i=0; i<(ucs2len/2); i++){
-		j = 0;
-		for(j=0; j<128; j++){
-			if(*(ucs2buf+i) == gsm_to_unicode_be[j])
+	for (i=0; i<(ucs2len/2); i++)
+	{
+		for (j=0; j<128; j++)
+		{
+			if (*(ucs2buf+i) == gsm_to_unicode_be[j])
 				break;
-			}
-		if(j >= 128){
+		}
+		if (j >= 128) {
 			isgsm7 = 0;
 			break;
-			}
-		if(!isgsm7) break;
 		}
+		if (!isgsm7) break;
+	}
 
 	ucs2len /= 2;
 
-	if(isgsm7){
-		if(ucs2len <= 160)
+	if (isgsm7) {
+		if (ucs2len <= 160)
 			i = 1;
-		else{
+		else {
 			i = ucs2len / 153;
-			if(ucs2len % 153) i++;
-			}
+			if (ucs2len % 153) i++;
 		}
-	else{
-		if(ucs2len <= 70)
+	} else {
+		if (ucs2len <= 70)
 			i = 1;
-		else{
+		else {
 			i = ucs2len / 67;
-			if(ucs2len % 67) i++;
-			}
+			if (ucs2len % 67) i++;
 		}
+	}
 
 	free(obuf);
 	return i;
-	}
+}
 //------------------------------------------------------------------------------
 // end of get_parts_count()
 //------------------------------------------------------------------------------
@@ -1313,9 +1268,8 @@ int get_parts_count(char *buf){
 //------------------------------------------------------------------------------
 // calc_submit_pdu()
 //------------------------------------------------------------------------------
-struct pdu *calc_submit_pdu(char *content, char *destination, int flash,
-							struct address *sca, int id){
-
+struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct address *sca, int id)
+{
 	int isgsm7;
 
 	iconv_t tc;
@@ -1338,96 +1292,95 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash,
 	struct pdu *curr;
 	struct pdu *prev;
 
-	//
 	ibuf = content;
 	ilen = strlen(ibuf);
 	ucs2len = olen = ilen * 2;
-	if(!(ucs2buf = malloc(olen)))
+	if (!(ucs2buf = malloc(olen)))
 		return NULL;
 	obuf = (char *)ucs2buf;
 	// convert from utf-8 to ucs-2be - prepare converter
 	tc = iconv_open("UCS-2BE", "UTF-8");
-	if(tc == (iconv_t)-1){
+	if (tc == (iconv_t)-1) {
 		// converter not created
 		free(ucs2buf);
 		return NULL;
-		}
+	}
 	isgsm7 = iconv(tc, &ibuf, &ilen, &obuf, &olen);
-	if(isgsm7 == (size_t)-1){
+	if (isgsm7 == (size_t)-1) {
 		free(ucs2buf);
 		return NULL;
-		}
+	}
 	ucs2len -= olen;
 	// close converter
 	iconv_close(tc);
 
 	isgsm7 = 1;
 	// test for data in gsm7 default alphabet
-	for(i=0; i<(ucs2len/2); i++){
-		j = 0;
-		for(j=0; j<128; j++){
-			if(*(ucs2buf+i) == gsm_to_unicode_be[j])
+	for (i=0; i<(ucs2len/2); i++)
+	{
+		for (j=0; j<128; j++) {
+			if (*(ucs2buf+i) == gsm_to_unicode_be[j])
 				break;
-			}
-		if(j >= 128){
+		}
+		if (j >= 128) {
 			isgsm7 = 0;
 			break;
-			}
-		if(!isgsm7) break;
 		}
+		if (!isgsm7) break;
+	}
 
 	symcnt = olen = ucs2len / 2;
 
-	if(isgsm7){
-		if(olen <= 160)
+	if (isgsm7) {
+		if (olen <= 160)
 			part_count = 1;
-		else{
+		else {
 			part_count = olen / 153;
 			if(olen % 153) part_count++;
-			}
 		}
-	else{
-		if(olen <= 70)
+	} else {
+		if (olen <= 70)
 			part_count = 1;
-		else{
+		else {
 			part_count = olen / 67;
-			if(olen % 67) part_count++;
-			}
+			if (olen % 67) part_count++;
 		}
+	}
 
-	//
 	pdu = NULL;
 	prev = NULL;
 	curr = NULL;
-	for(part=0; part<part_count; part++){
+	for (part=0; part<part_count; part++)
+	{
 		// create pdu storage
-		if(!(curr = malloc(sizeof(struct pdu)))){
+		if (!(curr = malloc(sizeof(struct pdu)))) {
 			free(ucs2buf);
 			pdu_free(pdu);
 			return NULL;
-			}
+		}
 		memset(curr, 0, sizeof(struct pdu));
-		if(!pdu)
+		if (!pdu)
 			pdu = curr;
-		if(prev)
+		if (prev)
 			prev->next = curr;
 		prev = curr;
 		// build pdu
 		bldp = curr->buf;
 		// sms center address
-		if(sca){
+		if (sca) {
 			memcpy(&curr->scaddr, sca, sizeof(struct address));
 			*bldp++ = (unsigned char)((curr->scaddr.length/2) + (curr->scaddr.length%2) + 1);
 			*bldp++ = (unsigned char)curr->scaddr.type.full;
-			for(i=0; i<curr->scaddr.length; i++){
-				if(i%2)
+			for (i=0; i<curr->scaddr.length; i++)
+			{
+				if (i%2)
 					*bldp++ |= (((curr->scaddr.value[i] - '0') << 4) & 0xf0);
 				else
 					*bldp = ((curr->scaddr.value[i] - '0') & 0x0f);
-				}
-			if(curr->scaddr.length%2)
-				*bldp++ |= 0xf0;
 			}
+			if (curr->scaddr.length%2)
+				*bldp++ |= 0xf0;
+		}
 		// first byte
 		curr->fb.submit.mti = MTI_SMS_SUBMIT; // message type indicator - bit: 0,1
 		curr->fb.submit.rd = 1; // reject duplicates - bit 2
@@ -1442,36 +1395,37 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash,
 		address_classify(destination, &curr->raddr);
 		*bldp++ = (unsigned char)curr->raddr.length;
 		*bldp++ = (unsigned char)curr->raddr.type.full;
-		for(i=0; i<curr->raddr.length; i++){
-			if(i%2)
+		for (i=0; i<curr->raddr.length; i++)
+		{
+			if (i%2)
 				*bldp++ |= (((curr->raddr.value[i] - '0') << 4) & 0xf0);
 			else
 				*bldp = ((curr->raddr.value[i] - '0') & 0x0f);
-			}
-		if(curr->raddr.length%2)
+		}
+		if (curr->raddr.length%2)
 			*bldp++ |= 0xf0;
 		// protocol id
 		*bldp++ = curr->pid = 0;
 		// data coding scheme
-		if(isgsm7 && !flash)
+		if (isgsm7 && !flash)
 			curr->dacosc = 0x00;
-		else if(isgsm7 && flash)
+		else if (isgsm7 && flash)
 			curr->dacosc = 0x10;
-		else if(!isgsm7 && !flash)
+		else if (!isgsm7 && !flash)
 			curr->dacosc = 0x08;
 		else
 			curr->dacosc = 0x18;
 		*bldp++ = curr->dacosc;
 		// validity period
 #if 0
-		if(curr->fb.submit.vpf){
+		if (curr->fb.submit.vpf) {
 			;
-			}
+		}
 #endif
 		// user data length
-		if(isgsm7){
+		if (isgsm7) {
 			// gsm7 default alphabet
-			if(part_count > 1){
+			if (part_count > 1) {
 				// set user data length
 				curr->udl = ((symcnt/153)?(153):(symcnt%153)) + 7;
 				*bldp++ = curr->udl;
@@ -1488,26 +1442,25 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash,
 				ilen = ((symcnt/153)?(153):(symcnt%153)) * 2;
 				obuf = curr->ud;
 				olen = 640;
-				if(from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)){
+				if (from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
-					}
+				}
 				//
 				ibuf = (char *)(ucs2buf + part*153);
 				ilen = ((symcnt/153)?(153):(symcnt%153)) * 2;
 				obuf = bldp;
 				olen = 153;
-				if(ucs2_to_gsm7(&ibuf, (int *)&ilen, 7, &obuf, (int *)&olen)){
+				if (ucs2_to_gsm7(&ibuf, (int *)&ilen, 7, &obuf, (int *)&olen)) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
-					}
-				curr->len = (int)(bldp - curr->buf) + ((curr->udl * 7) / 8);
-				if((curr->udl * 7) % 8) curr->len++;
-				symcnt -= 153;
 				}
-			else{
+				curr->len = (int)(bldp - curr->buf) + ((curr->udl * 7) / 8);
+				if ((curr->udl * 7) % 8) curr->len++;
+				symcnt -= 153;
+			} else {
 				// set user data length
 				curr->udl = symcnt;
 				*bldp++ = curr->udl;
@@ -1516,28 +1469,27 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash,
 				ilen = ucs2len;
 				obuf = curr->ud;
 				olen = 640;
-				if(from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)){
+				if (from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
-					}
+				}
 				//
 				ibuf = (char *)ucs2buf;
 				ilen = ucs2len;
 				obuf = bldp;
 				olen = 140;
-				if(ucs2_to_gsm7(&ibuf, (int *)&ilen, 0, &obuf, (int *)&olen)){
+				if (ucs2_to_gsm7(&ibuf, (int *)&ilen, 0, &obuf, (int *)&olen)) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
-					}
-				curr->len = (int)(bldp - curr->buf) + ((curr->udl * 7) / 8);
-				if((curr->udl * 7) % 8) curr->len++;
 				}
+				curr->len = (int)(bldp - curr->buf) + ((curr->udl * 7) / 8);
+				if ((curr->udl * 7) % 8) curr->len++;
 			}
-		else{
+		} else {
 			// ucs2
-			if(part_count > 1){
+			if (part_count > 1) {
 				// set user data length
 				curr->udl = ((ucs2len/134)?(134):(ucs2len%134)) + 6;
 				*bldp++ = curr->udl;
@@ -1553,17 +1505,16 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash,
 				ilen = (ucs2len/134)?(134):(ucs2len%134);
 				obuf = curr->ud;
 				olen = 640;
-				if(from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)){
+				if (from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
-					}
+				}
 				//
 				memcpy(bldp+6, (ucs2buf + part*67), (ucs2len/134)?(134):(ucs2len%134));
 				ucs2len -= 134;
 				curr->len = (int)(bldp - curr->buf) + curr->udl;
-				}
-			else{
+			} else {
 				// set user data length
 				curr->udl = ucs2len;
 				*bldp++ = curr->udl;
@@ -1572,36 +1523,35 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash,
 				ilen = ucs2len;
 				obuf = curr->ud;
 				olen = 640;
-				if(from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)){
+				if (from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
-					}
+				}
 				//
 				memcpy(bldp, ucs2buf, ucs2len);
 				curr->len = (int)(bldp - curr->buf) + curr->udl;
-				}
 			}
+		}
 		// final adjust
-		if(part_count > 1){
+		if (part_count > 1) {
 			curr->concat_ref = (unsigned char)((id & 0xff)?(id & 0xff):(0x5a));
 			curr->concat_cnt = part_count;
 			curr->concat_num = part+1;
-			}
-		else{
+		} else {
 			curr->concat_ref = 0;
 			curr->concat_cnt = 1;
 			curr->concat_num = 1;
-			}
+		}
 		// set full length
 		curr->full_len = curr->len;
-		if(curr->scaddr.length)
+		if (curr->scaddr.length)
 			curr->len -= ((curr->scaddr.length/2) + (curr->scaddr.length%2) + 2);
-		}
+	}
 
 	free(ucs2buf);
 	return pdu;
-	}
+}
 //------------------------------------------------------------------------------
 // end of calc_submit_pdu()
 //------------------------------------------------------------------------------
@@ -1609,16 +1559,17 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash,
 //------------------------------------------------------------------------------
 // pdu_free()
 //------------------------------------------------------------------------------
-void pdu_free(struct pdu *pdu){
-
+void pdu_free(struct pdu *pdu)
+{
 	struct pdu *next;
 
-	while(pdu){
+	while (pdu)
+	{
 		next = pdu->next;
 		free(pdu);
 		pdu = next;
-		}
 	}
+}
 //------------------------------------------------------------------------------
 // end of pdu_free()
 //------------------------------------------------------------------------------
@@ -1626,8 +1577,8 @@ void pdu_free(struct pdu *pdu){
 //------------------------------------------------------------------------------
 // ussd_decode()
 //------------------------------------------------------------------------------
-char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs){
-
+char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs)
+{
 	char *res;
 
 	char ussdbin[256];
@@ -1637,7 +1588,7 @@ char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs){
 	int ilen, olen;
 
 	// get buffer for result
-	if(!(res = malloc(512)))
+	if (!(res = malloc(512)))
 		return NULL;
 	memset(res, 0, 512);
 
@@ -1646,31 +1597,30 @@ char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs){
 	ilen = ussdhexlen;
 	op = ussdbin;
 	olen = 256;
-	if(str_hex_to_bin(&ip, &ilen, &op, &olen))
+	if (str_hex_to_bin(&ip, &ilen, &op, &olen))
 		return NULL;
 	ussdbinlen = 256 - olen;
 
 	// sim300 ucs2 or gsm7
-	if((dcs == 0x11) ||
+	if ((dcs == 0x11) ||
 		(((dcs & 0xc0) == 0x40) && ((dcs & 0x0c) == 0x08)) ||
-		(((dcs & 0xf0) == 0x90) && ((dcs & 0x0c) == 0x08))){
+		(((dcs & 0xf0) == 0x90) && ((dcs & 0x0c) == 0x08))) {
 		// ucs2
 		ip = ussdbin;
 		ilen = ussdbinlen;
 		op = res;
 		olen = 512;
-		if(from_ucs2_to_specset("UTF-8", &ip, &ilen, &op, &olen)){
+		if (from_ucs2_to_specset("UTF-8", &ip, &ilen, &op, &olen)) {
 			free(res);
 			return NULL;
-			}
 		}
-	else{
+	} else {
 		// gsm7
 		memcpy(res, ussdbin, ussdbinlen);
-		}
+	}
 
 	return res;
-	}
+}
 //------------------------------------------------------------------------------
 // end of get_ussd_decoded()
 //------------------------------------------------------------------------------

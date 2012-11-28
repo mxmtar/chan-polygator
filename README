@@ -37,6 +37,8 @@ Compile and install from source directory by:
 
 # ./configure --prefix=/path/to/asterisk/prefix
 # make
+or on some system
+# make CFLAGS="-g -O0"
 # make install
 
 NOTE:

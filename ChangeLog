@@ -41,3 +41,6 @@ n is integer value,
 begin, end format is y-m-d h:m:s or shorter.
 22.11.12
 Improved SIM removing detection.
+28.11.12
+Fix segfault on parsing corrupted PDU.
+Add sanity check for maximum length of Originating Address.
