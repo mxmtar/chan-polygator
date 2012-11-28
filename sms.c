@@ -571,6 +571,17 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			if (err) *err = __LINE__;
 			goto pdu_parser_error;
 		}
+		if (pdu->dcs.charset == DCS_CS_GSM7) {
+			if (pdu->udl > 160) {
+				if (err) *err = __LINE__;
+				goto pdu_parser_error;
+			}
+		} else {
+			if (pdu->udl > 140) {
+				if (err) *err = __LINE__;
+				goto pdu_parser_error;
+			}
+		}
 		//----------------------------------------------------------------------
 		//
 		pdu->delivered = ltime;
@@ -801,8 +812,20 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		}
 		// user data length (optional)
 		if (pdu->paramind.bits.udl) {
-			if((cp - pdu->buf) <= pdu->full_len)
+			if ((cp - pdu->buf) <= pdu->full_len) {
 				pdu->udl = (int)(*cp++ & 0xff);
+				if (pdu->dcs.charset == DCS_CS_GSM7) {
+					if (pdu->udl > 160) {
+						if (err) *err = __LINE__;
+						goto pdu_parser_error;
+					}
+				} else {
+					if (pdu->udl > 140) {
+						if (err) *err = __LINE__;
+						goto pdu_parser_error;
+					}
+				}
+			}
 		}
 	} else {
 		if (err) *err = __LINE__;
@@ -1025,9 +1048,9 @@ int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen
 			sym4grp >>= 4;
 			chridx = (sym4grp >> ((i%4)*7)) & 0x7f;
 		}
-		//
-		*wrpos = gsm_to_unicode_be[chridx];
-		//
+
+		memcpy(wrpos, &gsm_to_unicode_be[chridx], 2);
+
 		rest -= 2;
 		wrpos++;
 		i++;

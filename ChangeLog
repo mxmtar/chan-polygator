@@ -44,3 +44,5 @@ Improved SIM removing detection.
 28.11.12
 Fix segfault on parsing corrupted PDU.
 Add sanity check for maximum length of Originating Address.
+Add sanity check for maximum length of User Data.
+Fix Alignment trap on ARM architecture in gsm7_to_ucs2().
