@@ -415,7 +415,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 	// select PDU type
 	if (pdu->fb.general.mti == MTI_SMS_DELIVER) {
 		// originating address
-		tlen = pdu->raddr.length = (int)(*cp++ & 0xff); // get length
+		tlen = pdu->raddr.length = (unsigned char)(*cp++ & 0xff); // get length
 		if (tlen > 20) {
 			if (err) *err = __LINE__;
 			goto pdu_parser_error;
@@ -566,41 +566,40 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			}
 		}
 		// user data length
-		pdu->udl = (int)(*cp++ & 0xff);
+		pdu->udl = (unsigned char)(*cp++ & 0xff);
 		if ((cp - pdu->buf) > pdu->full_len) {
 			if (err) *err = __LINE__;
 			goto pdu_parser_error;
 		}
 		if (pdu->dcs.charset == DCS_CS_GSM7) {
+			if (((pdu->udl*7)/8) > (pdu->full_len - (cp - pdu->buf))) {
+				if (err) *err = __LINE__;
+				goto pdu_parser_error;
+			}
 			if (pdu->udl > 160) {
 				if (err) *err = __LINE__;
 				goto pdu_parser_error;
 			}
 		} else {
+			if (pdu->udl > (pdu->full_len - (cp - pdu->buf))) {
+				if (err) *err = __LINE__;
+				goto pdu_parser_error;
+			}
 			if (pdu->udl > 140) {
 				if (err) *err = __LINE__;
 				goto pdu_parser_error;
 			}
 		}
-		//----------------------------------------------------------------------
-		//
 		pdu->delivered = ltime;
-		//
-	} // end of sms-deliver
-/*
-	else if(pdu->fb.general.mti == MTI_SMS_SUBMIT){
-		;
-		}
-*/
-	else if (pdu->fb.general.mti == MTI_SMS_STATUS_REPORT) {
+	} else if (pdu->fb.general.mti == MTI_SMS_STATUS_REPORT) {
 		// message reference
-		pdu->mr = (int)(*cp++ & 0xff);
+		pdu->mr = (unsigned char)(*cp++ & 0xff);
 		if ((cp - pdu->buf) > pdu->full_len) {
 			if (err) *err = __LINE__;
 			goto pdu_parser_error;
 		}
 		// recipient address
-		tlen = pdu->raddr.length = (int)(*cp++ & 0xff); // get length
+		tlen = pdu->raddr.length = (unsigned char)(*cp++ & 0xff); // get length
 		if ((cp - pdu->buf) > pdu->full_len) {
 			if (err) *err = __LINE__;
 			goto pdu_parser_error;
@@ -813,13 +812,21 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		// user data length (optional)
 		if (pdu->paramind.bits.udl) {
 			if ((cp - pdu->buf) <= pdu->full_len) {
-				pdu->udl = (int)(*cp++ & 0xff);
+				pdu->udl = (unsigned char)(*cp++ & 0xff);
 				if (pdu->dcs.charset == DCS_CS_GSM7) {
+					if (((pdu->udl*7)/8) > (pdu->full_len - (cp - pdu->buf))) {
+						if (err) *err = __LINE__;
+						goto pdu_parser_error;
+					}
 					if (pdu->udl > 160) {
 						if (err) *err = __LINE__;
 						goto pdu_parser_error;
 					}
 				} else {
+					if (pdu->udl > (pdu->full_len - (cp - pdu->buf))) {
+						if (err) *err = __LINE__;
+						goto pdu_parser_error;
+					}
 					if (pdu->udl > 140) {
 						if (err) *err = __LINE__;
 						goto pdu_parser_error;
@@ -838,11 +845,11 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 	if (pdu->udl) {
 		// processing user data header
 		if (pdu->fb.general.udhi) {
-			tlen = (int)(*cp & 0xff);
+			tlen = (unsigned char)(*cp & 0xff);
 			tp = cp+1;
 			while (tlen > 0)
 			{
-				switch ((int)(*tp & 0xff))
+				switch ((unsigned char)(*tp & 0xff))
 				{
 					//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 					case 0x00:
@@ -864,13 +871,12 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			// check for user data header
 			tlen = 0;
 			if (pdu->fb.general.udhi) {
-				ilen = (int)(*cp & 0xff);
+				ilen = (unsigned char)(*cp & 0xff);
 				tlen = ((ilen+1)/7)*8;
 				if ((ilen+1)%7)
 					tlen += ((ilen+1)%7) + 1;
 				pdu->udl -= tlen;
 			} // end udhi
-			//
 			ip = cp;
 			ilen = pdu->udl;
 			op = ucs2data;
@@ -894,12 +900,10 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			// 8-bit
 			// check for user data header
 			if (pdu->fb.general.udhi) {
-				tlen = (int)(*cp++ & 0xff);
+				tlen = (unsigned char)(*cp++ & 0xff);
 				pdu->udl -= (tlen + 1);
 				cp += tlen;
 			}
-			//
-// 			memcpy(pdu->ud, cp, pdu->udl);
 			olen = 0;
 			for (tlen=0; tlen<pdu->udl; tlen++)
 				olen += sprintf(cp+olen,"%02x ", (unsigned char)*(cp+tlen));
@@ -907,7 +911,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			// ucs2
 			// check for user data header
 			if (pdu->fb.general.udhi) {
-				tlen = (int)(*cp++ & 0xff);
+				tlen = (unsigned char)(*cp++ & 0xff);
 				pdu->udl -= (tlen + 1);
 				cp += tlen;
 			}

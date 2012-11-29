@@ -5837,6 +5837,9 @@ static void *pg_channel_gsm_workthread(void *data)
 											// wake up SIM
 											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 											x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+										} else if (ch_gsm->reg_stat == REG_STAT_NOTREG_SEARCH) {
+											// start registering timer
+											x_timer_set(ch_gsm->timers.registering, registering_timeout);
 										} else if ((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) {
 											// "1" home network, "5" roaming
 											ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
