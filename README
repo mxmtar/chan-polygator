@@ -76,3 +76,31 @@ ownership for polygator-linux device files.
 and if exist
 
 # chown user:group /dev/ttyPG*
+
+
+Dialplan configuration with chan-polygator.
+
+For establishing call through chan-polygator Asterisk dialplan may content next extensions.
+
+For request channel from all active channels on all installed boards:
+exten =>  0981234567,1,Dial(PGGSM/+38${EXTEN})
+
+For request channel from channel group(trunk):
+exten =>  0981234567,1,Dial(PGGSM/TRUNK[trunk]/+38${EXTEN})
+or
+exten =>  0981234567,1,Dial(PGGSM/TR[trunk]/+38${EXTEN})
+
+For request channel with known name:
+exten =>  0981234567,1,Dial(PGGSM/CHANNEL[channel]/+38${EXTEN})
+or
+exten =>  0981234567,1,Dial(PGGSM/CH[channel]/+38${EXTEN})
+
+For request channel with known IMSI:
+exten =>  0981234567,1,Dial(PGGSM/IMSI[imsi]/+38${EXTEN})
+
+For request channel with known ICCID of SIM:
+exten =>  0981234567,1,Dial(PGGSM/ICCID[iccid]/+38${EXTEN})
+
+For request channel from specified PLMN:
+exten =>  0981234567,1,Dial(PGGSM/PLMN[mccmnc]/+38${EXTEN})
+where mccmnc - digital presentation of Mobile Country Code and Mobile Network Code.

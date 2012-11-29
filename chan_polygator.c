@@ -2717,6 +2717,58 @@ static struct pg_channel_gsm *pg_get_channel_gsm_by_name(const char *name)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_get_channel_gsm_by_imsi()
+//------------------------------------------------------------------------------
+static struct pg_channel_gsm *pg_get_channel_gsm_by_imsi(const char *imsi)
+{
+	struct pg_channel_gsm *ch_gsm = NULL;
+	// check for name present
+	if (imsi) {
+		// traverse channel gsm list for matching entry IMSI
+		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
+		{
+			ast_mutex_lock(&ch_gsm->lock);
+			// compare IMSI strings
+			if (ch_gsm->imsi && !strcmp(imsi, ch_gsm->imsi)) {
+				ast_mutex_unlock(&ch_gsm->lock);
+				break;
+			}
+			ast_mutex_unlock(&ch_gsm->lock);
+		}
+	}
+	return ch_gsm;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_channel_gsm_by_imsi()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_get_channel_gsm_by_iccid()
+//------------------------------------------------------------------------------
+static struct pg_channel_gsm *pg_get_channel_gsm_by_iccid(const char *iccid)
+{
+	struct pg_channel_gsm *ch_gsm = NULL;
+	// check for name present
+	if (iccid) {
+		// traverse channel gsm list for matching entry ICCID
+		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
+		{
+			ast_mutex_lock(&ch_gsm->lock);
+			// compare ICCID strings
+			if (ch_gsm->iccid && !strcmp(iccid, ch_gsm->iccid)) {
+				ast_mutex_unlock(&ch_gsm->lock);
+				break;
+			}
+			ast_mutex_unlock(&ch_gsm->lock);
+		}
+	}
+	return ch_gsm;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_channel_gsm_by_iccid()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_get_channel_gsm_power_sequence_number()
 //------------------------------------------------------------------------------
 static int pg_get_channel_gsm_power_sequence_number(void)
@@ -10877,7 +10929,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 {
 	char *cpd;
 	char trunk[256];
+	char plmn[16];
 	char channel[256];
+	char imsi[32];
+	char iccid[32];
 #if ASTERISK_VERSION_NUM >= 10800
 	char conference[256];
 #endif	
@@ -10913,7 +10968,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 
 	cpd = ast_strdupa((char *)data);
 	trunk[0] = '\0';
+	plmn[0] = '\0';
 	channel[0] = '\0';
+	imsi[0] = '\0';
+	iccid[0] = '\0';
 #if ASTERISK_VERSION_NUM >= 10800
 	conference[0] = '\0';
 #endif
@@ -10922,14 +10980,24 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 		(sscanf(cpd, "TR[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", trunk, flags, called_name) != 3) &&
 		(sscanf(cpd, "TRUNK[%[0-9A-Za-z-_]]/%[0-9+]", trunk, called_name) != 2) &&
 		(sscanf(cpd, "TRUNK[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", trunk, flags, called_name) != 3) &&
-			(sscanf(cpd, "CH[%[0-9A-Za-z-_]]/%[0-9+]", channel, called_name) != 2) &&
-			(sscanf(cpd, "CHANNEL[%[0-9A-Za-z-_]]/%[0-9+]", channel, called_name) != 2) &&
+			(sscanf(cpd, "PLMN[%[0-9A-Za-z-_]]/%[0-9+]", plmn, called_name) != 2) &&
+			(sscanf(cpd, "PLMN[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", plmn, flags, called_name) != 3) &&
+				(sscanf(cpd, "CH[%[0-9A-Za-z-_]]/%[0-9+]", channel, called_name) != 2) &&
+				(sscanf(cpd, "CH[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", channel, flags, called_name) != 3) &&
+				(sscanf(cpd, "CHANNEL[%[0-9A-Za-z-_]]/%[0-9+]", channel, called_name) != 2) &&
+				(sscanf(cpd, "CHANNEL[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", channel, flags, called_name) != 3) &&
+					(sscanf(cpd, "IMSI[%[0-9A-Za-z-_]]/%[0-9+]", imsi, called_name) != 2) &&
+					(sscanf(cpd, "IMSI[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", imsi, flags, called_name) != 3) &&
+						(sscanf(cpd, "ICCID[%[0-9A-Za-z-_]]/%[0-9+]", iccid, called_name) != 2) &&
+						(sscanf(cpd, "ICCID[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", iccid, flags, called_name) != 3) &&
 #if ASTERISK_VERSION_NUM >= 10800
-				(sscanf(cpd, "CONF[%[0-9A-Za-z-_]]/%[0-9+]", conference, called_name) != 2) &&
-				(sscanf(cpd, "CONFERENCE[%[0-9A-Za-z-_]]/%[0-9+]", conference, called_name) != 2) &&
+							(sscanf(cpd, "CONF[%[0-9A-Za-z-_]]/%[0-9+]", conference, called_name) != 2) &&
+							(sscanf(cpd, "CONF[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", conference, flags, called_name) != 3) &&
+							(sscanf(cpd, "CONFERENCE[%[0-9A-Za-z-_]]/%[0-9+]", conference, called_name) != 2) &&
+							(sscanf(cpd, "CONFERENCE[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", conference, flags, called_name) != 3) &&
 #endif
-					(sscanf(cpd, "%[0-9+]", called_name) != 1) &&
-					(sscanf(cpd, "%[A-Za-z]/%[0-9+]", flags, called_name) != 2)) {
+								(sscanf(cpd, "%[0-9+]", called_name) != 1) &&
+								(sscanf(cpd, "%[A-Za-z]/%[0-9+]", flags, called_name) != 2)) {
 		ast_log(LOG_WARNING, "can't parse request data=\"%s\"\n", (char *)data);
 		*cause = AST_CAUSE_INCOMPATIBLE_DESTINATION;
 		return NULL;
@@ -10995,6 +11063,60 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 			ast_verb(3, "Polygator: requested GSM trunk=\"%s\" not found\n", trunk);
 		}
 		ast_mutex_unlock(&pg_lock);
+	} else if (strlen(plmn)) {
+		ast_mutex_lock(&pg_lock);
+		// search free channel in general channel list
+		ch_gsm_start = NULL;
+		if (pg_channel_gsm_last)
+			ch_gsm_start = pg_channel_gsm_last->pg_general_channel_gsm_list_entry.next;
+		if (!ch_gsm_start)
+			ch_gsm_start = pg_general_channel_gsm_list.first;
+		ch_gsm = ch_gsm_start;
+		// traverse channel list
+		while (ch_gsm)
+		{
+			ast_mutex_lock(&ch_gsm->lock);
+			if (
+				(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
+				(ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) &&
+				(ch_gsm->config.outgoing_type == PG_CALL_GSM_OUTGOING_TYPE_ALLOW) &&
+				(!ch_gsm->config.trunkonly) &&
+				(ch_gsm->operator_code && !strcmp(plmn, ch_gsm->operator_code)) &&
+				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
+				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+				(pg_is_vinetic_run(vin)) &&
+#if ASTERISK_VERSION_NUM >= 100000
+				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
+#else
+				((joint = format & vin->capabilities)) &&
+#endif
+				((rtp = pg_get_channel_rtp(vin)))
+			) {
+				// set new empty call to prevent missing ownership
+				if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
+					call->direction = PG_CALL_GSM_DIRECTION_OUTGOING;
+					call->channel_rtp = rtp;
+					pg_channel_gsm_last = ch_gsm;
+					ast_verb(3, "Polygator: got GSM channel=\"%s\" from PLMN=\"%s\"\n", ch_gsm->alias, plmn);
+					break;
+				}
+			}
+			ast_mutex_unlock(&ch_gsm->lock);
+
+			ch_gsm = ch_gsm->pg_general_channel_gsm_list_entry.next;
+			if (!ch_gsm)
+				ch_gsm = pg_general_channel_gsm_list.first;
+			if (ch_gsm == ch_gsm_start) {
+				ch_gsm = NULL;
+				break;
+			}
+		} // end of traverse channel list
+		ast_mutex_unlock(&pg_lock);
+		// congestion -- free channel not found
+		if (!ch_gsm) {
+			*cause = AST_CAUSE_NORMAL_CIRCUIT_CONGESTION;
+			ast_verb(3, "Polygator: free GSM channel from PLMN=\"%s\" not found\n", plmn);
+		}
 	} else if (strlen(channel)) {
 		// get requested channel from general channel list
 		if ((ch_gsm = pg_get_channel_gsm_by_name(channel))) {
@@ -11027,6 +11149,72 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 		} else {
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			ast_verb(3, "Polygator: requested GSM channel=\"%s\" not found\n", channel);
+		}
+	} else if (strlen(imsi)) {
+		// get requested channel from general channel list
+		if ((ch_gsm = pg_get_channel_gsm_by_imsi(imsi))) {
+			ast_mutex_lock(&ch_gsm->lock);
+			if (
+				(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
+				((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) &&
+				(ch_gsm->config.outgoing_type == PG_CALL_GSM_OUTGOING_TYPE_ALLOW) &&
+				(!ch_gsm->config.trunkonly) &&
+				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
+				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+				(pg_is_vinetic_run(vin)) &&
+#if ASTERISK_VERSION_NUM >= 100000
+				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
+#else
+				((joint = format & vin->capabilities)) &&
+#endif
+				((rtp = pg_get_channel_rtp(vin))) &&
+				((call = pg_channel_gsm_get_new_call(ch_gsm)))
+			) {
+				call->direction = PG_CALL_GSM_DIRECTION_OUTGOING;
+				call->channel_rtp = rtp;
+				ast_verb(3, "Polygator: got requested GSM channel=\"%s\" with IMSI=\"%s\"\n", ch_gsm->alias, imsi);
+			} else {
+				ast_mutex_unlock(&ch_gsm->lock);
+				ch_gsm = NULL;
+				*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+				ast_verb(3, "Polygator: requested GSM channel=\"%s\" with IMSI=\"%s\" busy\n", ch_gsm->alias, imsi);
+			}
+		} else {
+			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+			ast_verb(3, "Polygator: requested GSM channel with IMSI=\"%s\" not found\n", imsi);
+		}
+	} else if (strlen(iccid)) {
+		// get requested channel from general channel list
+		if ((ch_gsm = pg_get_channel_gsm_by_iccid(iccid))) {
+			ast_mutex_lock(&ch_gsm->lock);
+			if (
+				(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
+				((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) &&
+				(ch_gsm->config.outgoing_type == PG_CALL_GSM_OUTGOING_TYPE_ALLOW) &&
+				(!ch_gsm->config.trunkonly) &&
+				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
+				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+				(pg_is_vinetic_run(vin)) &&
+#if ASTERISK_VERSION_NUM >= 100000
+				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
+#else
+				((joint = format & vin->capabilities)) &&
+#endif
+				((rtp = pg_get_channel_rtp(vin))) &&
+				((call = pg_channel_gsm_get_new_call(ch_gsm)))
+			) {
+				call->direction = PG_CALL_GSM_DIRECTION_OUTGOING;
+				call->channel_rtp = rtp;
+				ast_verb(3, "Polygator: got requested GSM channel=\"%s\" with ICCID=\"%s\"\n", ch_gsm->alias, iccid);
+			} else {
+				ast_mutex_unlock(&ch_gsm->lock);
+				ch_gsm = NULL;
+				*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+				ast_verb(3, "Polygator: requested GSM channel=\"%s\" with ICCID=\"%s\" busy\n", ch_gsm->alias, iccid);
+			}
+		} else {
+			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+			ast_verb(3, "Polygator: requested GSM channel with ICCID=\"%s\" not found\n", iccid);
 		}
 #if ASTERISK_VERSION_NUM >= 10800
 	} else if (strlen(conference)) {
@@ -11521,12 +11709,22 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeou
 		(sscanf(cpd, "TR[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
 		(sscanf(cpd, "TRUNK[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
 		(sscanf(cpd, "TRUNK[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
-			(sscanf(cpd, "CH[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
-			(sscanf(cpd, "CHANNEL[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
-				(sscanf(cpd, "CONF[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
-				(sscanf(cpd, "CONFERENCE[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
-					(sscanf(cpd, "%[0-9+]", called_name) != 1) &&
-					(sscanf(cpd, "%[A-Za-z]/%[0-9+]", flags, called_name) != 2)) {
+			(sscanf(cpd, "PLMN[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+			(sscanf(cpd, "PLMN[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
+				(sscanf(cpd, "CH[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+				(sscanf(cpd, "CH[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
+				(sscanf(cpd, "CHANNEL[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+				(sscanf(cpd, "CHANNEL[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
+					(sscanf(cpd, "IMSI[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+					(sscanf(cpd, "IMSI[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
+						(sscanf(cpd, "ICCID[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+						(sscanf(cpd, "ICCID[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
+							(sscanf(cpd, "CONF[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+							(sscanf(cpd, "CONF[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
+							(sscanf(cpd, "CONFERENCE[%[0-9A-Za-z-_]]/%[0-9+]", device, called_name) != 2) &&
+							(sscanf(cpd, "CONFERENCE[%[0-9A-Za-z-_]]/%[A-Za-z]/%[0-9+]", device, flags, called_name) != 3) &&
+								(sscanf(cpd, "%[0-9+]", called_name) != 1) &&
+								(sscanf(cpd, "%[A-Za-z]/%[0-9+]", flags, called_name) != 2)) {
 		ast_log(LOG_WARNING, "ast channel=\"%s\" has invalid called name=\"%s\"\n", ast_ch->name, called_name);
 		return -1;
 	}

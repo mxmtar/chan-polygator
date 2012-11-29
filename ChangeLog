@@ -50,3 +50,8 @@ Fix Alignment trap on ARM architecture in gsm7_to_ucs2().
 Fix segfault on parsing corrupted PDU.
 Add sanity check for maximum length of User Data and actual PDU length.
 Set timer for registering timeout after transition from registered state to searching state.
+Add aditional modifiers to Dial application to specify requested channels for
+outgoing GSM calls.
+PLMN - request channels with specified PLMN (MCC, MNC). (May work as trunk)
+IMSI - request channels with specified IMSI.
+ICCID - request channels with specified ICCID.
