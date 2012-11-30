@@ -55,3 +55,9 @@ outgoing GSM calls.
 PLMN - request channels with specified PLMN (MCC, MNC). (May work as trunk)
 IMSI - request channels with specified IMSI.
 ICCID - request channels with specified ICCID.
+30.11.12
+Fix segfault on parsing corrupted PDU.
+Add sanity check for maximum length of Recipent Address(SMS-STATUS-REPORT type).
+Add proceeding timer for drop bad incoming call,
+which occurred on corrupted RING CLIP CLCC responses.
+
