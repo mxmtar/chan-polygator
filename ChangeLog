@@ -50,3 +50,8 @@ Fix Alignment trap on ARM architecture in gsm7_to_ucs2().
 Fix segfault on parsing corrupted PDU.
 Add sanity check for maximum length of User Data and actual PDU length.
 Set timer for registering timeout after transition from registered state to searching state.
+30.11.12
+Fix segfault on parsing corrupted PDU.
+Add sanity check for maximum length of Recipent Address(SMS-STATUS-REPORT type).
+Add proceeding timer for drop bad incoming call,
+which occurred on corrupted RING CLIP CLCC responses.

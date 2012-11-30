@@ -600,6 +600,10 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		}
 		// recipient address
 		tlen = pdu->raddr.length = (unsigned char)(*cp++ & 0xff); // get length
+		if (tlen > 20) {
+			if (err) *err = __LINE__;
+			goto pdu_parser_error;
+		}		
 		if ((cp - pdu->buf) > pdu->full_len) {
 			if (err) *err = __LINE__;
 			goto pdu_parser_error;

@@ -4732,20 +4732,24 @@ static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_CALL_GSM_MSG_RELEASE_IND:
-			while (ast_channel_trylock(call->owner))
-			{
+			if (call->owner) {
+				while (ast_channel_trylock(call->owner))
+				{
+					ast_mutex_unlock(&ch_gsm->lock);
+					usleep(1000);
+					ast_mutex_lock(&ch_gsm->lock);
+				}
+
 				ast_mutex_unlock(&ch_gsm->lock);
-				usleep(1000);
+				call->owner->hangupcause = cause;
+				ast_queue_control(call->owner, AST_CONTROL_HANGUP);
 				ast_mutex_lock(&ch_gsm->lock);
-			}
 
-			ast_mutex_unlock(&ch_gsm->lock);
-			call->owner->hangupcause = cause;
-			ast_queue_control(call->owner, AST_CONTROL_HANGUP);
-			ast_mutex_lock(&ch_gsm->lock);
+				ast_channel_unlock(call->owner);
+				call->state = PG_CALL_GSM_STATE_RELEASE_INDICATION;
+			} else
+				pg_channel_gsm_put_call(ch_gsm, call);
 
-			ast_channel_unlock(call->owner);
-			call->state = PG_CALL_GSM_STATE_RELEASE_INDICATION;
 			res = 0;
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -5221,10 +5225,11 @@ static void *pg_channel_gsm_workthread(void *data)
 								// stop all timers
 								memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
 								// hangup active calls
-								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-									pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
-								while (ch_gsm->call_list.first)
-								{
+								while (pg_channel_gsm_get_calls_count(ch_gsm)) {
+									AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
+										pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+										break;
+									}
 									ast_mutex_unlock(&ch_gsm->lock);
 									usleep(1000);
 									ast_mutex_lock(&ch_gsm->lock);
@@ -5451,6 +5456,8 @@ static void *pg_channel_gsm_workthread(void *data)
 												ast_verb(4, "GSM channel=\"%s\": incoming active line id=%d\n", ch_gsm->alias, parser_ptrs.clcc_ex->id);
 												// processing OVERLAP_RECEIVING
 												if (call->state == PG_CALL_GSM_STATE_OVERLAP_RECEIVING) {
+													// stop proceeding timer
+													x_timer_stop(call->timers.proceeding);
 													// get calling number
 													if (parser_ptrs.clip_un->number_len > 0) {
 														ast_copy_string(call->calling_name.value, parser_ptrs.clcc_ex->number, MAX_ADDRESS_LENGTH);
@@ -5589,8 +5596,10 @@ static void *pg_channel_gsm_workthread(void *data)
 								// perform line contest
 								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
 								{
-									if (call->contest > 1)
+									if (call->contest > 1) {
 										pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+										break;
+									}
 								}
 							}
 							break;
@@ -5798,16 +5807,15 @@ static void *pg_channel_gsm_workthread(void *data)
 											x_timer_stop(ch_gsm->timers.registering);
 											// stop smssend timer
 											x_timer_stop(ch_gsm->timers.smssend);
-											// hangup active call
-											AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-											{
-												// hangup - GSM
-												if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
-													pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
-												else
-													pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-												// hangup - asterisk core call
-												pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+											// hangup active calls
+											while (pg_channel_gsm_get_calls_count(ch_gsm)) {
+												AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
+													pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+													break;
+												}
+												ast_mutex_unlock(&ch_gsm->lock);
+												usleep(1000);
+												ast_mutex_lock(&ch_gsm->lock);
 											}
 											if (ch_gsm->flags.sim_inserted) {
 												// decrement attempt counter
@@ -7832,6 +7840,8 @@ static void *pg_channel_gsm_workthread(void *data)
 				{
 					if (call->direction == PG_CALL_GSM_DIRECTION_INCOMING) {
 						if (call->state == PG_CALL_GSM_STATE_OVERLAP_RECEIVING) {
+							// stop proceeding timer
+							x_timer_stop(call->timers.proceeding);
 							// set calling party as unknown
 							address_classify("unknown", &call->calling_name);
 							// run call state machine
@@ -7844,6 +7854,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								(call->state != PG_CALL_GSM_STATE_LOCAL_HOLD) &&
 									(call->state != PG_CALL_GSM_STATE_REMOTE_HOLD)) {
 							pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_CHANNEL_UNACCEPTABLE);
+							break;
 						}
 					}
 				}
@@ -7852,6 +7863,8 @@ static void *pg_channel_gsm_workthread(void *data)
 						call->direction = PG_CALL_GSM_DIRECTION_INCOMING;
 						pg_channel_gsm_last = ch_gsm;
 						pg_call_gsm_sm(call, PG_CALL_GSM_MSG_SETUP_IND, 0);
+						// start proceeding timer
+						x_timer_set(call->timers.proceeding, proceeding_timeout);
 					}
 				}
 			}
@@ -7866,6 +7879,8 @@ static void *pg_channel_gsm_workthread(void *data)
 					{
 						// valid if call state OVERLAP_RECEIVING
 						if (call->state == PG_CALL_GSM_STATE_OVERLAP_RECEIVING) {
+							// stop proceeding timer
+							x_timer_stop(call->timers.proceeding);
 							// get calling number
 							if (parser_ptrs.clip_un->number_len > 0) {
 								ast_copy_string(call->calling_name.value, parser_ptrs.clip_un->number, MAX_ADDRESS_LENGTH);
@@ -8997,14 +9012,14 @@ static void *pg_channel_gsm_workthread(void *data)
 			// dial
 			if (is_x_timer_enable(call->timers.dial)) {
 				if (is_x_timer_fired(call->timers.dial)) {
+					// stop dial timer
+					x_timer_stop(call->timers.dial);
 					// dial timer fired
 					ast_verb(4, "GSM channel=\"%s\":  call line=%d dialing timeout=%ld.%06ld expired\n",
 								ch_gsm->alias,
 			  					call->line,
 								call->timers.dial.timeout.tv_sec,
 								call->timers.dial.timeout.tv_usec);
-					// run call sm
-					pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NO_ANSWER);
 					// hangup gsm channel
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
@@ -9014,17 +9029,18 @@ static void *pg_channel_gsm_workthread(void *data)
 						else
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					}
-					// stop dial timer
-					x_timer_stop(call->timers.dial);
+					// run call sm
+					pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NO_ANSWER);
+					break;
 				}
 			}
 			// proceeding
 			if (is_x_timer_enable(call->timers.proceeding)) {
 				if (is_x_timer_fired(call->timers.proceeding)) {
+					// stop proceeding timer
+					x_timer_stop(call->timers.proceeding);
 					// proceeding timer fired
 					ast_verb(4, "GSM channel=\"%s\":  call line=%d proceeding timeout expired\n", ch_gsm->alias, call->line);
-					// run call sm
-					pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_TEMPORARY_FAILURE);
 					// hangup gsm channel
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
@@ -9034,8 +9050,9 @@ static void *pg_channel_gsm_workthread(void *data)
 						else
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					}
-					// stop proceeding timer
-					x_timer_stop(call->timers.proceeding);
+					// run call sm
+					pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_TEMPORARY_FAILURE);
+					break;
 				}
 			}
 		}
@@ -9668,10 +9685,11 @@ static void *pg_channel_gsm_workthread(void *data)
 			ch_gsm->flags.restart = 0;
 			ch_gsm->flags.restart_now = 0;
 			// hangup active calls
-			AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-				pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
-			while (ch_gsm->call_list.first)
-			{
+			while (pg_channel_gsm_get_calls_count(ch_gsm)) {
+				AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
+					pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+					break;
+				}
 				ast_mutex_unlock(&ch_gsm->lock);
 				usleep(1000);
 				ast_mutex_lock(&ch_gsm->lock);
@@ -9714,10 +9732,11 @@ static void *pg_channel_gsm_workthread(void *data)
 			ch_gsm->flags.restart = 0;
 			ast_verb(4, "GSM channel=\"%s\" received restart signal\n", ch_gsm->alias);
 			// hangup active calls
-			AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-				pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
-			while (ch_gsm->call_list.first)
-			{
+			while (pg_channel_gsm_get_calls_count(ch_gsm)) {
+				AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
+					pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+					break;
+				}
 				ast_mutex_unlock(&ch_gsm->lock);
 				usleep(1000);
 				ast_mutex_lock(&ch_gsm->lock);
@@ -14977,10 +14996,11 @@ static char *pg_cli_channel_gsm_action_suspend_resume(struct ast_cli_entry *e, i
 					// stop all timers
 					memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
 					// hangup active calls
-					AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-						pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
-					while (ch_gsm->call_list.first)
-					{
+					while (pg_channel_gsm_get_calls_count(ch_gsm)) {
+						AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
+							pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+							break;
+						}
 						ast_mutex_unlock(&ch_gsm->lock);
 						usleep(1000);
 						ast_mutex_lock(&ch_gsm->lock);
