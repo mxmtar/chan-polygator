@@ -8387,13 +8387,18 @@ static void *pg_channel_gsm_workthread(void *data)
 						// check channel
 						if (ast_ch_tmp) {
 							// set channel variables
+
 							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSCHANNEL", ch_gsm->alias); // Channel name
-							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSCENTERADDRESS", pdu->scaddr.value); // SMS Center Address
+							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSCENTERADDRESSVALUE", pdu->scaddr.value); // SMS Center Address
 							sprintf(tmpbuf, "%d", pdu->scaddr.type.full);
 							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSCENTERADDRESSTYPE", tmpbuf); // SMS Center Address Type
-							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSORIGADDRESS", pdu->raddr.value); // SMS Originator Address
+							sprintf(tmpbuf, "%s%s", (pdu->scaddr.type.full == 145)?("+"):(""), pdu->scaddr.value);
+							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSCENTERADDRESS", tmpbuf); // SMS Center Address Full
+							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSORIGADDRESSVALUE", pdu->raddr.value); // SMS Originator Address
 							sprintf(tmpbuf, "%d", pdu->raddr.type.full);
 							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSORIGADDRESSTYPE", tmpbuf); // SMS Originator Address Type
+							sprintf(tmpbuf, "%s%s", (pdu->raddr.type.full == 145)?("+"):(""), pdu->raddr.value);
+							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSORIGADDRESS", tmpbuf); // SMS Originator Address Full
 							sprintf(tmpbuf, "%d", pdu->concat_num);
 							pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSPART", tmpbuf); // SMS current part number
 							sprintf(tmpbuf, "%d", pdu->concat_cnt);
@@ -13144,6 +13149,37 @@ static char *pg_cli_generate_complete_channel_gsm_clir(const char *begin, int co
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_gsm_sms_ntf_en()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_gsm_sms_ntf_en(const char *begin, int count, const char *channel_gsm)
+{
+	char *res;
+	int beginlen;
+	int which;
+	struct pg_channel_gsm *ch_gsm;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
+		ast_mutex_lock(&ch_gsm->lock);
+		if (ch_gsm->config.sms_notify_enable) {
+			if((!strncmp(begin, "off", beginlen)) && (++which > count))
+				res = ast_strdup("off");
+		} else {
+			if ((!strncmp(begin, "on", beginlen)) && (++which > count))
+				res = ast_strdup("on");
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_gsm_sms_ntf_en()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_generate_complete_channel_gsm_ali_nelec()
 //------------------------------------------------------------------------------
 static char *pg_cli_generate_complete_channel_gsm_ali_nelec(const char *begin, int count, const char *channel_gsm)
@@ -15304,6 +15340,8 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						return pg_cli_generate_complete_channel_gsm_callwait(a->word, a->n, gargv[3]);
 					else if (!strcmp(gargv[5], "clir"))
 						return pg_cli_generate_complete_channel_gsm_clir(a->word, a->n, gargv[3]);
+					else if (!strcmp(gargv[5], "sms.ntf.en"))
+						return pg_cli_generate_complete_channel_gsm_sms_ntf_en(a->word, a->n, gargv[3]);
 					else if (!strcmp(gargv[5], "sms.ntf.ctx"))
 						return pg_cli_generate_complete_context(a->word, a->n);
 					else if (!strcmp(gargv[5], "trunk"))
@@ -16353,10 +16391,12 @@ pg_channel_gsm_imei_set_end:
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_CONTEXT:
 							ast_copy_string(ch_gsm->config.sms_notify_context, a->argv[6], sizeof(ch_gsm->config.sms_notify_context));
+							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_EXTENSION:
 							ast_copy_string(ch_gsm->config.sms_notify_extension, a->argv[6], sizeof(ch_gsm->config.sms_notify_extension));
+							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNK:
