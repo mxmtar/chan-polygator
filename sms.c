@@ -316,12 +316,15 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 	struct timeval tv;
 	struct tm tmc, *tml;
 
+	memset(&tmc, 0, sizeof(struct tm));
+
 	// check for valid input
 	if (!pduhex || !pduhexlen || !pdulen) {
 		if (err) *err = __LINE__;
 		goto pdu_parser_error;
 	}
 	lpdu = strdup(pduhex);
+	tlen = pduhexlen;
 	// create storage
 	if (!(pdu = malloc(sizeof(struct pdu)))){
 		if (err) *err = __LINE__;
@@ -333,7 +336,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 	pdu->len = pdulen;
 	// convert PDU from hex to bin
 	ip = lpdu;
-	ilen = pduhexlen;
+	ilen = tlen;
 	op = pdu->buf;
 	olen = MAX_PDU_BIN_SIZE;
 	if (str_hex_to_bin(&ip, &ilen, &op, &olen)) {
@@ -349,20 +352,22 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		// is abnormally - sanity check
 		if (err) *err = __LINE__;
 		goto pdu_parser_error;
-	}
 /*
-	else if (pdu->len == pdu->full_len) {
+	} else if (pdu->len == pdu->full_len) {
 		// SCA not present in PDU
 		sprintf(pdu->scaddr.value, "unknown");
 		pdu->scaddr.length = strlen(pdu->scaddr.value);
 		pdu->scaddr.type.bits.reserved = 1;
 		pdu->scaddr.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
 		pdu->scaddr.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
-	}
 */
-	else {
+	} else {
 		// SCA present in PDU
-		tlen = *cp++ & 0xff;
+		tlen = (unsigned char)(*cp++ & 0xff);
+		if (tlen > 9) {
+			if (err) *err = __LINE__;
+			goto pdu_parser_error;
+		}
 		if ((cp - pdu->buf) > pdu->full_len) {
 			if (err) *err = __LINE__;
 			goto pdu_parser_error;
@@ -419,7 +424,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		if (tlen > 20) {
 			if (err) *err = __LINE__;
 			goto pdu_parser_error;
-		}		
+		}
 		if ((cp - pdu->buf) > pdu->full_len) {
 			if (err) *err = __LINE__;
 			goto pdu_parser_error;
