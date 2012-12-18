@@ -1,3 +1,4 @@
+
 /******************************************************************************/
 /* chan_polygator.c                                                           */
 /******************************************************************************/
@@ -31,6 +32,7 @@
 #include "asterisk/cli.h"
 #include "asterisk/frame.h"
 #include "asterisk/md5.h"
+#include "asterisk/manager.h"
 #include "asterisk/module.h"
 #include "asterisk/musiconhold.h"
 #include "asterisk/paths.h"
@@ -52,6 +54,23 @@
 #include "m10.h"
 #include "sim300.h"
 #include "sim900.h"
+
+/*** DOCUMENTATION
+	<manager name="PolygatorShowGSMNetinfo" language="en_US">
+		<synopsis>
+			Show GSM network information of Polygator channels.
+		</synopsis>
+		<syntax>
+			<xi:include xpointer="xpointer(/docs/manager[@name='Login']/syntax/parameter[@name='ActionID'])" />
+			<parameter name="Channel">
+				<para>Specify the GSM channel to show.  Show all GSM channels if not present.</para>
+			</parameter>
+		</syntax>
+		<description>
+			<para>Similar to the CLI command "polygator show gsm netinfo".</para>
+		</description>
+	</manager>
+ ***/
 
 #if SQLITE_VERSION_NUMBER < 3003009
 	#define sqlite3_prepare_fun(a,b,c,d,e) sqlite3_prepare(a,b,c,d,e)
@@ -546,8 +565,15 @@ struct pg_channel_gsm {
 	AST_LIST_ENTRY(pg_channel_gsm) pg_general_channel_gsm_list_entry;
 };
 
+enum {
+	PG_TRUNK_GSM_ALL,
+	PG_TRUNK_GSM_MANUAL,
+	PG_TRUNK_GSM_MCCMNC,
+};
+
 struct pg_trunk_gsm {
 	char *name;
+	int type;
 	struct pg_trunk_gsm_channel_gsm_fold *channel_gsm_last;
 	AST_LIST_HEAD_NOLOCK(trunk_channel_gsm_list, pg_trunk_gsm_channel_gsm_fold) channel_gsm_list;
 	AST_LIST_ENTRY(pg_trunk_gsm) pg_general_trunk_gsm_list_entry;
@@ -614,6 +640,7 @@ static void pg_atexit(void);
 
 static int pg_atexit_registered = 0;
 static int pg_cli_registered = 0;
+static int pg_man_registered = 0;
 static int pg_gsm_tech_neededed = 0;
 static int pg_gsm_tech_registered = 0;
 
@@ -643,7 +670,7 @@ static char *pg_cli_show_channels(struct ast_cli_entry *e, int cmd, struct ast_c
 static char *pg_cli_show_trunks(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
-static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_devinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_board(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
@@ -661,7 +688,7 @@ static struct ast_cli_entry pg_cli[] = {
 	AST_CLI_DEFINE(pg_cli_show_trunks, "Show PG trunks information summary"),
 	AST_CLI_DEFINE(pg_cli_show_calls, "Show PG calls information summary"),
 	AST_CLI_DEFINE(pg_cli_show_gsm_call_stat_out, "Show PG outgoing GSM calls statistic"),
-	AST_CLI_DEFINE(pg_cli_show_netinfo, "Show PG GSM network information summary"),
+	AST_CLI_DEFINE(pg_cli_show_gsm_netinfo, "Show PG GSM network information summary"),
 	AST_CLI_DEFINE(pg_cli_show_devinfo, "Show PG device information summary"),
 	AST_CLI_DEFINE(pg_cli_show_board, "Show PG board information"),
 	AST_CLI_DEFINE(pg_cli_show_vinetic, "Show VINETIC information"),
@@ -2793,12 +2820,12 @@ static int pg_get_channel_gsm_power_sequence_number(void)
 //------------------------------------------------------------------------------
 // pg_get_channel_gsm_from_trunk_by_name()
 //------------------------------------------------------------------------------
-static struct pg_channel_gsm *pg_get_channel_gsm_from_trunk_by_name(struct pg_trunk_gsm *trunk, const char *name)
+static struct pg_channel_gsm *pg_get_channel_gsm_from_trunk_by_name(struct pg_trunk_gsm *trunk, int type, const char *name)
 {
 	struct pg_channel_gsm *ch_gsm = NULL;
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold;
 	// check for name present
-	if (trunk && name) {
+	if ((trunk) && (trunk->type == type) && (name)) {
 		// traverse channel gsm list for matching entry name
 		AST_LIST_TRAVERSE(&trunk->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry)
 		{
@@ -2818,11 +2845,11 @@ static struct pg_channel_gsm *pg_get_channel_gsm_from_trunk_by_name(struct pg_tr
 //------------------------------------------------------------------------------
 // pg_get_channel_gsm_fold_from_trunk_by_name()
 //------------------------------------------------------------------------------
-static struct pg_trunk_gsm_channel_gsm_fold *pg_get_channel_gsm_fold_from_trunk_by_name(struct pg_trunk_gsm *trunk, const char *name)
+static struct pg_trunk_gsm_channel_gsm_fold *pg_get_channel_gsm_fold_from_trunk_by_name(struct pg_trunk_gsm *trunk, int type, const char *name)
 {
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold = NULL;
 	// check for name present
-	if (trunk && name) {
+	if ((trunk) && (trunk->type == type) && (name)) {
 		// traverse channel gsm list for matching entry name
 		AST_LIST_TRAVERSE(&trunk->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry)
 		{
@@ -2840,7 +2867,7 @@ static struct pg_trunk_gsm_channel_gsm_fold *pg_get_channel_gsm_fold_from_trunk_
 //------------------------------------------------------------------------------
 // pg_get_trunk_gsm_by_name()
 //------------------------------------------------------------------------------
-static struct pg_trunk_gsm *pg_get_trunk_gsm_by_name(const char *name)
+static struct pg_trunk_gsm *pg_get_trunk_gsm_by_name(const char *name, int type)
 {
 	struct pg_trunk_gsm *tr_gsm = NULL;
 	// check for name present
@@ -2852,7 +2879,7 @@ static struct pg_trunk_gsm *pg_get_trunk_gsm_by_name(const char *name)
 			AST_LIST_TRAVERSE(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry)
 			{
 				// compare name strings
-				if (!strcmp(name, tr_gsm->name)) break;
+				if ((type == tr_gsm->type) && (!strcmp(name, tr_gsm->name))) break;
 			}
 		}
 	}
@@ -4922,6 +4949,9 @@ static void *pg_channel_gsm_workthread(void *data)
 	struct pg_call_gsm *call = NULL;
 
 	struct ast_channel *ast_ch_tmp = NULL;
+	
+	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold;
+	struct pg_trunk_gsm *tr_gsm;
 
 	struct pg_channel_gsm *ch_gsm = (struct pg_channel_gsm *)data;
 
@@ -5823,6 +5853,34 @@ static void *pg_channel_gsm_workthread(void *data)
 										if (!ch_gsm->operator_name) ch_gsm->operator_name = ast_strdup(parser_ptrs.cops_rd->oper);
 									} else if ((parser_ptrs.cops_rd->format == 2) && (parser_ptrs.cops_rd->oper_len >= 0)) {
 										if (!ch_gsm->operator_code) ch_gsm->operator_code = ast_strdup(parser_ptrs.cops_rd->oper);
+											// search trunk gsm
+											tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm->operator_code, PG_TRUNK_GSM_MCCMNC);
+											if (!tr_gsm) {
+												// create trunk storage
+												if ((tr_gsm = ast_calloc(1, sizeof(struct pg_trunk_gsm)))) {
+													tr_gsm->name = ast_strdup(ch_gsm->operator_code);
+													tr_gsm->type = PG_TRUNK_GSM_MCCMNC;
+													AST_LIST_INSERT_TAIL(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry);
+													// init trunk channel list
+													AST_LIST_HEAD_SET_NOLOCK(&tr_gsm->channel_gsm_list, NULL);
+													tr_gsm->channel_gsm_last = NULL;
+												}
+											}
+											if (tr_gsm) {
+												// check for channel already in trunk
+												if (!pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MCCMNC, ch_gsm->alias)) {
+													// create trunk channel gsm fold
+													if ((ch_gsm_fold = ast_calloc(1, sizeof(struct pg_trunk_gsm_channel_gsm_fold)))) {
+													ch_gsm_fold->name = ast_strdup(ch_gsm->operator_code);
+													// set channel pointer
+													ch_gsm_fold->channel_gsm = ch_gsm;
+													// add entry into trunk list
+													AST_LIST_INSERT_TAIL(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
+													// add entry into channel list
+													AST_LIST_INSERT_TAIL(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+												}
+											}
+										}
 									}
 								}
 							}
@@ -5905,6 +5963,13 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
 											// stop registering timer
 											x_timer_stop(ch_gsm->timers.registering);
+											// get operator
+											// name
+											pg_atcommand_queue_append(ch_gsm, AT_COPS, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "3,0");
+											pg_atcommand_queue_append(ch_gsm, AT_COPS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
+											// code
+											pg_atcommand_queue_append(ch_gsm, AT_COPS, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "3,2");
+											pg_atcommand_queue_append(ch_gsm, AT_COPS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
 										}
 									}
 								}
@@ -6023,6 +6088,17 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->smsc_number.type.bits.reserved = 1;
 											ch_gsm->smsc_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
 											ch_gsm->smsc_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
+
+											if ((tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm->operator_code, PG_TRUNK_GSM_MCCMNC))) {
+												if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MCCMNC, ch_gsm->alias))) {
+													// remove entry from trunk list
+													AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
+													// remove entry from channel list
+													AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+													ast_free(ch_gsm_fold->name);
+													ast_free(ch_gsm_fold);
+												}
+											}
 
 											if (ch_gsm->operator_name) ast_free(ch_gsm->operator_name); ch_gsm->operator_name = NULL;
 											if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
@@ -7311,6 +7387,17 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->smsc_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
 												ch_gsm->smsc_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
 
+												if ((tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm->operator_code, PG_TRUNK_GSM_MCCMNC))) {
+													if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MCCMNC, ch_gsm->alias))) {
+														// remove entry from trunk list
+														AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
+														// remove entry from channel list
+														AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+														ast_free(ch_gsm_fold->name);
+														ast_free(ch_gsm_fold);
+													}
+												}
+
 												if (ch_gsm->operator_name) ast_free(ch_gsm->operator_name); ch_gsm->operator_name = NULL;
 												if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 												if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
@@ -7513,6 +7600,17 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->smsc_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
 												ch_gsm->smsc_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
 
+												if ((tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm->operator_code, PG_TRUNK_GSM_MCCMNC))) {
+													if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MCCMNC, ch_gsm->alias))) {
+														// remove entry from trunk list
+														AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
+														// remove entry from channel list
+														AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+														ast_free(ch_gsm_fold->name);
+														ast_free(ch_gsm_fold);
+													}
+												}
+
 												if (ch_gsm->operator_name) ast_free(ch_gsm->operator_name); ch_gsm->operator_name = NULL;
 												if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 												if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
@@ -7710,6 +7808,17 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->smsc_number.type.bits.reserved = 1;
 												ch_gsm->smsc_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
 												ch_gsm->smsc_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
+
+												if ((tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm->operator_code, PG_TRUNK_GSM_MCCMNC))) {
+													if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MCCMNC, ch_gsm->alias))) {
+														// remove entry from trunk list
+														AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
+														// remove entry from channel list
+														AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+														ast_free(ch_gsm_fold->name);
+														ast_free(ch_gsm_fold);
+													}
+												}
 
 												if (ch_gsm->operator_name) ast_free(ch_gsm->operator_name); ch_gsm->operator_name = NULL;
 												if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
@@ -8079,7 +8188,7 @@ static void *pg_channel_gsm_workthread(void *data)
 			else if (is_str_begin_by(r_buf, "+CFUN:")) {
 				// valid if mgmt state WAIT_CFUN
 				if (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_CFUN) {
-					if (!strcasecmp(r_buf, "+CFUN: 0")) {
+					if (is_str_begin_by(r_buf, "+CFUN: 0")) {
 						// minimum functionality - try to enable GSM module full functionality
 						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 					}
@@ -8134,6 +8243,17 @@ static void *pg_channel_gsm_workthread(void *data)
 							ch_gsm->smsc_number.type.bits.reserved = 1;
 							ch_gsm->smsc_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
 							ch_gsm->smsc_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
+
+							if ((tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm->operator_code, PG_TRUNK_GSM_MCCMNC))) {
+								if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MCCMNC, ch_gsm->alias))) {
+									// remove entry from trunk list
+									AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
+									// remove entry from channel list
+									AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+									ast_free(ch_gsm_fold->name);
+									ast_free(ch_gsm_fold);
+								}
+							}
 
 							if (ch_gsm->operator_name) ast_free(ch_gsm->operator_name); ch_gsm->operator_name = NULL;
 							if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
@@ -10165,6 +10285,17 @@ pg_channel_gsm_workthread_end:
 	ch_gsm->smsc_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
 	ch_gsm->smsc_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
 
+	if ((tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm->operator_code, PG_TRUNK_GSM_MCCMNC))) {
+		if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MCCMNC, ch_gsm->alias))) {
+			// remove entry from trunk list
+			AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
+			// remove entry from channel list
+			AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+			ast_free(ch_gsm_fold->name);
+			ast_free(ch_gsm_fold);
+		}
+	}
+
 	if (ch_gsm->operator_name) ast_free(ch_gsm->operator_name); ch_gsm->operator_name = NULL;
 	if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 	if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
@@ -11030,7 +11161,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 	if (strlen(trunk)) {
 		ast_mutex_lock(&pg_lock);
 		// get requested trunk from general trunk list
-		if ((tr_gsm = pg_get_trunk_gsm_by_name(trunk))) {
+		if ((tr_gsm = pg_get_trunk_gsm_by_name(trunk, PG_TRUNK_GSM_MANUAL))) {
 			ch_gsm_fold_start = NULL;
 			if (tr_gsm->channel_gsm_last)
 				ch_gsm_fold_start = tr_gsm->channel_gsm_last->pg_trunk_gsm_channel_gsm_fold_trunk_list_entry.next;
@@ -11089,58 +11220,64 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 		ast_mutex_unlock(&pg_lock);
 	} else if (strlen(plmn)) {
 		ast_mutex_lock(&pg_lock);
-		// search free channel in general channel list
-		ch_gsm_start = NULL;
-		if (pg_channel_gsm_last)
-			ch_gsm_start = pg_channel_gsm_last->pg_general_channel_gsm_list_entry.next;
-		if (!ch_gsm_start)
-			ch_gsm_start = pg_general_channel_gsm_list.first;
-		ch_gsm = ch_gsm_start;
-		// traverse channel list
-		while (ch_gsm)
-		{
-			ast_mutex_lock(&ch_gsm->lock);
-			if (
-				(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
-				(ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) &&
-				(ch_gsm->config.outgoing_type == PG_CALL_GSM_OUTGOING_TYPE_ALLOW) &&
-				(!ch_gsm->config.trunkonly) &&
-				(ch_gsm->operator_code && !strcmp(plmn, ch_gsm->operator_code)) &&
-				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
-				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
-				(pg_is_vinetic_run(vin)) &&
+		// get requested trunk from general trunk list
+		if ((tr_gsm = pg_get_trunk_gsm_by_name(plmn, PG_TRUNK_GSM_MCCMNC))) {
+			ch_gsm_fold_start = NULL;
+			if (tr_gsm->channel_gsm_last)
+				ch_gsm_fold_start = tr_gsm->channel_gsm_last->pg_trunk_gsm_channel_gsm_fold_trunk_list_entry.next;
+			if (!ch_gsm_fold_start)
+				ch_gsm_fold_start = tr_gsm->channel_gsm_list.first;
+			ch_gsm_fold = ch_gsm_fold_start;
+			// traverse trunk channel list
+			while (ch_gsm_fold)
+			{
+				ch_gsm = ch_gsm_fold->channel_gsm;
+				if (ch_gsm) {
+					ast_mutex_lock(&ch_gsm->lock);
+					if (
+						(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
+						((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) &&
+						(ch_gsm->config.outgoing_type == PG_CALL_GSM_OUTGOING_TYPE_ALLOW) &&
+						(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
+						((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+						(pg_is_vinetic_run(vin)) &&
 #if ASTERISK_VERSION_NUM >= 100000
-				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
+						((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
-				((joint = format & vin->capabilities)) &&
+						((joint = format & vin->capabilities)) &&
 #endif
-				((rtp = pg_get_channel_rtp(vin)))
-			) {
-				// set new empty call to prevent missing ownership
-				if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
-					call->direction = PG_CALL_GSM_DIRECTION_OUTGOING;
-					call->channel_rtp = rtp;
-					pg_channel_gsm_last = ch_gsm;
-					ast_verb(3, "Polygator: got GSM channel=\"%s\" from PLMN=\"%s\"\n", ch_gsm->alias, plmn);
+						((rtp = pg_get_channel_rtp(vin)))
+					) {
+						// set new empty call to prevent missing ownership
+						if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
+							call->direction = PG_CALL_GSM_DIRECTION_OUTGOING;
+							call->channel_rtp = rtp;
+							tr_gsm->channel_gsm_last = ch_gsm_fold;
+							ast_verb(3, "Polygator: got GSM channel=\"%s\" from GSM PLMN=\"%s\"\n", ch_gsm->alias, plmn);
+							break;
+						}
+					}
+					ast_mutex_unlock(&ch_gsm->lock);
+				}
+				ch_gsm_fold = ch_gsm_fold->pg_trunk_gsm_channel_gsm_fold_trunk_list_entry.next;
+				if (!ch_gsm_fold)
+					ch_gsm_fold = tr_gsm->channel_gsm_list.first;
+				if (ch_gsm_fold == ch_gsm_fold_start) {
+					ch_gsm = NULL;
+					ch_gsm_fold = NULL;
 					break;
 				}
+			}  // traverse trunk channel list
+			// congestion -- free channel not found
+			if (!ch_gsm) {
+				*cause = AST_CAUSE_NORMAL_CIRCUIT_CONGESTION;
+				ast_verb(3, "Polygator: free GSM channel from GSM PLMN=\"%s\" not found\n", plmn);
 			}
-			ast_mutex_unlock(&ch_gsm->lock);
-
-			ch_gsm = ch_gsm->pg_general_channel_gsm_list_entry.next;
-			if (!ch_gsm)
-				ch_gsm = pg_general_channel_gsm_list.first;
-			if (ch_gsm == ch_gsm_start) {
-				ch_gsm = NULL;
-				break;
-			}
-		} // end of traverse channel list
-		ast_mutex_unlock(&pg_lock);
-		// congestion -- free channel not found
-		if (!ch_gsm) {
-			*cause = AST_CAUSE_NORMAL_CIRCUIT_CONGESTION;
-			ast_verb(3, "Polygator: free GSM channel from PLMN=\"%s\" not found\n", plmn);
+		} else { // trunk not found
+			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
+			ast_verb(3, "Polygator: requested GSM PLMN=\"%s\" not found\n", plmn);
 		}
+		ast_mutex_unlock(&pg_lock);
 	} else if (strlen(channel)) {
 		// get requested channel from general channel list
 		if ((ch_gsm = pg_get_channel_gsm_by_name(channel))) {
@@ -13477,7 +13614,7 @@ static char *pg_cli_generate_complete_trunk_gsm(const char *begin, int count)
 
 	AST_LIST_TRAVERSE(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry)
 	{
-		if ((!strncmp(begin, tr_gsm->name, beginlen)) && (++which > count)) {
+		if ((tr_gsm->type == PG_TRUNK_GSM_MANUAL) && (!strncmp(begin, tr_gsm->name, beginlen)) && (++which > count)) {
 			res = ast_strdup(tr_gsm->name);
 			break;
 		}
@@ -13509,7 +13646,7 @@ static char *pg_cli_generate_complete_trunk_gsm_channel_set(const char *begin, i
 
 	AST_LIST_TRAVERSE(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry)
 	{
-		if ((!strncmp(begin, tr_gsm->name, beginlen)) && (++which > count) && (!pg_get_channel_gsm_from_trunk_by_name(tr_gsm, channel_gsm))) {
+		if ((tr_gsm->type == PG_TRUNK_GSM_MANUAL) && (!strncmp(begin, tr_gsm->name, beginlen)) && (++which > count) && (!pg_get_channel_gsm_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MANUAL, channel_gsm))) {
 			res = ast_strdup(tr_gsm->name);
 			break;
 		}
@@ -13900,19 +14037,21 @@ static char *pg_cli_show_trunks(struct ast_cli_entry *e, int cmd, struct ast_cli
 	code_fl = strlen("Code");
 	AST_LIST_TRAVERSE(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry)
 	{
-		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
-		trunk_fl = mmax(trunk_fl, strlen(tr_gsm->name));
-		AST_LIST_TRAVERSE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry)
-		{
-			ch_gsm = ch_gsm_fold->channel_gsm;
-			ast_mutex_lock(&ch_gsm->lock);
-			channel_fl = mmax(channel_fl, strlen(ch_gsm->alias));
-			status_fl = mmax(status_fl, strlen(ch_gsm->flags.enable?"enabled":"disabled"));
-			sim_fl = mmax(sim_fl, strlen(ch_gsm->flags.sim_inserted?"inserted":""));
-			reg_fl = mmax(reg_fl, strlen(ch_gsm->flags.enable?reg_status_print_short(ch_gsm->reg_stat):""));
-			oper_fl = mmax(oper_fl, strlen(ch_gsm->operator_name?ch_gsm->operator_name:""));
-			code_fl = mmax(code_fl, strlen(ch_gsm->operator_code?ch_gsm->operator_code:""));
-			ast_mutex_unlock(&ch_gsm->lock);
+		if (tr_gsm->type == PG_TRUNK_GSM_MANUAL) {
+			number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
+			trunk_fl = mmax(trunk_fl, strlen(tr_gsm->name));
+			AST_LIST_TRAVERSE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry)
+			{
+				ch_gsm = ch_gsm_fold->channel_gsm;
+				ast_mutex_lock(&ch_gsm->lock);
+				channel_fl = mmax(channel_fl, strlen(ch_gsm->alias));
+				status_fl = mmax(status_fl, strlen(ch_gsm->flags.enable?"enabled":"disabled"));
+				sim_fl = mmax(sim_fl, strlen(ch_gsm->flags.sim_inserted?"inserted":""));
+				reg_fl = mmax(reg_fl, strlen(ch_gsm->flags.enable?reg_status_print_short(ch_gsm->reg_stat):""));
+				oper_fl = mmax(oper_fl, strlen(ch_gsm->operator_name?ch_gsm->operator_name:""));
+				code_fl = mmax(code_fl, strlen(ch_gsm->operator_code?ch_gsm->operator_code:""));
+				ast_mutex_unlock(&ch_gsm->lock);
+			}
 		}
 		count++;
 	}
@@ -13930,29 +14069,32 @@ static char *pg_cli_show_trunks(struct ast_cli_entry *e, int cmd, struct ast_cli
 		count = 0;
 		AST_LIST_TRAVERSE(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry)
 		{
-			snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count++);
-			ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
-					number_fl, buf,
-			  		trunk_fl, tr_gsm->name,
-					channel_fl, "",
-					status_fl, "",
-					sim_fl, "",
-					reg_fl, "",
-					oper_fl, "",
-					code_fl, "");
-			AST_LIST_TRAVERSE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry)
-			{
-				ch_gsm = ch_gsm_fold->channel_gsm;
+			if (tr_gsm->type == PG_TRUNK_GSM_MANUAL) {
+				snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count++);
 				ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
-					number_fl, "",
-			  		trunk_fl, "",
-					channel_fl, ch_gsm->alias,
-					status_fl, ch_gsm->flags.enable?"enabled":"disabled",
-					sim_fl, ch_gsm->flags.sim_inserted?"inserted":"",
-					reg_fl, ch_gsm->flags.enable?reg_status_print_short(ch_gsm->reg_stat):"",
-					oper_fl, ch_gsm->operator_name?ch_gsm->operator_name:"",
-					code_fl, ch_gsm->operator_code?ch_gsm->operator_code:"");
-				ast_mutex_unlock(&ch_gsm->lock);
+						number_fl, buf,
+				  		trunk_fl, tr_gsm->name,
+						channel_fl, "",
+						status_fl, "",
+						sim_fl, "",
+						reg_fl, "",
+						oper_fl, "",
+						code_fl, "");
+				AST_LIST_TRAVERSE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry)
+				{
+					ch_gsm = ch_gsm_fold->channel_gsm;
+					ast_mutex_lock(&ch_gsm->lock);
+					ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+						number_fl, "",
+			  			trunk_fl, "",
+						channel_fl, ch_gsm->alias,
+						status_fl, ch_gsm->flags.enable?"enabled":"disabled",
+						sim_fl, ch_gsm->flags.sim_inserted?"inserted":"",
+						reg_fl, ch_gsm->flags.enable?reg_status_print_short(ch_gsm->reg_stat):"",
+						oper_fl, ch_gsm->operator_name?ch_gsm->operator_name:"",
+						code_fl, ch_gsm->operator_code?ch_gsm->operator_code:"");
+					ast_mutex_unlock(&ch_gsm->lock);
+				}
 			}
 		}
 		total += count;
@@ -14334,9 +14476,9 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_cli_show_netinfo()
+// pg_cli_show_gsm_netinfo()
 //------------------------------------------------------------------------------
-static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	size_t count;
 	size_t total;
@@ -14359,8 +14501,8 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 	{
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
-			e->command = "polygator show netinfo";
-			e->usage = "Usage: polygator show netinfo\n";
+			e->command = "polygator show gsm netinfo";
+			e->usage = "Usage: polygator show gsm netinfo\n";
 			return NULL;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_GENERATE:
@@ -14374,7 +14516,7 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 			return CLI_FAILURE;
 	}
 
-	if (a->argc < 3)
+	if (a->argc < 4)
 		return CLI_SHOWUSAGE;
 
 	total = 0;
@@ -14395,10 +14537,10 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
 		alias_fl = mmax(alias_fl, strlen(ch_gsm->alias));
 		status_fl = mmax(status_fl, strlen(ch_gsm->flags.enable?"enabled":"disabled"));
-		sim_fl = mmax(sim_fl, strlen(ch_gsm->flags.sim_inserted?"inserted":""));
+		sim_fl = mmax(sim_fl, strlen(ch_gsm->flags.enable?(ch_gsm->flags.sim_inserted?"inserted":""):""));
 		reg_fl = mmax(reg_fl, strlen(ch_gsm->flags.sim_inserted?reg_status_print_short(ch_gsm->reg_stat):""));
-		oper_fl = mmax(oper_fl, strlen(ch_gsm->operator_name?ch_gsm->operator_name:""));
-		code_fl = mmax(code_fl, strlen(ch_gsm->operator_code?ch_gsm->operator_code:""));
+		oper_fl = mmax(oper_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->operator_name?ch_gsm->operator_name:"unknown"):""));
+		code_fl = mmax(code_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->operator_code?ch_gsm->operator_code:"unknown"):""));
 		imsi_fl = mmax(imsi_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->imsi?ch_gsm->imsi:"unknown"):""));
 		rssi_fl = mmax(rssi_fl, strlen(ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):""));
 		ber_fl = mmax(ber_fl, strlen(ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):""));
@@ -14426,10 +14568,10 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 					number_fl, (unsigned long int)count++,
 					alias_fl, ch_gsm->alias,
 					status_fl, ch_gsm->flags.enable?"enabled":"disabled",
-					sim_fl, ch_gsm->flags.sim_inserted?"inserted":"",
+					sim_fl, ch_gsm->flags.enable?(ch_gsm->flags.sim_inserted?"inserted":""):"",
 					reg_fl, ch_gsm->flags.sim_inserted?reg_status_print_short(ch_gsm->reg_stat):"",
-					oper_fl, ch_gsm->operator_name?ch_gsm->operator_name:"",
-					code_fl, ch_gsm->operator_code?ch_gsm->operator_code:"",
+					oper_fl, ch_gsm->flags.sim_inserted?(ch_gsm->operator_name?ch_gsm->operator_name:"unknown"):"",
+					code_fl, ch_gsm->flags.sim_inserted?(ch_gsm->operator_code?ch_gsm->operator_code:"unknown"):"",
 					imsi_fl, ch_gsm->flags.sim_inserted?(ch_gsm->imsi?ch_gsm->imsi:"unknown"):"",
 					rssi_fl, ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):"",
 					ber_fl, ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):"");
@@ -14445,7 +14587,74 @@ static char *pg_cli_show_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 	return CLI_SUCCESS;
 }
 //------------------------------------------------------------------------------
-// end of pg_cli_show_netinfo()
+// end of pg_cli_show_gsm_netinfo()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_man_show_gsm_netinfo()
+//------------------------------------------------------------------------------
+const char *pg_man_show_gsm_netinfo_synopsis = "Show GSM network information of Polygator channels.";
+const char *pg_man_show_gsm_netinfo_decription = "Similar to the CLI command \"polygator show gsm netinfo\".";
+static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m)
+{
+	struct pg_channel_gsm *ch_gsm;
+	char rssi[32];
+	const char *id = astman_get_header(m, "ActionID");
+	const char *alias = astman_get_header(m, "Channel");
+	char idText[256] = "";
+	size_t total = 0;
+
+	astman_send_ack(s, m, "Polygator GSM channel network information will follow");
+	if (!ast_strlen_zero(id)) snprintf(idText, sizeof(idText), "ActionID: %s\r\n", id);
+
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
+	{
+		ast_mutex_lock(&ch_gsm->lock);
+
+		if (ast_strlen_zero(alias) || !strcmp(alias, ch_gsm->alias)) {
+
+			astman_append(s,
+				"Event: PolygatorShowGSMNetinfo\r\n"
+				"%s"
+				"Channel: %s\r\n"
+				"Status: %s\r\n"
+				"SIM: %s\r\n"
+				"Registered: %s\r\n"
+				"Operator: %s\r\n"
+				"Code: %s\r\n"
+				"IMSI: %s\r\n"
+				"RSSI: %s\r\n"
+				"BER: %s\r\n"
+				"\r\n",
+				idText,
+				ch_gsm->alias,
+				ch_gsm->flags.enable?"enabled":"disabled",
+				ch_gsm->flags.enable?(ch_gsm->flags.sim_inserted?"inserted":"removed"):"unknown",
+				ch_gsm->flags.sim_inserted?reg_status_print_short(ch_gsm->reg_stat):"unknown",
+				ch_gsm->operator_name?ch_gsm->operator_name:"unknown",
+				ch_gsm->operator_code?ch_gsm->operator_code:"unknown",
+				ch_gsm->imsi?ch_gsm->imsi:"unknown",
+				ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):"unknown",
+				ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):"unknown");
+
+			total++;
+		}
+
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+
+	astman_append(s, 
+				  "Event: PolygatorShowGSMNetinfoComplete\r\n"
+				  "%s"
+				  "Items: %lu\r\n"
+				  "\r\n",
+			   idText,
+			   (unsigned long int)total);
+
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_man_show_gsm_netinfo()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -16401,10 +16610,11 @@ pg_channel_gsm_imei_set_end:
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNK:
 							// check for trunk exist
-							if (!(tr_gsm = pg_get_trunk_gsm_by_name(a->argv[6]))) {
+							if (!(tr_gsm = pg_get_trunk_gsm_by_name(a->argv[6], PG_TRUNK_GSM_MANUAL))) {
 								// create trunk storage
 								if ((tr_gsm = ast_calloc(1, sizeof(struct pg_trunk_gsm)))) {
 									tr_gsm->name = ast_strdup(a->argv[6]);
+									tr_gsm->type = PG_TRUNK_GSM_MANUAL;
 									AST_LIST_INSERT_TAIL(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry);
 									// init trunk channel list
 									AST_LIST_HEAD_SET_NOLOCK(&tr_gsm->channel_gsm_list, NULL);
@@ -16413,7 +16623,7 @@ pg_channel_gsm_imei_set_end:
 							}
 							if (tr_gsm) {
 								// check for channel already in trunk
-								if (!pg_get_channel_gsm_from_trunk_by_name(tr_gsm, ch_gsm->alias)) {
+								if (!pg_get_channel_gsm_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MANUAL, ch_gsm->alias)) {
 									// create trunk channel gsm fold
 									if ((ch_gsm_fold = ast_calloc(1, sizeof(struct pg_trunk_gsm_channel_gsm_fold)))) {
 										ch_gsm_fold->name = ast_strdup(a->argv[6]);
@@ -16703,8 +16913,8 @@ pg_channel_gsm_imei_set_end:
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNK:
 							// check for trunk exist
-							if ((tr_gsm = pg_get_trunk_gsm_by_name(a->argv[6]))) {
-								if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, ch_gsm->alias))) {
+							if ((tr_gsm = pg_get_trunk_gsm_by_name(a->argv[6], PG_TRUNK_GSM_MANUAL))) {
+								if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MANUAL, ch_gsm->alias))) {
 									// remove entry from trunk list
 									AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
 									// remove entry from channel list
@@ -18732,10 +18942,11 @@ static char *pg_cli_trunk_gsm_actions(struct ast_cli_entry *e, int cmd, struct a
 		// create
 		ast_mutex_lock(&pg_lock);
 		// search this trunk name in list
-		if (!(tr_gsm = pg_get_trunk_gsm_by_name(a->argv[4]))) {
+		if (!(tr_gsm = pg_get_trunk_gsm_by_name(a->argv[4], PG_TRUNK_GSM_MANUAL))) {
 			// create trunk storage
 			if ((tr_gsm = ast_calloc(1, sizeof(struct pg_trunk_gsm)))) {
 				tr_gsm->name = ast_strdup(a->argv[4]);
+				tr_gsm->type = PG_TRUNK_GSM_MANUAL;
 				AST_LIST_INSERT_TAIL(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry);
 				// init trunk channel list
 				AST_LIST_HEAD_SET_NOLOCK(&tr_gsm->channel_gsm_list, NULL);
@@ -18749,7 +18960,7 @@ static char *pg_cli_trunk_gsm_actions(struct ast_cli_entry *e, int cmd, struct a
 		// delete
 		ast_mutex_lock(&pg_lock);
 		// search this trunk name in list
-		if ((tr_gsm = pg_get_trunk_gsm_by_name(a->argv[4]))) {
+		if ((tr_gsm = pg_get_trunk_gsm_by_name(a->argv[4], PG_TRUNK_GSM_MANUAL))) {
 			// clean trunk binding in trunk channel list member
 			while ((tr_fold = AST_LIST_REMOVE_HEAD(&tr_gsm->channel_gsm_list, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry)))
 			{
@@ -18778,9 +18989,9 @@ static char *pg_cli_trunk_gsm_actions(struct ast_cli_entry *e, int cmd, struct a
 		// rename
 		ast_mutex_lock(&pg_lock);
 		// check for new trunk name already exist
-		if (!(tr_gsm = pg_get_trunk_gsm_by_name(a->argv[5]))) {
+		if (!(tr_gsm = pg_get_trunk_gsm_by_name(a->argv[5], PG_TRUNK_GSM_MANUAL))) {
 			// search this old trunk name in list
-			if ((tr_gsm = pg_get_trunk_gsm_by_name(a->argv[4]))) {
+			if ((tr_gsm = pg_get_trunk_gsm_by_name(a->argv[4], PG_TRUNK_GSM_MANUAL))) {
 				// rename trunk binding in trunk channel list member
 				AST_LIST_TRAVERSE(&tr_gsm->channel_gsm_list, tr_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry)
 				{
@@ -18842,6 +19053,12 @@ static void pg_cleanup(void)
 	int is_wait;
 
 	ast_mutex_lock(&pg_lock);
+
+	// unregistering Polygator Manager commands
+	if (pg_man_registered) {
+		ast_manager_unregister("PolygatorShowGSMNetinfo");
+		ast_verbose("%s: Manager commands unregistered\n", AST_MODULE);
+	}
 
 	// unregistering Polygator CLI interface
 	if (pg_cli_registered) {
@@ -19358,7 +19575,7 @@ static int pg_load(void)
 					{
 						if (!strcmp(ast_var->name, "trunk")) {
 							// search trunk gsm
-							tr_gsm = pg_get_trunk_gsm_by_name(ast_var->value);
+							tr_gsm = pg_get_trunk_gsm_by_name(ast_var->value, PG_TRUNK_GSM_MANUAL);
 							if (!tr_gsm) {  
 								// create trunk storage
 								if (!(tr_gsm = ast_calloc(1, sizeof(struct pg_trunk_gsm)))) {
@@ -19366,6 +19583,7 @@ static int pg_load(void)
 									continue;
 								}
 								tr_gsm->name = ast_strdup(ast_var->value);
+								tr_gsm->type = PG_TRUNK_GSM_MANUAL;
 								AST_LIST_INSERT_TAIL(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry);
 								// init trunk channel list
 								AST_LIST_HEAD_SET_NOLOCK(&tr_gsm->channel_gsm_list, NULL);
@@ -19374,7 +19592,7 @@ static int pg_load(void)
 							}
 							if (tr_gsm) {
 								// check for channel already in trunk
-								if (!pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, ch_gsm->alias)) {
+								if (!pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MANUAL, ch_gsm->alias)) {
 									// create trunk channel gsm fold
 									if ((ch_gsm_fold = ast_calloc(1, sizeof(struct pg_trunk_gsm_channel_gsm_fold)))) {
 										ch_gsm_fold->name = ast_strdup(ast_var->value);
@@ -19546,6 +19764,15 @@ static int pg_load(void)
 	ast_cli_register_multiple(pg_cli, sizeof(pg_cli)/sizeof(pg_cli[0]));
 	ast_verbose("%s: CLI registered\n", AST_MODULE);
 	pg_cli_registered = 1;
+
+	// registering Polygator Manager commands
+#if 0
+	ast_manager_register_xml("PolygatorShowGSMNetinfo", 0, pg_man_show_gsm_netinfo);
+#else
+	ast_manager_register2("PolygatorShowGSMNetinfo", 0, pg_man_show_gsm_netinfo, pg_man_show_gsm_netinfo_synopsis, pg_man_show_gsm_netinfo_decription);
+#endif
+	ast_verbose("%s: Manager commands registered\n", AST_MODULE);
+	pg_man_registered = 1;
 
 	// destroy configuration environments
 	if (ast_cfg) ast_config_destroy(ast_cfg);
