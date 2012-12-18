@@ -13943,6 +13943,7 @@ static char *pg_cli_show_trunks(struct ast_cli_entry *e, int cmd, struct ast_cli
 			AST_LIST_TRAVERSE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry)
 			{
 				ch_gsm = ch_gsm_fold->channel_gsm;
+				ast_mutex_lock(&ch_gsm->lock);
 				ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
 					number_fl, "",
 			  		trunk_fl, "",
