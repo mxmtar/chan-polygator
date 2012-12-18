@@ -55,3 +55,5 @@ Fix segfault on parsing corrupted PDU.
 Add sanity check for maximum length of Recipent Address(SMS-STATUS-REPORT type).
 Add proceeding timer for drop bad incoming call,
 which occurred on corrupted RING CLIP CLCC responses.
+18.12.12
+Fix in polygator show trunks ast_mutex_unlock() without ast_mutex_unlock() call.
