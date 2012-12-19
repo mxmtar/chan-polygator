@@ -63,3 +63,5 @@ which occurred on corrupted RING CLIP CLCC responses.
 18.12.12
 Add asterisk manager interface command PolygatorShowGSMNetinfo.
 Add PLMN virtual trunks.
+19.12.12
+Limit field length of Dial PGGSM arguments string for prevent stack corruption in sscanf call.
