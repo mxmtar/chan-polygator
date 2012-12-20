@@ -395,7 +395,7 @@ struct pg_channel_gsm {
 		char mohinterpret[MAX_MUSICCLASS];
 		char sms_notify_context[AST_MAX_CONTEXT];
 		char sms_notify_extension[AST_MAX_EXTENSION];
-		struct timeval sms_send_interval;
+		time_t sms_send_interval;
 		int sms_send_attempt;
 		int sms_max_part;
 		int gainin;
@@ -889,26 +889,25 @@ static struct pg_generic_param pg_vinetic_ali_nelec_nlpms[] = {
 	PG_GENERIC_PARAM("white", VIN_NLPM_WHITE_NOISE),
 };
 
-static struct timeval waitrdy_timeout = {20, 0};
-static struct timeval waitsuspend_timeout = {30, 0};
-static struct timeval testfun_timeout = {10, 0};
-static struct timeval testfunsend_timeout = {1, 0};
-static struct timeval callready_timeout = {300, 0};
-static struct timeval runquartersecond_timeout = {0, 250000};
-static struct timeval runhalfsecond_timeout = {0, 500000};
-static struct timeval runonesecond_timeout = {1, 0};
-static struct timeval runfivesecond_timeout = {5, 0};
-static struct timeval halfminute_timeout = {30, 0};
-static struct timeval runoneminute_timeout = {60, 0};
-static struct timeval waitviodown_timeout = {120, 0};
-static struct timeval testviodown_timeout = {1, 0};
-static struct timeval onesec_timeout = {1, 0};
-static struct timeval zero_timeout = {0, 1000};
-static struct timeval simpoll_timeout = {2, 0};
-static struct timeval pinwait_timeout = {16, 0};	// {8, 0}
-static struct timeval registering_timeout = {60, 0};
-
-static struct timeval proceeding_timeout = {5, 0};
+static x_timeout_global(waitrdy_timeout, 20, 0);
+static x_timeout_global(waitsuspend_timeout, 30, 0);
+static x_timeout_global(testfun_timeout, 10, 0);
+static x_timeout_global(testfunsend_timeout, 1, 0);
+static x_timeout_global(callready_timeout, 300, 0);
+static x_timeout_global(runquartersecond_timeout, 0, 250000000);
+static x_timeout_global(runhalfsecond_timeout, 0, 500000000);
+static x_timeout_global(runonesecond_timeout, 1, 0);
+static x_timeout_global(runfivesecond_timeout, 5, 0);
+static x_timeout_global(halfminute_timeout, 30, 0);
+static x_timeout_global(runoneminute_timeout, 60, 0);
+static x_timeout_global(waitviodown_timeout, 120, 0);
+static x_timeout_global(testviodown_timeout, 1, 0);
+static x_timeout_global(onesec_timeout, 1, 0);
+static x_timeout_global(zero_timeout, 0, 1000000);
+static x_timeout_global(simpoll_timeout, 2, 0);
+static x_timeout_global(pinwait_timeout, 16, 0);
+static x_timeout_global(registering_timeout, 60, 0);
+static x_timeout_global(proceeding_timeout, 5, 0);
 
 static char pg_config_file[] = "polygator.conf";
 
@@ -3998,7 +3997,7 @@ static int pg_atcommand_queue_append(struct pg_channel_gsm* ch_gsm,
 //------------------------------------------------------------------------------
 static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 {
-	struct timeval time_data, timer;
+	struct timeval time_data;
 	struct ast_tm *time_ptr, time_buf;
 	int res;
 	//
@@ -4019,10 +4018,7 @@ static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 					res = -1;
 				}
 			} else {
-				gettimeofday(&time_data, NULL);
-				timer.tv_sec = ch_gsm->at_cmd->timeout;
-				timer.tv_usec = 0;
-				x_timer_set(ch_gsm->at_cmd->timer, timer);
+				x_timer_set_second(ch_gsm->at_cmd->timer, ch_gsm->at_cmd->timeout);
 				if (ch_gsm->at_cmd->show) {
 					write(ch_gsm->at_pipe[1], ch_gsm->at_cmd->cmd_buf, ch_gsm->at_cmd->cmd_len - 1);
 					write(ch_gsm->at_pipe[1], &char_lf, 1);
@@ -4030,6 +4026,7 @@ static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 				if (ch_gsm->debug.receiver) {
 					ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
 					if (ch_gsm->debug.receiver_debug_fp) {
+						gettimeofday(&time_data, NULL);
 						if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
 							fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
 													time_ptr->tm_year + 1900,
@@ -4055,6 +4052,7 @@ static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 				if (ch_gsm->debug.at) {
 					ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
 					if (ch_gsm->debug.at_debug_fp) {
+						gettimeofday(&time_data, NULL);
 						if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
 							fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
 													time_ptr->tm_year + 1900,
@@ -4081,10 +4079,7 @@ static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 			ch_gsm->cmd_done = 0;
 		} else {
 			// spacer
-			gettimeofday(&time_data, NULL);
-			timer.tv_sec = ch_gsm->at_cmd->timeout;
-			timer.tv_usec = 0;
-			x_timer_set(ch_gsm->at_cmd->timer, timer);
+			x_timer_set_second(ch_gsm->at_cmd->timer, ch_gsm->at_cmd->timeout);
 			ch_gsm->cmd_done = 0;
 		}
 	} // end od data to send is ready
@@ -5917,8 +5912,10 @@ static void *pg_channel_gsm_workthread(void *data)
 											// stop smssend timer
 											x_timer_stop(ch_gsm->timers.smssend);
 											// hangup active calls
-											while (pg_channel_gsm_get_calls_count(ch_gsm)) {
-												AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
+											while (pg_channel_gsm_get_calls_count(ch_gsm))
+											{
+												AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
+												{
 													pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
 													break;
 												}
@@ -9191,11 +9188,11 @@ static void *pg_channel_gsm_workthread(void *data)
 					// stop dial timer
 					x_timer_stop(call->timers.dial);
 					// dial timer fired
-					ast_verb(4, "GSM channel=\"%s\":  call line=%d dialing timeout=%ld.%06ld expired\n",
+					ast_verb(4, "GSM channel=\"%s\":  call line=%d dialing timeout=%ld.%09ld expired\n",
 								ch_gsm->alias,
 			  					call->line,
 								call->timers.dial.timeout.tv_sec,
-								call->timers.dial.timeout.tv_usec);
+								call->timers.dial.timeout.tv_nsec);
 					// hangup gsm channel
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
@@ -9770,7 +9767,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					}
 				}
 				// restart smssend timer
-				x_timer_set(ch_gsm->timers.smssend, ch_gsm->config.sms_send_interval);
+				x_timer_set_second(ch_gsm->timers.smssend, ch_gsm->config.sms_send_interval);
 			}
 		}
 		// waitviodown
@@ -10969,7 +10966,7 @@ static int pg_config_file_build(char *filename)
 			len += fprintf(fp, "gainr=%02x\n", ch_gsm->config.gainr);
 
 			// sms.send.interval
-			len += fprintf(fp, "sms.send.interval=%ld\n", ch_gsm->config.sms_send_interval.tv_sec);
+			len += fprintf(fp, "sms.send.interval=%ld\n", ch_gsm->config.sms_send_interval);
 			// sms.max.attempt
 			len += fprintf(fp, "sms.send.attempt=%d\n", ch_gsm->config.sms_send_attempt);
 			// sms.max.part
@@ -11859,7 +11856,7 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeou
 	char device[256];
 	char flags[256];
 	char called_name[MAX_ADDRESS_LENGTH];
-	struct timeval dial_timeout;
+	time_t dial_timeout;
 	struct pg_call_gsm *call = (struct pg_call_gsm *)ast_ch->tech_pvt;
 	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
 
@@ -11914,15 +11911,9 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeou
 								(call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value,
 								(call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
 	// set dialing timeout
-	if (timeout > 0) {
-		dial_timeout.tv_sec = timeout;
-		dial_timeout.tv_usec = 0;
-	} else {
-		dial_timeout.tv_sec = 180;
-		dial_timeout.tv_usec = 0;
-	}
+	dial_timeout = (timeout > 0)?timeout:180;
 	// start dial timer
-	x_timer_set(call->timers.dial, dial_timeout);
+	x_timer_set_second(call->timers.dial, dial_timeout);
 	// start proceeding timer
 	x_timer_set(call->timers.proceeding, proceeding_timeout);
 
@@ -14332,7 +14323,8 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 		return CLI_SHOWUSAGE;
 
 	start_time = 0;
-	tv_set(tv_begin, 0, 0);
+	tv_begin.tv_sec = 0;
+	tv_begin.tv_usec = 0;
 	gettimeofday(&tv_end, NULL);
 
 	if (a->argc == 8) {
@@ -14965,17 +14957,17 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 #define CHANNEL_GSM_TIMER_INFO(_timer) \
 do { \
 		if (is_x_timer_enable(ch_gsm->timers._timer)) { \
-			ast_cli(a->fd, "  --   %s: run", #_timer); \
+			ast_cli(a->fd, "  --   %16.16s : run", #_timer); \
 			if (is_x_timer_active(ch_gsm->timers._timer)) { \
-				struct timeval __sub_tv; \
-				struct timeval __cur_tv; \
-				gettimeofday(&__cur_tv, NULL); \
+				struct timespec __sub_tv; \
+				struct timespec __cur_tv; \
+				clock_gettime(CLOCK_MONOTONIC, &__cur_tv); \
 				__sub_tv = tv_sub(ch_gsm->timers._timer.expires, __cur_tv); \
-				ast_cli(a->fd, " expire at %ld.%ld\n", __sub_tv.tv_sec, __sub_tv.tv_usec); \
+				ast_cli(a->fd, " expire at %ld.%ld\n", __sub_tv.tv_sec, __sub_tv.tv_nsec); \
 			} else \
 				ast_cli(a->fd, " fired\n"); \
 		} else \
-			ast_cli(a->fd, "  --   %s: stop\n", #_timer); \
+			ast_cli(a->fd, "  --   %16.16s : stop\n", #_timer); \
 } while (0)
 
 			CHANNEL_GSM_TIMER_INFO(waitrdy);
@@ -15449,8 +15441,10 @@ static char *pg_cli_channel_gsm_action_suspend_resume(struct ast_cli_entry *e, i
 					// stop all timers
 					memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
 					// hangup active calls
-					while (pg_channel_gsm_get_calls_count(ch_gsm)) {
-						AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
+					while (pg_channel_gsm_get_calls_count(ch_gsm))
+					{
+						AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
+						{
 							pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
 							break;
 						}
@@ -15745,7 +15739,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMSSENDINTERVAL:
-							ast_cli(a->fd, " -> %ld\n", ch_gsm->config.sms_send_interval.tv_sec);
+							ast_cli(a->fd, " -> %ld\n", ch_gsm->config.sms_send_interval);
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMSSENDATTEMPT:
@@ -16571,7 +16565,7 @@ pg_channel_gsm_imei_set_end:
 									tmpi = 10;
 									ast_cli(a->fd, " - value %d less than 10 - set smssendinterval to 10\n", tmpi);
 								}
-								ch_gsm->config.sms_send_interval.tv_sec = tmpi;
+								ch_gsm->config.sms_send_interval = tmpi;
 								ast_cli(a->fd, " - ok\n");
 							} else
 								ast_cli(a->fd, " - bad param - must be digit\n");
@@ -19548,11 +19542,11 @@ static int pg_load(void)
 					ch_gsm->config.gainr = 0x60;
 				// SMS
 				// sms.send.interval
-				ch_gsm->config.sms_send_interval.tv_sec = 20;
+				ch_gsm->config.sms_send_interval = 20;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "sms.send.interval")) && (is_str_digit(cvar)))
-					ch_gsm->config.sms_send_interval.tv_sec = atoi(cvar);
-				if (ch_gsm->config.sms_send_interval.tv_sec < 10)
-					ch_gsm->config.sms_send_interval.tv_sec = 10;
+					ch_gsm->config.sms_send_interval = atoi(cvar);
+				if (ch_gsm->config.sms_send_interval < 10)
+					ch_gsm->config.sms_send_interval = 10;
 				// sms.max.attempt
 				ch_gsm->config.sms_send_attempt = 2;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "sms.send.attempt")) && (is_str_digit(cvar)))

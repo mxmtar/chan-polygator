@@ -10,40 +10,43 @@
 
 struct x_timer {
 	int enable;
-	struct timeval start;
-	struct timeval timeout;
-	struct timeval expires;
+	struct timespec start;
+	struct timespec timeout;
+	struct timespec expires;
 };
 
-#define tv_set(_tv, _sec, _usec) \
+#define x_timeout_global(_timeout, _sec, _nsec) \
+	struct timespec _timeout = { .tv_sec = _sec, .tv_nsec = _nsec, }
+
+#define tv_set(_tv, _sec, _nsec) \
 do { \
 	_tv.tv_sec = _sec; \
-	_tv.tv_usec = _usec; \
+	_tv.tv_nsec = _nsec; \
 } while(0)
 
 #define tv_cpy(_dest, _src) \
 do { \
 	_dest.tv_sec = _src.tv_sec; \
-	_dest.tv_usec = _src.tv_usec; \
+	_dest.tv_nsec = _src.tv_nsec; \
 } while(0)
 
 #define tv_add(_tv_1, _tv_2) \
 do { \
 	_tv_1.tv_sec += _tv_2.tv_sec; \
-	_tv_1.tv_usec += _tv_2.tv_usec; \
-	if (_tv_1.tv_usec >= 1000000) { \
-		_tv_1.tv_usec -= 1000000; \
+	_tv_1.tv_nsec += _tv_2.tv_nsec; \
+	if (_tv_1.tv_nsec >= 1000000000) { \
+		_tv_1.tv_nsec -= 1000000000; \
 		_tv_1.tv_sec += 1; \
 	} \
 } while(0)
 
 #define tv_sub(_tv_1, _tv_2) \
 ({ \
-	struct timeval __res; \
+	struct timespec __res; \
 	__res.tv_sec = _tv_1.tv_sec - _tv_2.tv_sec; \
-	__res.tv_usec = _tv_1.tv_usec - _tv_2.tv_usec; \
-	if (__res.tv_usec < 0) { \
-		__res.tv_usec += 1000000; \
+	__res.tv_nsec = _tv_1.tv_nsec - _tv_2.tv_nsec; \
+	if (__res.tv_nsec < 0) { \
+		__res.tv_nsec += 1000000000; \
 		__res.tv_sec -= 1; \
 	} \
 	__res; \
@@ -57,9 +60,9 @@ do { \
 	else if (_tv_1.tv_sec > _tv_2.tv_sec) \
 		__res = 1; \
 	else if (_tv_1.tv_sec == _tv_2.tv_sec) { \
-		if (_tv_1.tv_usec < _tv_2.tv_usec) \
+		if (_tv_1.tv_nsec < _tv_2.tv_nsec) \
 			__res = -1; \
-		else if (_tv_1.tv_usec > _tv_2.tv_usec) \
+		else if (_tv_1.tv_nsec > _tv_2.tv_nsec) \
 			__res = 1; \
 		else \
 			__res = 0; \
@@ -69,8 +72,8 @@ do { \
 
 #define x_timer_set(_timer, _timeout) \
 do { \
-	struct timeval __curr_time; \
-	gettimeofday(&__curr_time, NULL); \
+	struct timespec __curr_time; \
+	clock_gettime(CLOCK_MONOTONIC, &__curr_time); \
 	_timer.enable = 1; \
 	tv_cpy(_timer.start, __curr_time); \
 	tv_cpy(_timer.timeout, _timeout); \
@@ -80,10 +83,10 @@ do { \
 
 #define x_timer_set_second(_timer, _timeout) \
 do { \
-	struct timeval __curr_time; \
-	struct timeval __timeout; \
+	struct timespec __curr_time; \
+	struct timespec __timeout; \
 	tv_set(__timeout, _timeout, 0); \
-	gettimeofday(&__curr_time, NULL); \
+	clock_gettime(CLOCK_MONOTONIC, &__curr_time); \
 	_timer.enable = 1; \
 	tv_cpy(_timer.start, __curr_time); \
 	tv_cpy(_timer.timeout, __timeout); \
@@ -106,8 +109,8 @@ do { \
 #define is_x_timer_active(_timer) \
 ({ \
 	int __res = 0; \
-	struct timeval __curr_time; \
-	gettimeofday(&__curr_time, NULL); \
+	struct timespec __curr_time; \
+	clock_gettime(CLOCK_MONOTONIC, &__curr_time); \
 	if ((tv_cmp(_timer.expires, __curr_time) > 0) && (tv_cmp(_timer.start, __curr_time) <= 0)) \
 		__res = 1; \
 	else \
@@ -118,8 +121,8 @@ do { \
 #define is_x_timer_fired(_timer) \
 ({ \
 	int __res = 0; \
-	struct timeval __curr_time; \
-	gettimeofday(&__curr_time, NULL); \
+	struct timespec __curr_time; \
+	clock_gettime(CLOCK_MONOTONIC, &__curr_time); \
 	if ((tv_cmp(_timer.expires, __curr_time) > 0) && (tv_cmp(_timer.start, __curr_time) <= 0)) \
 		__res = 0; \
 	else \

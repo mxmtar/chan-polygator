@@ -14,7 +14,7 @@ chan_polygator_la_SOURCES = \
 		sim900.c
 
 chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
-chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic
+chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic -lrt
 
 noinst_HEADERS = \
 		address.h \
