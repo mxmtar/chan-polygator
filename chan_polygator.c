@@ -534,6 +534,7 @@ struct pg_channel_gsm {
 	char *model;
 	char *firmware;
 	char imei[16];
+	char imei_new[16];
 	int reg_try_count;
 	char *pin;
 	char *puk;
@@ -4101,6 +4102,40 @@ static inline void pg_atcommand_queue_flush(struct pg_channel_gsm* ch_gsm)
 }
 //------------------------------------------------------------------------------
 // end of pg_atcommand_queue_flush()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_channel_gsm_suspend_action()
+//------------------------------------------------------------------------------
+static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
+{
+	ast_verbose("%s: GSM channel=\"%s\": module switched to suspend state\n", AST_MODULE, ch_gsm->alias);
+
+	// reset registaration status
+	ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+	// reset callwait state
+	ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+	// reset clir state
+	ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+	// reset rssi value
+	ch_gsm->rssi = 99;
+	// reset ber value
+	ch_gsm->ber = 99;
+
+	if (strlen(ch_gsm->imei_new)) {
+		ast_verbose("%s: GSM channel=\"%s\": IMEI write started\n", AST_MODULE, ch_gsm->alias);
+		ast_mutex_unlock(&ch_gsm->lock);
+		sleep(3);
+		ast_mutex_lock(&ch_gsm->lock);
+		ast_verbose("%s: GSM channel=\"%s\": IMEI write succeeded\n", AST_MODULE, ch_gsm->alias);
+		ch_gsm->imei_new[0] = '\0';
+		// wake up SIM
+		x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+		pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
+	}
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_gsm_suspend_action()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -8178,21 +8213,37 @@ static void *pg_channel_gsm_workthread(void *data)
 					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 				}
 				ast_verb(4, "GSM channel=\"%s\": serial port work at speed = %d baud\n", ch_gsm->alias, ch_gsm->baudrate);
-// 				pg_atcommand_queue_append(ch_gsm, AT_UNKNOWN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "AT+IPR=%d;&W", chnl->config.baudrate);
 			}
 			// CFUN
 			else if (is_str_begin_by(r_buf, "+CFUN:")) {
 				// valid if mgmt state WAIT_CFUN
 				if (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_CFUN) {
 					if (is_str_begin_by(r_buf, "+CFUN: 0")) {
-						// minimum functionality - try to enable GSM module full functionality
-						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
+						if (ast_strlen_zero(ch_gsm->imei_new)) {
+							// minimum functionality - set GSM module to full functionality mode
+							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
+						}
 					}
-					// next mgmt state -- check for SIM is READY
-					ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
-					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-					// start pinwait timer
-					x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
+					if (ast_strlen_zero(ch_gsm->imei_new)) {
+						ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
+						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+						// start pinwait timer
+						x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
+					} else {
+						// try to switch GSM module into suspend state
+						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+						if (ch_gsm->flags.sim_inserted) {
+							ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
+							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+							// start waitsuspend timer
+							x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
+						} else {
+							ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
+							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+							// perform suspend action
+							pg_channel_gsm_suspend_action(ch_gsm);
+						}
+					}
 				}
 			} // end of CFUN
 			// CPIN
@@ -8255,8 +8306,6 @@ static void *pg_channel_gsm_workthread(void *data)
 							if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
 							if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
 							if (ch_gsm->iccid) ast_free(ch_gsm->iccid); ch_gsm->iccid = NULL;
-// 							if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
-// 							if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
 							if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
 
 							ch_gsm->flags.sms_table_needed = 1;
@@ -8309,7 +8358,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
 							ch_gsm->flags.suspend_now = 0;
 							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-							ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
+							ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
 							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 							// start waitsuspend timer
 							x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
@@ -8367,6 +8416,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
 							pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+
 					} else if (!strcasecmp(r_buf, "+CPIN: SIM ERROR")) {
 
 						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
@@ -8382,19 +8432,12 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (!strcasecmp(r_buf, "+CPIN: NOT READY")) {
 						// stop waitsuspend timer
 						x_timer_stop(ch_gsm->timers.waitsuspend);
-						ast_verbose("%s: GSM channel=\"%s\": module switch to suspend state\n", AST_MODULE, ch_gsm->alias);
+
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-						// reset registaration status
-						ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
-						// reset callwait state
-						ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
-						// reset clir state
-						ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
-						// reset rssi value
-						ch_gsm->rssi = 99;
-						// reset ber value
-						ch_gsm->ber = 99;
+
+						// perform suspend action
+						pg_channel_gsm_suspend_action(ch_gsm);
 					}
 				}
 			} // end of CPIN
@@ -8408,11 +8451,9 @@ static void *pg_channel_gsm_workthread(void *data)
 					x_timer_stop(ch_gsm->timers.pinwait);
 					//
 					if (ch_gsm->flags.suspend_now) {
-						//
 						ch_gsm->flags.suspend_now = 0;
-						// try to set suspend state
+						// try to switch GSM module into suspend state
 						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-						//
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 						// start waitsuspend timer
@@ -9165,18 +9206,17 @@ static void *pg_channel_gsm_workthread(void *data)
 		// waitsuspend
 		if (is_x_timer_enable(ch_gsm->timers.waitsuspend)) {
 			if (is_x_timer_fired(ch_gsm->timers.waitsuspend)) {
-				// waitsuspend timer fired
-				ast_log(LOG_ERROR, "GSM channel=\"%s\": can't switch in suspend mode\n", ch_gsm->alias);
 				// stop waitsuspend timer
 				x_timer_stop(ch_gsm->timers.waitsuspend);
-				//
-				if (ch_gsm->flags.sim_inserted) // start pinwait timer
-					x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
-				else {
+				// waitsuspend timer fired
+				ast_log(LOG_ERROR, "GSM channel=\"%s\": can't switch in suspend mode\n", ch_gsm->alias);
+
+				if (!ch_gsm->flags.sim_inserted) {
 					// wake up SIM
 					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
-				}
+				} else
+					x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
 			}
 		}
 		// call timers
@@ -15316,6 +15356,8 @@ static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, i
 {
 	struct pg_channel_gsm *ch_gsm;
 
+	int res;
+
 	unsigned int pwr_seq_num;
 	size_t total;
 
@@ -15337,17 +15379,29 @@ static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, i
 			return CLI_FAILURE;
 	}
 
+	if (a->argc < 5) {
+		snprintf(pg_cli_channel_gsm_actions_usage, sizeof(pg_cli_channel_gsm_actions_usage),
+				"Usage: polygator channel gsm <channel> enbale|disable [<imei>]\n");
+		return CLI_SHOWUSAGE;
+	}
+
 	total = 0;
 	pwr_seq_num = 0;
 	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
 	{
 		ast_mutex_lock(&ch_gsm->lock);
-		if (!strcmp(a->argv[3], "all") || !strcmp(a->argv[3], ch_gsm->alias)) {
+		if (((a->argc == 5) && (!strcmp(a->argv[3], "all"))) || !strcmp(a->argv[3], ch_gsm->alias)) {
 			total++;
 			ast_cli(a->fd, "  GSM channel=\"%s\": ", ch_gsm->alias);
 			if (!strcmp(a->argv[4], "enable")) {
 				// enable
 				if (!ch_gsm->flags.enable) {
+					// check for additional IMEI present
+					if (a->argc == 6) {
+						if ((res = imei_is_valid(a->argv[5])) == EIMEI_VALID) {
+							strcpy(ch_gsm->imei_new, a->argv[5]);
+						}
+					}
 					// start GSM channel workthread
 					ch_gsm->flags.enable = 1;
 					ch_gsm->power_sequence_number = pwr_seq_num++;
@@ -15390,8 +15444,12 @@ static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, i
 		ast_mutex_unlock(&ch_gsm->lock);
 	}
 
-	if (!total)
-		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
+	if (!total) {
+		if (strcmp(a->argv[3], "all"))
+			ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
+		else
+			ast_cli(a->fd, "  Channel wildcard \"%s\" not supported to pass additional parameters\n", a->argv[3]);
+	}
 
 	return CLI_SUCCESS;
 }
@@ -15457,7 +15515,7 @@ static char *pg_cli_channel_gsm_action_suspend_resume(struct ast_cli_entry *e, i
 					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 					x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
 				} else if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SUSPEND) {
-					ast_cli(a->fd, " module switch to suspend state\n");
+					ast_cli(a->fd, " module now is suspended\n");
 				} else if ((ch_gsm->state == PG_CHANNEL_GSM_STATE_CHECK_PIN) || (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_CALL_READY))
 				  	ch_gsm->flags.suspend_now = 1;
 				else
@@ -15863,9 +15921,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							memcpy(imei_buf, a->argv[6], (imei_len < 15)?(imei_len):(15));
 							// calc IMEI check digit
 							if ((tmpi = imei_calc_check_digit(imei_buf)) < 0) {
-								if(tmpi == -2)
+								if (tmpi == -2)
 									ast_cli(a->fd, " - IMEI is too short\n");
-								if(tmpi == -3)
+								if (tmpi == -3)
 									ast_cli(a->fd, " - IMEI has illegal character\n");
 								else
 									ast_cli(a->fd, " - can't calc IMEI check digit\n");
