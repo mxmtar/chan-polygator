@@ -17,7 +17,7 @@ enum {
 
 extern int imei_calc_check_digit(const char *imei);
 extern int imei_is_valid(const char *imei);
-extern const char *imei_strerror(int errno);
+extern const char *imei_strerror(int err);
 
 #endif //__IMEI_H__
 

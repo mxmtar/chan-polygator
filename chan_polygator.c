@@ -999,6 +999,51 @@ static int pg_cli_generating_prepare(char *s, int *argc, char *argv[])
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_printf()
+//------------------------------------------------------------------------------
+enum {
+	PG_PRINT_FILE = 0,
+	PG_PRINT_CLI = 1,
+	PG_PRINT_VERB = 2,
+};
+void pg_printf(int type, uintptr_t dst, const char *fmt, ...)
+{
+	va_list va;
+	FILE *fp;
+	int out;
+	char buff[1024];
+
+	switch (type)
+	{
+		case PG_PRINT_FILE:
+			fp = (FILE *)dst;
+			va_start(va, fmt);
+			vfprintf(fp, fmt, va);
+			va_end(va);
+			break;
+		case PG_PRINT_CLI:
+			out = (int)dst;
+			va_start(va, fmt);
+			vsnprintf(buff, sizeof(buff), fmt, va);
+			va_end(va);
+			ast_cli(out, "%s", buff);
+			break;
+		case PG_PRINT_VERB:
+			out = (int)dst;
+			va_start(va, fmt);
+			vsnprintf(buff, sizeof(buff), fmt, va);
+			va_end(va);
+			ast_verb(out, "%s", buff);
+			break;
+		default:
+			break;
+	}
+}
+//------------------------------------------------------------------------------
+// end of pg_printf()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_second_to_dhms()
 //------------------------------------------------------------------------------
 static char * pg_second_to_dhms(char *buf, time_t sec)
@@ -4105,12 +4150,346 @@ static inline void pg_atcommand_queue_flush(struct pg_channel_gsm* ch_gsm)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_channel_gsm_write_imei_sim300()
+//------------------------------------------------------------------------------
+static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const char *imei, int print_type, uintptr_t print_out)
+{
+	struct termios old_termios, raw_termios;
+
+	char tmpbuf[256];
+	unsigned char tmpchr;
+
+	int tmpi;
+	int pos;
+
+	struct x_timer timer;
+
+	int res;
+	struct timeval tv;
+#ifdef HAVE_ASTERISK_SELECT_H
+	ast_fdset fds;
+#else
+	fd_set fds;
+#endif
+
+	int result = -1;
+
+	// backup termios
+	if (tcgetattr(ch_gsm->tty_fd, &old_termios)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": tcgetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	if (tcgetattr(ch_gsm->tty_fd, &raw_termios)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": tcgetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// set raw termios
+	cfmakeraw(&raw_termios);
+	if (tcsetattr(ch_gsm->tty_fd, TCSANOW, &raw_termios)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// select AUXILARY channel of SERIAL port
+	ch_gsm->flags.main_tty = 0;
+	if (pg_channel_gsm_serial_set(ch_gsm, 1) < 0) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": can't switch serial port to auxilary channel: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// imei data1
+	sim300_build_imei_data1(tmpbuf, &tmpi);
+	// write imei data1
+	pos = 0;
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(ch_gsm->tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+		ast_mutex_lock(&ch_gsm->lock);
+		// check select result code
+		if (res > 0) {
+			if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+				if ((res = write(ch_gsm->tty_fd, &tmpbuf[pos], tmpi)) < 0) {
+					pg_printf(print_type, print_out, "GSM channel=\"%s\": write(imei data1): %s\n", ch_gsm->alias, strerror(errno));
+					goto pg_channel_gsm_write_imei_sim300_end;
+				} else {
+					tmpi -= res;
+					pos += res;
+					if (tmpi <= 0) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(write imei data1): %s\n", ch_gsm->alias, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim300_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": write imei data1 - time is out\n", ch_gsm->alias);
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// wait for 0x06 from GSM module
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(ch_gsm->tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(ch_gsm->tty_fd + 1, &fds, NULL, NULL, &tv);
+		ast_mutex_lock(&ch_gsm->lock);
+		// check select result code
+		if (res > 0) {
+			if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+				if ((res = read(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": read(wait for 0x06 imei data1): %s\n", ch_gsm->alias, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim300_end;
+					}
+				} else {
+					if (tmpchr == 0x06) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(wait for 0x06 imei data1): %s\n", ch_gsm->alias, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim300_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": wait for 0x06 imei data1 - time is out\n", ch_gsm->alias);
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// imei data2
+	sim300_build_imei_data2(tmpbuf, &tmpi);
+	// write imei data2
+	pos = 0;
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(ch_gsm->tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+		ast_mutex_lock(&ch_gsm->lock);
+		// check select result code
+		if (res > 0) {
+			if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+				if ((res = write(ch_gsm->tty_fd, &tmpbuf[pos], tmpi)) < 0) {
+					pg_printf(print_type, print_out, "GSM channel=\"%s\": write(imei data2): %s\n", ch_gsm->alias, strerror(errno));
+					goto pg_channel_gsm_write_imei_sim300_end;
+				} else {
+					tmpi -= res;
+					pos += res;
+					if (tmpi <= 0) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(write imei data2): %s\n", ch_gsm->alias, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim300_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": write imei data2 - time is out\n", ch_gsm->alias);
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// wait for 0x06 from GSM module
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(ch_gsm->tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(ch_gsm->tty_fd + 1, &fds, NULL, NULL, &tv);
+		ast_mutex_lock(&ch_gsm->lock);
+		// check select result code
+		if (res > 0) {
+			if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+				if ((res = read(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": read(wait for 0x06 imei data2): %s\n", ch_gsm->alias, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim300_end;
+					}
+				} else {
+					if (tmpchr == 0x06) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(wait for 0x06 imei data2): %s\n", ch_gsm->alias, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim300_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": wait for 0x06 imei data2 - time is out\n", ch_gsm->alias);
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// write 0x06
+	tmpchr = 0x06;
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(ch_gsm->tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+		ast_mutex_lock(&ch_gsm->lock);
+		// check select result code
+		if (res > 0) {
+			if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+				if ((res = write(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+					pg_printf(print_type, print_out, "GSM channel=\"%s\": write(0x06 a): %s\n", ch_gsm->alias, strerror(errno));
+					goto pg_channel_gsm_write_imei_sim300_end;
+				} else
+					break;
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(write 0x06 a): %s\n", ch_gsm->alias, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim300_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": write 0x06 a - time is out\n", ch_gsm->alias);
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// build imei data3
+	
+	sim300_build_imei_data3(imei, imei_calc_check_digit(imei), tmpbuf, &tmpi);
+	// write imei data3
+	pos = 0;
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(ch_gsm->tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+		ast_mutex_lock(&ch_gsm->lock);
+		// check select result code
+		if (res > 0) {
+			if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+				if ((res = write(ch_gsm->tty_fd, &tmpbuf[pos], tmpi)) < 0) {
+					pg_printf(print_type, print_out, "GSM channel=\"%s\": write(imei data3): %s\n", ch_gsm->alias, strerror(errno));
+					goto pg_channel_gsm_write_imei_sim300_end;
+				} else {
+					tmpi -= res;
+					pos += res;
+					if (tmpi <= 0) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(write imei data3): %s\n", ch_gsm->alias, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim300_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": write imei data3 - time is out\n", ch_gsm->alias);
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// wait for 0x06 from GSM module
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(ch_gsm->tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(ch_gsm->tty_fd + 1, &fds, NULL, NULL, &tv);
+		ast_mutex_lock(&ch_gsm->lock);
+		// check select result code
+		if (res > 0) {
+			if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+				if ((res = read(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": read(wait for 0x06 imei data3): %s\n", ch_gsm->alias, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim300_end;
+					}
+				} else {
+					if (tmpchr == 0x06) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(wait for 0x06 imei data3): %s\n", ch_gsm->alias, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim300_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": wait for 0x06 imei data3 - time is out\n", ch_gsm->alias);
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+	// write 0x06
+	tmpchr = 0x06;
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(ch_gsm->tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
+		ast_mutex_lock(&ch_gsm->lock);
+		// check select result code
+		if (res > 0) {
+			if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
+				if ((res = write(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
+					pg_printf(print_type, print_out, "GSM channel=\"%s\": write(0x06 b): %s\n", ch_gsm->alias, strerror(errno));
+					goto pg_channel_gsm_write_imei_sim300_end;
+				} else
+					break;
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(write 0x06 b): %s\n", ch_gsm->alias, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim300_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": write 0x06 b - time is out\n", ch_gsm->alias);
+		goto pg_channel_gsm_write_imei_sim300_end;
+	}
+
+	ch_gsm->imei[0] = '\0';
+	pg_printf(print_type, print_out, "GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
+
+	result = 0;
+
+pg_channel_gsm_write_imei_sim300_end:
+
+	// restore old termios
+	if (tcsetattr(ch_gsm->tty_fd, TCSANOW, &old_termios))
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+	// select MAIN channel of SERIAL port
+	ch_gsm->flags.main_tty = 1;
+	if (pg_channel_gsm_serial_set(ch_gsm, 0) < 0)
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": can't switch serial port to main channel: %s\n", ch_gsm->alias, strerror(errno));
+	if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0)
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
+
+	return result;
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_gsm_write_imei_sim300()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_channel_gsm_suspend_action()
 //------------------------------------------------------------------------------
 static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
 {
-	ast_verbose("%s: GSM channel=\"%s\": module switched to suspend state\n", AST_MODULE, ch_gsm->alias);
-
 	// reset registaration status
 	ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
 	// reset callwait state
@@ -4123,16 +4502,11 @@ static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
 	ch_gsm->ber = 99;
 
 	if (strlen(ch_gsm->imei_new)) {
-		ast_verbose("%s: GSM channel=\"%s\": IMEI write started\n", AST_MODULE, ch_gsm->alias);
-		ast_mutex_unlock(&ch_gsm->lock);
-		sleep(3);
-		ast_mutex_lock(&ch_gsm->lock);
-		ast_verbose("%s: GSM channel=\"%s\": IMEI write succeeded\n", AST_MODULE, ch_gsm->alias);
+		if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
+			pg_channel_gsm_write_imei_sim300(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 2);
 		ch_gsm->imei_new[0] = '\0';
-		// wake up SIM
-		x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
-		pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 	}
+
 }
 //------------------------------------------------------------------------------
 // end of pg_channel_gsm_suspend_action()
@@ -8242,6 +8616,9 @@ static void *pg_channel_gsm_workthread(void *data)
 							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 							// perform suspend action
 							pg_channel_gsm_suspend_action(ch_gsm);
+							// wake up SIM
+							x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
 						}
 					}
 				}
@@ -8329,6 +8706,9 @@ static void *pg_channel_gsm_workthread(void *data)
 
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+
+						// perform suspend action
+						pg_channel_gsm_suspend_action(ch_gsm);
 
 						// wake up SIM
 						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
@@ -15400,7 +15780,9 @@ static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, i
 					if (a->argc == 6) {
 						if ((res = imei_is_valid(a->argv[5])) == EIMEI_VALID) {
 							strcpy(ch_gsm->imei_new, a->argv[5]);
-						}
+							ast_cli(a->fd, " - IMEI=\"%s\" valid - ", a->argv[5]);
+						} else 
+							ast_cli(a->fd, " - IMEI=\"%s\" invalid: %s - ", a->argv[5], imei_strerror(-res));
 					}
 					// start GSM channel workthread
 					ch_gsm->flags.enable = 1;

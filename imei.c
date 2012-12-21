@@ -83,9 +83,9 @@ int imei_is_valid(const char *imei)
 //------------------------------------------------------------------------------
 // imei_strerror()
 //------------------------------------------------------------------------------
-const char *imei_strerror(int errno)
+const char *imei_strerror(int err)
 {
-	switch (errno)
+	switch (err)
 	{
 		case EIMEI_VALID: return "valid";
 		case EIMEI_EMPTY: return "empty";

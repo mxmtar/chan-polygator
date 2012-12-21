@@ -1,10 +1,6 @@
 /******************************************************************************/
 /* sim300.h                                                                   */
 /******************************************************************************/
-/* $Rev:: 140                        $                                        */
-/* $Author:: maksym                  $                                        */
-/* $Date:: 2012-03-20 18:19:44 +0200#$                                        */
-/******************************************************************************/
 
 #ifndef __SIM300_H__
 #define __SIM300_H__
@@ -15,7 +11,7 @@
 
 //------------------------------------------------------------------------------
 // at command id
-enum{
+enum {
 	AT_SIM300_UNKNOWN = AT_UNKNOWN,
 	// SIM300 V.25TER V1.06
 	AT_SIM300_A_SLASH = AT_A_SLASH,		// A/ - Re-issues last AT command given
@@ -182,26 +178,25 @@ enum{
 	AT_SIM300_CMGHEX,				// AT+CMGHEX - Enable to send non-ASCII character SMS
 	AT_SIM300_EXUNSOL,				// AT+EXUNSOL - Extra unsolicited indications
 
-	//
 	AT_SIM300_MAXNUM,
-	};
+};
 //------------------------------------------------------------------------------
 // sim300 AT command parameters
 // read
 // cmic read
-struct at_sim300_cmic_read{
+struct at_sim300_cmic_read {
 	// integer (mandatory)
 	int main_mic;	// Main microphone gain level
 	// integer (mandatory)
 	int aux_mic;	// Aux microphone gain level
-	};
+};
 // csmins read
-struct at_sim300_csmins_read{
+struct at_sim300_csmins_read {
 	// integer (mandatory)
 	int n;	// Unsolicited event code status
 	// integer (mandatory)
 	int sim_inserted;	// SIM inserted status
-	};
+};
 //------------------------------------------------------------------------------
 // extern
 extern const struct at_command sim300_at_com_list[AT_SIM300_MAXNUM];
@@ -210,9 +205,9 @@ extern const struct at_command sim300_at_com_list[AT_SIM300_MAXNUM];
 extern int at_sim300_cmic_read_parse(const char *fld, int fld_len, struct at_sim300_cmic_read *cmic);
 extern int at_sim300_csmins_read_parse(const char *fld, int fld_len, struct at_sim300_csmins_read *csmins);
 
-int sim300_build_imei_data1(char *data, int *len);
-int sim300_build_imei_data2(char *data, int *len);
-int sim300_build_imei_data3(char *imei, char chk, char *data, int *len);
+extern int sim300_build_imei_data1(char *data, int *len);
+extern int sim300_build_imei_data2(char *data, int *len);
+extern int sim300_build_imei_data3(const char *imei, char chk, char *data, int *len);
 //------------------------------------------------------------------------------
 #endif //__SIM300_H__
 

@@ -1,10 +1,6 @@
 /******************************************************************************/
 /* sim300.c                                                                   */
 /******************************************************************************/
-/* $Rev:: 140                        $                                        */
-/* $Author:: maksym                  $                                        */
-/* $Date:: 2012-03-20 18:19:44 +0200#$                                        */
-/******************************************************************************/
 
 #include <sys/types.h>
 
@@ -211,8 +207,8 @@ char imei_data3[49] = {	0x02,0x2D,0xD3,0xFF,0x00,0x29,0x02,
 //------------------------------------------------------------------------------
 // sim300_build_imei_data1()
 //------------------------------------------------------------------------------
-int sim300_build_imei_data1(char *data, int *len){
-
+int sim300_build_imei_data1(char *data, int *len)
+{
 	int ln;
 	// check input params
 	if(!data)
@@ -226,7 +222,7 @@ int sim300_build_imei_data1(char *data, int *len){
 	*len = ln;
 
 	return ln;
-	}
+}
 //------------------------------------------------------------------------------
 // end of sim300_build_imei_data1()
 //------------------------------------------------------------------------------
@@ -234,22 +230,22 @@ int sim300_build_imei_data1(char *data, int *len){
 //------------------------------------------------------------------------------
 // sim300_build_imei_data2()
 //------------------------------------------------------------------------------
-int sim300_build_imei_data2(char *data, int *len){
-
+int sim300_build_imei_data2(char *data, int *len)
+{
 	int ln;
 	// check input params
-	if(!data)
+	if (!data)
 		return -1;
-	if(!len)
+	if (!len)
 		return -2;
-	//
+
 	ln = sizeof(imei_data2);
 	// copy data
 	memcpy(data, imei_data2, ln);
 	*len = ln;
 
 	return ln;
-	}
+}
 //------------------------------------------------------------------------------
 // end of sim300_build_imei_data2()
 //------------------------------------------------------------------------------
@@ -257,21 +253,21 @@ int sim300_build_imei_data2(char *data, int *len){
 //------------------------------------------------------------------------------
 // sim300_build_imei_data3()
 //------------------------------------------------------------------------------
-int sim300_build_imei_data3(char *imei, char chk, char *data, int *len){
-
+int sim300_build_imei_data3(const char *imei, char chk, char *data, int *len)
+{
 	int i;
 	int ln;
 	char cs;
 	char *p;
 	char *sp;
 	// check input params
-	if(!data)
+	if (!data)
 		return -1;
-	if(!len)
+	if (!len)
 		return -2;
-	if(!imei)
+	if (!imei)
 		return -3;
-	if(!isdigit(chk))
+	if (!isdigit(chk))
 		return -4;
 	//
 	ln = sizeof(imei_data3);
@@ -280,14 +276,14 @@ int sim300_build_imei_data3(char *imei, char chk, char *data, int *len){
 	memcpy(data, imei_data3, ln);
 	// copy IMEI digit into data3 buffer
 	p = sp + 30;
-	for(i=0; i<14; i++)
+	for (i=0; i<14; i++)
 		*p++ = *imei++ - '0';
 	// copy IMEI check digit
 	*p = chk - '0';
 	// calc checksum
 	cs = 0;
 	p = sp;
-	for(i=0; i<47; i++)
+	for (i=0; i<47; i++)
 		cs ^= *p++;
 	// put checksum into data3 buffer
 	p = sp + 47;
@@ -295,7 +291,7 @@ int sim300_build_imei_data3(char *imei, char chk, char *data, int *len){
 
 	*len = ln;
 	return ln;
-	}
+}
 //------------------------------------------------------------------------------
 // end of sim300_build_imei_data3()
 //------------------------------------------------------------------------------
@@ -306,8 +302,8 @@ int sim300_build_imei_data3(char *imei, char chk, char *data, int *len){
 //------------------------------------------------------------------------------
 // at_sim300_csmins_read_parse()
 //------------------------------------------------------------------------------
-int at_sim300_csmins_read_parse(const char *fld, int fld_len, struct at_sim300_csmins_read *csmins){
-
+int at_sim300_csmins_read_parse(const char *fld, int fld_len, struct at_sim300_csmins_read *csmins)
+{
 	char *sp;
 	char *tp;
 	char *ep;
@@ -317,24 +313,25 @@ int at_sim300_csmins_read_parse(const char *fld, int fld_len, struct at_sim300_c
 	int param_cnt;
 
 	// check params
-	if(!fld) return -1;
+	if (!fld) return -1;
 
-	if((fld_len <= 0) || (fld_len > 256)) return -1;
+	if ((fld_len <= 0) || (fld_len > 256)) return -1;
 
-	if(!csmins) return -1;
+	if (!csmins) return -1;
 
 	// init ptr
-	if(!(sp = strchr(fld, ' ')))
+	if (!(sp = strchr(fld, ' ')))
 		return -1;
 	tp = ++sp;
 	ep = (char *)fld + fld_len;
 
 	// init params
-	for(param_cnt=0; param_cnt<MAX_CSIMINS_READ_PARAM; param_cnt++){
+	for (param_cnt=0; param_cnt<MAX_CSIMINS_READ_PARAM; param_cnt++)
+	{
 		params[param_cnt].type = PRM_TYPE_UNKNOWN;
 		params[param_cnt].buf = NULL;
 		params[param_cnt].len = -1;
-		}
+	}
 
 	// init at_sim300_csmins_read
 	csmins->n = -1;
@@ -342,65 +339,63 @@ int at_sim300_csmins_read_parse(const char *fld, int fld_len, struct at_sim300_c
 
 	// search params delimiters
 	param_cnt = 0;
-	while((tp < ep) || (param_cnt < MAX_CSIMINS_READ_PARAM)){
+	while ((tp < ep) || (param_cnt < MAX_CSIMINS_READ_PARAM))
+	{
 		// get param type
-		if(*tp == '"'){
+		if (*tp == '"') {
 			params[param_cnt].type = PRM_TYPE_STRING;
 			params[param_cnt].buf = ++tp;
-			}
-		else if(isdigit(*tp)){
+		} else if (isdigit(*tp)) {
 			params[param_cnt].type = PRM_TYPE_INTEGER;
 			params[param_cnt].buf = tp;
-			}
-		else{
+		} else {
 			params[param_cnt].type = PRM_TYPE_UNKNOWN;
 			params[param_cnt].buf = tp;
-			}
+		}
 		sp = tp;
 		// search delimiter and put terminated null-symbol
-		if(!(tp = strchr(sp, ',')))
+		if (!(tp = strchr(sp, ',')))
 			tp = ep;
 		*tp = '\0';
 		// set param len
-		if(params[param_cnt].type == PRM_TYPE_STRING){
+		if (params[param_cnt].type == PRM_TYPE_STRING) {
 			params[param_cnt].len = tp - sp - 1;
 			*(tp-1) = '\0';
-			}
-		else{
+		} else {
 			params[param_cnt].len = tp - sp;
-			}
+		}
 		//
 		param_cnt++;
 		tp++;
-		}
+	}
 
 	// processing integer params
 	// n (mandatory)
-	if(params[0].len > 0){
+	if (params[0].len > 0) {
 		tp = params[0].buf;
-		while(params[0].len--){
-			if(!isdigit(*tp++))
+		while (params[0].len--)
+		{
+			if (!isdigit(*tp++))
 				return -1;
-			}
-		csmins->n = atoi(params[0].buf);
 		}
-	else
+		csmins->n = atoi(params[0].buf);
+	} else
 		return -1;
 
 	// sim_inserted (mandatory)
-	if(params[1].len > 0){
+	if (params[1].len > 0) {
 		tp = params[1].buf;
-		while(params[1].len--){
-			if(!isdigit(*tp++))
+		while (params[1].len--)
+		{
+			if (!isdigit(*tp++))
 				return -1;
-			}
-		csmins->sim_inserted = atoi(params[1].buf);
 		}
-	else
+		csmins->sim_inserted = atoi(params[1].buf);
+	} else
 		return -1;
 
 	return param_cnt;
-	}
+}
 //------------------------------------------------------------------------------
 // end of at_sim300_csmins_read_parse()
 //------------------------------------------------------------------------------
@@ -408,8 +403,8 @@ int at_sim300_csmins_read_parse(const char *fld, int fld_len, struct at_sim300_c
 //------------------------------------------------------------------------------
 // at_sim300_parse_cmic_read_parse()
 //------------------------------------------------------------------------------
-int at_sim300_cmic_read_parse(const char *fld, int fld_len, struct at_sim300_cmic_read *cmic){
-
+int at_sim300_cmic_read_parse(const char *fld, int fld_len, struct at_sim300_cmic_read *cmic)
+{
 	char *sp;
 	char *tp;
 	char *ep;
@@ -419,24 +414,25 @@ int at_sim300_cmic_read_parse(const char *fld, int fld_len, struct at_sim300_cmi
 	int param_cnt;
 
 	// check params
-	if(!fld) return -1;
+	if (!fld) return -1;
 
-	if((fld_len <= 0) || (fld_len > 256)) return -1;
+	if ((fld_len <= 0) || (fld_len > 256)) return -1;
 
-	if(!cmic) return -1;
+	if (!cmic) return -1;
 
 	// init ptr
-	if(!(sp = strchr(fld, ' ')))
+	if (!(sp = strchr(fld, ' ')))
 		return -1;
 	tp = ++sp;
 	ep = (char *)fld + fld_len;
 
 	// init params
-	for(param_cnt=0; param_cnt<MAX_CMIC_READ_PARAM; param_cnt++){
+	for (param_cnt=0; param_cnt<MAX_CMIC_READ_PARAM; param_cnt++)
+	{
 		params[param_cnt].type = PRM_TYPE_UNKNOWN;
 		params[param_cnt].buf = NULL;
 		params[param_cnt].len = -1;
-		}
+	}
 
 	// init at_sim300_cmic_read
 	cmic->main_mic = -1;
@@ -444,65 +440,63 @@ int at_sim300_cmic_read_parse(const char *fld, int fld_len, struct at_sim300_cmi
 
 	// search params delimiters
 	param_cnt = 0;
-	while((tp < ep) && (param_cnt < MAX_CMIC_READ_PARAM)){
+	while ((tp < ep) && (param_cnt < MAX_CMIC_READ_PARAM))
+	{
 		// get param type
-		if(*tp == '"'){
+		if (*tp == '"') {
 			params[param_cnt].type = PRM_TYPE_STRING;
 			params[param_cnt].buf = ++tp;
-			}
-		else if(isdigit(*tp)){
+		} else if (isdigit(*tp)) {
 			params[param_cnt].type = PRM_TYPE_INTEGER;
 			params[param_cnt].buf = tp;
-			}
-		else{
+		} else {
 			params[param_cnt].type = PRM_TYPE_UNKNOWN;
 			params[param_cnt].buf = tp;
-			}
+		}
 		sp = tp;
 		// search delimiter and put terminated null-symbol
-		if(!(tp = strchr(sp, ',')))
+		if (!(tp = strchr(sp, ',')))
 			tp = ep;
 		*tp = '\0';
 		// set param len
-		if(params[param_cnt].type == PRM_TYPE_STRING){
+		if (params[param_cnt].type == PRM_TYPE_STRING) {
 			params[param_cnt].len = tp - sp - 1;
 			*(tp-1) = '\0';
-			}
-		else{
+		} else {
 			params[param_cnt].len = tp - sp;
-			}
+		}
 		//
 		param_cnt++;
 		tp++;
-		}
+	}
 
 	// processing integer params
 	// Main microphone gain level
-	if(params[0].len > 0){
+	if (params[0].len > 0) {
 		tp = params[0].buf;
-		while(params[0].len--){
-			if(!isdigit(*tp++))
+		while (params[0].len--)
+		{
+			if (!isdigit(*tp++))
 				return -1;
-			}
-		cmic->main_mic = atoi(params[0].buf);
 		}
-	else
+		cmic->main_mic = atoi(params[0].buf);
+	} else
 		return -1;
 
 	// Aux microphone gain level
-	if(params[1].len > 0){
+	if (params[1].len > 0) {
 		tp = params[1].buf;
-		while(params[1].len--){
-			if(!isdigit(*tp++))
+		while (params[1].len--)
+		{
+			if (!isdigit(*tp++))
 				return -1;
-			}
-		cmic->aux_mic = atoi(params[1].buf);
 		}
-	else
+		cmic->aux_mic = atoi(params[1].buf);
+	} else
 		return -1;
 
 	return param_cnt;
-	}
+}
 //------------------------------------------------------------------------------
 // end of at_sim300_cmic_read_parse()
 //------------------------------------------------------------------------------
