@@ -67,3 +67,7 @@ Add PLMN virtual trunks.
 Limit field length of Dial PGGSM arguments string for prevent stack corruption in sscanf call.
 20.12.12
 Use clock realtime library for internal timers.
+24.12.12
+Use ast_queue_hangup_with_cause(ast, cause) instead ast_queue_control(ast, AST_CONTROL_HANGUP)
+without lock asterisk channel.
+

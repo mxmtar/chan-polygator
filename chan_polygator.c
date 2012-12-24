@@ -5215,20 +5215,19 @@ static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_CALL_GSM_MSG_RELEASE_IND:
 			if (call->owner) {
-				while (ast_channel_trylock(call->owner))
-				{
-					ast_mutex_unlock(&ch_gsm->lock);
-					usleep(1000);
-					ast_mutex_lock(&ch_gsm->lock);
-				}
-
-				ast_mutex_unlock(&ch_gsm->lock);
-				call->owner->hangupcause = cause;
-				ast_queue_control(call->owner, AST_CONTROL_HANGUP);
-				ast_mutex_lock(&ch_gsm->lock);
-
-				ast_channel_unlock(call->owner);
+// 				while (ast_channel_trylock(call->owner))
+// 				{
+// 					ast_mutex_unlock(&ch_gsm->lock);
+// 					usleep(1000);
+// 					ast_mutex_lock(&ch_gsm->lock);
+// 				}
 				call->state = PG_CALL_GSM_STATE_RELEASE_INDICATION;
+				ast_mutex_unlock(&ch_gsm->lock);
+// 				call->owner->hangupcause = cause;
+// 				ast_queue_control(call->owner, AST_CONTROL_HANGUP);
+				ast_queue_hangup_with_cause(call->owner, cause);
+				ast_mutex_lock(&ch_gsm->lock);
+// 				ast_channel_unlock(call->owner);
 			} else
 				pg_channel_gsm_put_call(ch_gsm, call);
 
