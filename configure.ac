@@ -6,6 +6,7 @@ AC_PREREQ([2.60])
 # set project attribute
 AC_INIT([chan-polygator], [1.2.0])
 
+# init automake
 AM_INIT_AUTOMAKE([-Wall -Werror])
 
 m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
@@ -64,6 +65,8 @@ AC_PROG_INSTALL
 AC_PROG_SED
 AC_PROG_LIBTOOL
 
+m4_ifdef([AM_PROG_CC_C_O], [AM_PROG_CC_C_O])
+
 CPPFLAGS="${CPPFLAGS} -I$lt_sysroot$prefix/include"
 if test -d "$lt_sysroot$astprefix/lib64" ; then
 	LIBS="${LIBS} -L$lt_sysroot$prefix/lib64"
@@ -105,6 +108,8 @@ AC_MSG_RESULT(no)
 PG_ASTERISK_GET_DIRECTORY([astetcdir])
 PG_ASTERISK_GET_DIRECTORY([astmoddir])
 PG_ASTERISK_GET_DIRECTORY([astdatadir])
+
+AC_DEFINE_UNQUOTED([ASTERISK_DATA_DEFAULT_PATH], ["${astdatadir}"], [Define default path to asterisk data directory.])
 
 # Checks for required sqlite3 version
 PG_SQLITE3_VERSION_PREREQ([3.0.0])
