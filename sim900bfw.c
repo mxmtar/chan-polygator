@@ -7,6 +7,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -145,32 +146,27 @@ static int pg_channel_gsm_key_press(const char *board, int position, int state)
 	return res;
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
-#if 0
-	struct timeval timeout;
-	char cbuf[256];
-	FILE *ih_fp;
-	int rc;
-	int data_int;
-	int module_type;
-
-	size_t cnt;
 
 	union {
 		char byte[4];
 		u_int32_t full;
 	} res_checksum;
-#else
+
 	int opt;
 
 	char *device = NULL;
 	char *hex = NULL;
 	char *firmware = NULL;
-	char *imei = NULL;
 
 	size_t i;
-	char t_buf[512];
+
+	char t_buf[1024];
+	char *t_ptr;
+	size_t t_pos;
+	ssize_t t_size;
+	size_t t_total;
 
 	char *channel;
 	u_int32_t pos_on_board;
@@ -190,9 +186,10 @@ int main(int argc, char *argv[])
 
 	char tty_fpath[PATH_MAX];
 	int tty_fd = -1;
-	struct termios tty_termios;
+	struct termios tty_termios, old_termios;
 
 	char hex_fpath[PATH_MAX];
+	FILE *hex_fptr = NULL;
 
 	char fw_fpath[PATH_MAX];
 	int fw_fd = -1;
@@ -205,13 +202,13 @@ int main(int argc, char *argv[])
 	u_int8_t fw_u8;
 
 	struct x_timer timer;
-	char chr;
+	char t_char;
 	int res;
-	int cur;
 
-#endif
+	struct timeval timeout;
+	fd_set fds;
 
-	while ((opt = getopt(argc, argv, "d:f:h:i:")) != -1)
+	while ((opt = getopt(argc, argv, "d:f:h:")) != -1)
 	{
 		switch (opt)
 		{
@@ -223,9 +220,6 @@ int main(int argc, char *argv[])
 				break;
 			case 'h': /*! - File of Intel HEX, default "flash_nor_16bits_hwasic_evp_4902_rel.hex" */
 				hex = optarg;
-				break;
-			case 'i':
-				imei = optarg;
 				break;
 			default: /*! '?' */
 				printf(sim900bfw_usage);
@@ -248,8 +242,6 @@ int main(int argc, char *argv[])
 		snprintf(fw_fpath, sizeof(fw_fpath), "%s", firmware);
 	else
 		snprintf(fw_fpath, sizeof(fw_fpath), "%s/polygator/%s", ASTERISK_DATA_DEFAULT_PATH, sim900_firmware_default);
-
-	if (imei) imei = NULL;
 
 	printf("Discovering specified device \"%s\"...\n", device);
 	if (!(channel = strrchr(device, '-'))) {
@@ -291,21 +283,28 @@ int main(int argc, char *argv[])
 
 	if (!strlen(tty)) {
 		printf("not found\n");
+		goto main_end;
 	}
 
 	printf("Starting Download SIM900 Firmware\n");
 
 	// open TTY device
-	if ((tty_fd = open(tty_fpath, O_RDWR | O_NONBLOCK)) < 0) {
+	if ((tty_fd = open(tty_fpath, O_RDWR | O_NOCTTY | O_NONBLOCK)) < 0) {
 		printf("can't open \"%s\": %s\n", tty_fpath, strerror(errno));
 		goto main_end;
 	}
-	// set termios
-	cfmakeraw(&tty_termios);
+	// get termios
+	if (tcgetattr(tty_fd, &old_termios)) {
+		printf("tcgetattr() error: %s\n", strerror(errno));
+		goto main_end;
+	}
 	if (tcgetattr(tty_fd, &tty_termios)) {
 		printf("tcgetattr() error: %s\n", strerror(errno));
 		goto main_end;
 	}
+	cfmakeraw(&tty_termios);
+	tty_termios.c_cc[VMIN] = 0;
+	tty_termios.c_cc[VTIME] = 0;
 	cfsetispeed(&tty_termios, B115200);
 	cfsetospeed(&tty_termios, B115200);
 	if (tcsetattr(tty_fd, TCSANOW, &tty_termios) < 0) {
@@ -353,130 +352,243 @@ int main(int argc, char *argv[])
 	printf("succeeded\n");
 	fflush(stdout);
 
-	// Detection of synchronous bytes
-	printf("Detection of synchronous bytes...");
-	fflush(stdout);
-
-	if (pg_channel_gsm_power_set(board_fpath, pos_on_board, 1) < 0) {
-		printf("pg_channel_gsm_power_set() error: %s\n", strerror(errno));
-		goto main_end;
-	}
-	sleep(3);
-	if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 1) < 0) {
-		printf("pg_channel_gsm_key_press() error: %s\n", strerror(errno));
-		goto main_end;
-	}
-	usleep(1999999);
 	if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 0) < 0) {
 		printf("pg_channel_gsm_key_press() error: %s\n", strerror(errno));
 		goto main_end;
 	}
+	if (pg_channel_gsm_power_set(board_fpath, pos_on_board, 0) < 0) {
+		printf("pg_channel_gsm_power_set() error: %s\n", strerror(errno));
+		goto main_end;
+	}
+	sleep(1);
+	printf("Turn GSM module power to ON...");
+	if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 1) < 0) {
+		printf("pg_channel_gsm_key_press() error: %s\n", strerror(errno));
+		goto main_end;
+	}
+	if (pg_channel_gsm_power_set(board_fpath, pos_on_board, 1) < 0) {
+		printf("pg_channel_gsm_power_set() error: %s\n", strerror(errno));
+		goto main_end;
+	}
+	printf("ok\n");
+	fflush(stdout);
 
-	x_timer_set_second(timer, 60);
-	do {
+	// Detection of synchronous bytes
+	printf("Detection of synchronous bytes...");
+	fflush(stdout);
+
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
 		// writing synchronous octet
-		chr = 0x16;
-		if (write(tty_fd, &chr, 1) < 0) {
-			printf("failed - write(): %s\n", strerror(errno));
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x16;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				}
+			}
+		} if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
 			goto main_end;
 		}
-		// wait for synchronous octet round trip
-		usleep(30000);
 		// wait for synchronous octet
-		res = read(tty_fd, &chr, 1);
-		if (res < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - read(): %s\n", strerror(errno));
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 10000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				// read synchronous octet
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+// 					printf("read 0x%02x - %c\n", (unsigned char)t_char, isprint(t_char)?t_char:'?');
+					if (t_char == 0x16)
+						break;	// synchronous octet received
+				}
+			} if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
 				goto main_end;
 			}
-		} else if (res == 1) {
-			if (chr == 0x16) break;	// synchronous octet received
 		}
-	} while (is_x_timer_active(timer));
+	}
 	// check for entering into downloading procedure
 	if (is_x_timer_fired(timer)) {
 		printf("run in normal mode - quit from program\n");
 		goto main_end;
 	}
+// 	if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 0) < 0) {
+// 		printf("pg_channel_gsm_key_press() error: %s\n", strerror(errno));
+// 		goto main_end;
+// 	}
+	if (tcflush(tty_fd, TCIOFLUSH) < 0)
+		printf("can't flush tty device: %s\n", strerror(errno));
 	// entering into downloading procedure
 	printf("module entered into downloading procedure\n");
-#if 0
+
 	// File of Intel HEX download
 	printf("File of Intel HEX download...");
 	fflush(stdout);
-	if (!(ih_fp = fopen(intel_hex, "r"))) {
-		printf("failed - fopen(%s): %s\n", intel_hex, strerror(errno));
+	if (!(hex_fptr = fopen(hex_fpath, "r"))) {
+		printf("failed - fopen(%s): %s\n", hex_fpath, strerror(errno));
 		goto main_end;
 	}
-	rc = 0;
-	// copy hex file into device
-	while (fgets(cbuf, sizeof(cbuf), ih_fp))
+	// write hex file into device
+	t_total = 0;
+	while (fgets(t_buf, sizeof(t_buf), hex_fptr))
 	{
-		data_int = strlen(cbuf);
-		if (write(sig_fd, cbuf, data_int) < 0) {
-			printf("failed - write(): %s\n", strerror(errno));
-			fclose(ih_fp);
-			goto main_end;
-		}
-		printf(".");
-		fflush(stdout);
-		rc += data_int;
-		usleep(data_int*100);
-	}
-	data_int = rc;
-	// wait for success download indication
-	timeout.tv_sec = 10;
-	timeout.tv_usec = 0;
-	x_timer_set(timer, timeout);
-	do {
-		rc = read(sig_fd, &chr, 1);
-		if (rc < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - read(): %s\n", strerror(errno));
-				fclose(ih_fp);
+		t_size = strlen(t_buf);
+		t_pos = 0;
+		x_timer_set_second(timer, 5);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 0;
+			timeout.tv_usec = (t_size - t_pos) * 1000;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = write(tty_fd, &t_buf[t_pos], t_size - t_pos);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - write(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res > 0) {
+						t_pos += res;
+						if (t_size == t_pos) {
+							printf(".");
+							fflush(stdout);
+							t_total += t_size;
+							break;
+						}
+					}
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
 				goto main_end;
 			}
-		} else if(rc == 1) {
-			if (chr == 0) break;
 		}
-		usleep(100);
-	} while(is_x_timer_active(timer));
-	// check for completion
+		if (is_x_timer_fired(timer)) {
+			printf("failed - time is out\n");
+			goto main_end;
+		}
+	}
+	// wait for success download of Intel HEX indication
+	x_timer_set_second(timer, 5);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 5;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x00) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
 	if (is_x_timer_fired(timer)) {
-		printf("failed - timeout\n");
-		fclose(ih_fp);
+		printf("failed - time is out\n");
 		goto main_end;
 	}
-	fclose(ih_fp);
-	printf("\nsucceeded - total %d bytes\n", data_int);
+	fclose(hex_fptr);
+	hex_fptr = NULL;
+	printf("succeeded - total %lu bytes\n", (unsigned long int)t_total);
 
 	// Set the storage equipment
 	printf("Set the storage equipment...");
-	data_int = sizeof(sim900_set_storage_equipment);
-	if (write(sig_fd, sim900_set_storage_equipment, data_int) < 0) {
-		printf("failed - write(): %s\n", strerror(errno));
+	fflush(stdout);
+
+	t_ptr = (char *)&sim900_set_storage_equipment;
+	t_size = sizeof(sim900_set_storage_equipment);
+	t_pos = 0;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
 		goto main_end;
 	}
-	usleep(data_int*100);
 	// wait for success indication
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
-	x_timer_set(timer, timeout);
-	do {
-		rc = read(sig_fd, &chr, 1);
-		if (rc < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - read(): %s\n", strerror(errno));
-				goto main_end;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x04) break;
+				}
 			}
-		} else if (rc == 1) {
-			if (chr == 0x04) break;
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
 		}
-		usleep(100);
-	} while(is_x_timer_active(timer));
-	// check for completion
-	if (is_x_timer_fired(timer)){
-		printf("failed -  timeout\n");
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
 		goto main_end;
 	}
 	printf("succeeded\n");
@@ -484,54 +596,94 @@ int main(int argc, char *argv[])
 	// Read the flash manufacturer information
 	printf("Read the flash manufacturer information...");
 	fflush(stdout);
-	chr = 0x02;
-	if (write(sig_fd, &chr, 1) < 0) {
-		printf("failed - write(): %s\n", strerror(errno));
-		goto main_end;
-	}
-	usleep(100);
-	// read marker
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
-	x_timer_set(timer, timeout);
-	do {
-		rc = read(sig_fd, &chr, 1);
-		if (rc < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - marker - read(): %s\n", strerror(errno));
-				goto main_end;
-				}
-		} else if (rc == 1) {
-			if (chr == 0x02) break;
+
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		// writing synchronous octet
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x02;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} if (res == 1) break;
+			}
+		} if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
 		}
-		usleep(100);
-	} while (is_x_timer_active(timer));
-	// check for completion
+	}
 	if (is_x_timer_fired(timer)) {
-		printf("failed - marker - timeout\n");
+		printf("failed - write - timeout\n");
 		goto main_end;
 	}
-	// read data
-	for (cnt=0; cnt<4; cnt++)
+	// read marker
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
 	{
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
-		x_timer_set(timer, timeout);
-		do {
-			rc = read(sig_fd, &chr, 1);
-			if (rc < 0) {
-				if (errno != EAGAIN) {
-					printf("failed - read(): %s\n", strerror(errno));
-					goto main_end;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x02) break;
 				}
-			} else if (rc == 1) {
-				break;
 			}
-			usleep(100);
-		} while (is_x_timer_active(timer));
-		// check for completion
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	// read data
+	for (i=0; i<4; i++)
+	{
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - read(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res == 1) break;
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
+			}
+		}
 		if (is_x_timer_fired(timer)) {
-			printf("failed - timeout\n");
+			printf("failed - time is out\n");
 			goto main_end;
 		}
 	}
@@ -540,211 +692,425 @@ int main(int argc, char *argv[])
 	// Configuration for erased area of FLASH
 	printf("Configuration for erased area of FLASH...");
 	fflush(stdout);
-	data_int = sizeof(sim900_configuration_for_erased_area);
-	if (write(sig_fd, sim900_configuration_for_erased_area, data_int) < 0) {
-		printf("failed - write(): %s\n", strerror(errno));
+
+	t_ptr = (char *)&sim900_configuration_for_erased_area;
+	t_size = sizeof(sim900_configuration_for_erased_area);
+	t_pos = 0;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
 		goto main_end;
 	}
-	usleep(data_int*100);
 	// wait for success indication
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
-	x_timer_set(timer, timeout);
-	do {
-		rc = read(sig_fd, &chr, 1);
-		if (rc < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - read(): %s\n", strerror(errno));
-				goto main_end;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x09) break;
+				}
 			}
-		} else if (rc == 1) {
-			if (chr == 0x09) break;
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
 		}
-		usleep(100);
-	} while(is_x_timer_active(timer));
-	// check for completion
+	}
 	if (is_x_timer_fired(timer)) {
-		printf("failed - timeout\n");
+		printf("failed - time is out\n");
 		goto main_end;
 	}
 	printf("succeeded\n");
 
 	// FLASH erase
-	printf("FLASH erase...");
+	printf("FLASH erase");
 	fflush(stdout);
-	chr = 0x03;
-	if (write(sig_fd, &chr, 1) < 0) {
-		printf("failed - write(): %s\n", strerror(errno));
+
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		// writing synchronous octet
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x03;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} if (res == 1) break;
+			}
+		} if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - write - timeout\n");
 		goto main_end;
 	}
-	usleep(100);
 	// read marker
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
-	x_timer_set(timer, timeout);
-	do {
-		rc = read(sig_fd, &chr, 1);
-		if (rc < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - marker - read(): %s\n", strerror(errno));
-				goto main_end;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x03) break;
+				}
 			}
-		} else if (rc == 1) {
-			if (chr == 0x03) break;
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
 		}
-		usleep(100);
-	} while(is_x_timer_active(timer));
-	// check for completion
+	}
 	if (is_x_timer_fired(timer)) {
-		printf("failed - marker - timeout\n");
+		printf("failed - time is out\n");
 		goto main_end;
 	}
 	// Wait for flash erase
-	timeout.tv_sec = 300;
-	timeout.tv_usec = 0;
-	x_timer_set(timer, timeout);
-	do {
-		rc = read(sig_fd, &chr, 1);
-		if (rc < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - read(): %s\n", strerror(errno));
-				goto main_end;
+	t_total = 0;
+	x_timer_set_second(timer, 300);
+	while(is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x30) break;
+				}
 			}
-		} else if (rc == 1) {
-			if (chr == 0x30) break;
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		} else {
+			printf(".");
+			fflush(stdout);
+			t_total++;
 		}
-		usleep(100);
-	} while(is_x_timer_active(timer));
+	}
 	// check for completion
 	if (is_x_timer_fired(timer)) {
 		printf("failed - timeout\n");
 		goto main_end;
 	}
-	printf("succeeded\n");
+	printf("succeeded - in %lu seconds\n", (unsigned long int)t_total);
 
 	// Set for downloaded code information
 	printf("Set for downloaded code information...");
 	fflush(stdout);
+
 	memcpy(&sim900_set_for_downloaded_code_information[5], &fw_stat.st_size, 4);
-	data_int = sizeof(sim900_set_for_downloaded_code_information);
-	if (write(sig_fd, sim900_set_for_downloaded_code_information, data_int) < 0) {
-		printf("failed - write(): %s\n", strerror(errno));
+
+	t_ptr = (char *)&sim900_set_for_downloaded_code_information;
+	t_size = sizeof(sim900_set_for_downloaded_code_information);
+	t_pos = 0;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
 		goto main_end;
 	}
-	usleep(data_int*100);
-	// read marker
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
-	x_timer_set(timer, timeout);
-	do {
-		rc = read(sig_fd, &chr, 1);
-		if (rc < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - marker - read(): %s\n", strerror(errno));
-				goto main_end;
-			}	
-		} else if (rc == 1) {
-			if (chr == 0x04) break;
+	// read marker 0x04
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x04) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
 		}
-		usleep(100);
-	} while(is_x_timer_active(timer));
-	// check for completion
+	}
 	if (is_x_timer_fired(timer)) {
-		printf("failed - marker - timeout\n");
+		printf("failed - time is out\n");
 		goto main_end;
 	}
 	printf("succeeded\n");
 
-	for (cnt=0; cnt<fw_block_count; cnt++)
+	for (i=0; i<fw_block_count; i++)
 	{
-		fw_block_size = (fw_size/0x800)?(0x800):(fw_size);
-		printf("\rCode page download - block(%lu/%lu)...", (long unsigned int)cnt+1, (long unsigned int)fw_block_count);
+		printf("\rCode page download - block(%lu/%lu)...", (long unsigned int)i+1, (long unsigned int)fw_block_count);
 		fflush(stdout);
+
+		fw_block_size = (fw_size/0x800)?(0x800):(fw_size);
 		fw_size -= fw_block_size;
 		
-		if (lseek(fw_fd, cnt*0x800, SEEK_SET) < 0) {
+		if (lseek(fw_fd, i*0x800, SEEK_SET) < 0) {
 			printf("failed - lseek(): %s\n", strerror(errno));
 			goto main_end;
 		}
-		if (read(fw_fd, fw_block, fw_block_size) < 0) {
+		t_size = read(fw_fd, fw_block, fw_block_size);
+		if (t_size < 0) {
 			printf("failed - read(): %s\n", strerror(errno));
 			goto main_end;
 		}
+		if (t_size != fw_block_size) {
+			printf("failed - read(): block has wrong length=%lu, expected=%lu\n", (long unsigned int)t_size, (long unsigned int)fw_block_size);
+			goto main_end;
+		}
+
 		// Set for downloaded code section
 		memcpy(&sim900_set_for_downloaded_code_section[1], &fw_block_size, 2);
-		rc = sizeof(sim900_set_for_downloaded_code_section);
-		if (write(sig_fd, sim900_set_for_downloaded_code_section, rc) < 0) {
-			printf("failed section(%lu) write(): %s\n", (long unsigned int)cnt+1, strerror(errno));
-			goto main_end;
-		}
-		usleep(rc*100);
-		// read marker
-		timeout.tv_sec = 1;
-		timeout.tv_usec = 0;
-		x_timer_set(timer, timeout);
-		do {
-			rc = read(sig_fd, &chr, 1);
-			if (rc < 0) {
-				if (errno != EAGAIN) {
-					printf("failed section(%lu) - marker - read(): %s\n", (long unsigned int)cnt+1, strerror(errno));
-					goto main_end;
+
+		t_ptr = (char *)&sim900_set_for_downloaded_code_section;
+		t_size = sizeof(sim900_set_for_downloaded_code_section);
+		t_pos = 0;
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 0;
+			timeout.tv_usec = (t_size - t_pos) * 1000;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - write(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res > 0) {
+						t_pos += res;
+						if (t_size == t_pos) break;
+					}
 				}
-			} else if (rc == 1) {
-				if (chr == 0x01) break;
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
 			}
-			usleep(100);
-		} while(is_x_timer_active(timer));
-		// check for completion
+		}
 		if (is_x_timer_fired(timer)) {
-			printf("failed section(%lu) - marker - timeout\n", (long unsigned int)cnt+1);
+			printf("failed - time is out\n");
 			goto main_end;
 		}
+		// read marker
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - read(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res == 1) {
+						if (t_char == 0x01) break;
+					}
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			printf("failed - time is out\n");
+			goto main_end;
+		}
+
 		// Download code data
-		if (write(sig_fd, fw_block, fw_block_size) < 0) {
-			printf("failed - write(): %s\n", strerror(errno));
+		t_ptr = (char *)fw_block;
+		t_size = fw_block_size;
+		t_pos = 0;
+		x_timer_set_second(timer, fw_block_size/1000 + 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 0;
+			timeout.tv_usec = (t_size - t_pos) * 1000;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - write(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res > 0) {
+						t_pos += res;
+						if (t_size == t_pos) break;
+					}
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			printf("failed - time is out\n");
 			goto main_end;
 		}
-		usleep(fw_block_size*100);
-		// read marker
-		timeout.tv_sec = 1;
-		timeout.tv_usec = 0;
-		x_timer_set(timer, timeout);
-		do {
-			rc = read(sig_fd, &chr, 1);
-			if (rc < 0) {
-				if (errno != EAGAIN) {
-					printf("failed - marker(0x2e) - read(): %s\n", strerror(errno));
-					goto main_end;
+		// read marker 0x2e
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - read(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res == 1) {
+						if (t_char == 0x2e) break;
+					}
 				}
-			} else if (rc == 1) {
-				if (chr == 0x2e) break;
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
 			}
-			usleep(100);
-		} while(is_x_timer_active(timer));
-		// check for completion
+		}
 		if (is_x_timer_fired(timer)) {
-			printf("failed - marker(0x2e) - timeout\n");
+			printf("failed - time is out\n");
 			goto main_end;
 		}
-		// read marker
-		timeout.tv_sec = 1;
-		timeout.tv_usec = 0;
-		x_timer_set(timer, timeout);
-		do {
-			rc = read(sig_fd, &chr, 1);
-			if (rc < 0) {
-				if (errno != EAGAIN) {
-					printf("failed - marker(0x30) - read(): %s\n", strerror(errno));
-					goto main_end;
+		// read marker 0x30
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - read(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res == 1) {
+						if (t_char == 0x30) break;
+					}
 				}
-			} else if (rc == 1) {
-				if (chr == 0x30) break;
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
 			}
-			usleep(100);
-		} while(is_x_timer_active(timer));
-		// check for completion
+		}
 		if (is_x_timer_fired(timer)) {
-			printf("failed - marker(0x30) - timeout\n");
+			printf("failed - time is out\n");
 			goto main_end;
 		}
 	}
@@ -753,97 +1119,164 @@ int main(int argc, char *argv[])
 	// Comparision for downloaded information
 	printf("Comparision for downloaded information...");
 	fflush(stdout);
+
 	memcpy(&sim900_comparision_for_downloaded_information[5], &fw_checksum, 4);
 	memcpy(&sim900_comparision_for_downloaded_information[9], &fw_stat.st_size, 4);
-	rc = sizeof(sim900_comparision_for_downloaded_information);
-	if (write(sig_fd, sim900_comparision_for_downloaded_information, rc) < 0) {
-		printf("failed - write(): %s\n", strerror(errno));
-		goto main_end;
-	}
-	usleep(rc*100);
-	// read marker
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
-	x_timer_set(timer, timeout);
-	do {
-		rc = read(sig_fd, &chr, 1);
-		if (rc < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - marker(0x15) - read(): %s\n", strerror(errno));
-				goto main_end;
-				}
-		} else if (rc == 1) {
-			if (chr == 0x15) break;
-		}
-		usleep(100);
-	} while (is_x_timer_active(timer));
-	// check for completion
-	if (is_x_timer_fired(timer)) {
-		printf("failed - marker(0x15) - timeout\n");
-		goto main_end;
-	}
-	// read data
-	for (cnt=0; cnt<4; cnt++)
+
+	t_ptr = (char *)&sim900_comparision_for_downloaded_information;
+	t_size = sizeof(sim900_comparision_for_downloaded_information);
+	t_pos = 0;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
 	{
-		timeout.tv_sec = 1;
-		timeout.tv_usec = 0;
-		x_timer_set(timer, timeout);
-		do {
-			rc = read(sig_fd, &chr, 1);
-			if (rc < 0) {
-				if (errno != EAGAIN) {
-					printf("failed - read(): %s\n", strerror(errno));
-					goto main_end;
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
 				}
-			} else if (rc == 1) {
-				res_checksum.byte[cnt] = chr;
-				break;
 			}
-			usleep(100);
-		} while (is_x_timer_active(timer));
-		// check for completion
-		if (is_x_timer_fired(timer)) {
-			printf("failed - timeout\n");
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
 			goto main_end;
 		}
 	}
-	// read marker
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
-	x_timer_set(timer, timeout);
-	do {
-		rc = read(sig_fd, &chr, 1);
-		if (rc < 0) {
-			if (errno != EAGAIN) {
-				printf("failed - marker(0x30) - read(): %s\n", strerror(errno));
-				goto main_end;
-				}
-		} else if (rc == 1) {
-			if ((chr == 0x30) || (chr == 0x43)) break;
-		}
-		usleep(100);
-	} while (is_x_timer_active(timer));
-	// check for completion
 	if (is_x_timer_fired(timer)) {
-		printf("failed - marker(0x30) - timeout\n");
+		printf("failed - time is out\n");
 		goto main_end;
 	}
-	if (chr == 0x30) {
+	// read marker 0x15
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x15) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	// read data
+	for (i=0; i<4; i++)
+	{
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - read(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res == 1) {
+						res_checksum.byte[i] = t_char;
+						break;
+					}
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			printf("failed - time is out\n");
+			goto main_end;
+		}
+	}
+	// read marker 0x30 or 0x43
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if ((t_char == 0x30) || (t_char == 0x43)) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+
+	if (t_char == 0x30) {
 		printf("checksum match=%08x\n", res_checksum.full);
 		printf("Download SIM900 Firmware succeeded\n");
 	} else {
 		printf("checksum not match=%08x\n", res_checksum.full);
 		printf("Download SIM900 Firmware failed\n");
 	}
-#endif
+
 main_end:
-#if 0
-	// send power control command - enable GSM module
-	pwr_cmd.enable = 0;
-	pwr_cmd.activation = 0;
-	ioctl(sig_fd, EGGSM_PWR_CFG_SET, &pwr_cmd);
-#endif
-	close(tty_fd);
+	if (hex_fptr) fclose(hex_fptr);
+	if (tty_fd > -1) {
+		// restore termios
+		if (tcsetattr(tty_fd, TCSANOW, &old_termios) < 0)
+			printf("tcsetattr() error: %s\n", strerror(errno));
+		// close TTY device
+		close(tty_fd);
+		// disable GSM module
+		if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 0) < 0) {
+			printf("pg_channel_gsm_key_press() error: %s\n", strerror(errno));
+			goto main_end;
+		}
+		if (pg_channel_gsm_power_set(board_fpath, pos_on_board, 0) < 0) {
+			printf("pg_channel_gsm_power_set() error: %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
 	close(fw_fd);
 	exit(EXIT_SUCCESS);
 }
