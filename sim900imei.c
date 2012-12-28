@@ -21,41 +21,65 @@
 
 #include "autoconfig.h"
 
+#include "imei.h"
+#include "strutil.h"
 #include "x_timer.h"
 
-unsigned char sim900_set_storage_equipment[9] = {
+static const unsigned char sim900_set_storage_equipment[9] = {
 	0x04,
 	0x00, 0x00, 0x00, 0x90,
 	0x00, 0x00, 0x00, 0x00,
 };
 
-unsigned char sim900_configuration_for_erased_area[9] = {
+static const unsigned char sim900_set_storage_equipment_s1[9] = {
+	0x04,
+	0x00, 0x00, 0x23, 0x90,
+	0x00, 0x00, 0x01, 0x00};
+
+
+static const unsigned char sim900_configuration_for_erased_area[9] = {
 	0x09,
 	0x00, 0x00, 0x00, 0x90,
 	0x00, 0x00, 0x7f, 0x00,
 };
 
-unsigned char sim900_set_for_downloaded_code_information[9] = {
+static const const unsigned char sim900_configuration_for_erased_area_s0[9] = {
+	0x09,
+	0x00, 0x00, 0x23, 0x90,
+	0x00, 0x00, 0x01, 0x00};
+
+static const unsigned char sim900_configuration_for_erased_area_s1[9] = {
+	0x09,
+	0x00, 0x00, 0x51, 0x90,
+	0x00, 0x00, 0x2e, 0x00};
+
+static const unsigned char sim900_set_for_downloaded_code_information[9] = {
 	0x04,
 	0x00, 0x00, 0x00, 0x90,
 	0x00, 0x00, 0x00, 0x00,
 };
 
-unsigned char sim900_set_for_downloaded_code_section[5] = {
+static const unsigned char sim900_set_for_downloaded_code_information_s0[9] = {
+	0x04,
+	0x00, 0x00, 0x23, 0x90,
+	0x00, 0x00, 0x01, 0x00,
+};
+
+static const unsigned char sim900_set_for_downloaded_code_section[5] = {
 	0x01,
 	0x00, 0x08, 0x00, 0x00,
 };
 
-unsigned char sim900_comparision_for_downloaded_information[13] = {
+static const unsigned char sim900_comparision_for_downloaded_information[13] = {
 	0x15,
 	0x00, 0x00, 0x00, 0x90,
 	0xE7, 0xDA, 0x45, 0x0D,
 	0x00, 0x00, 0x00, 0x00,
 };
 
-const char *sim900bfw_usage = "Usage: sim900bfw -d <device> -i imei [-h <File of Intel HEX>]\n";
+static const char *sim900imei_usage = "Usage: sim900imei -d <device> -i imei [-h <File of Intel HEX>]\n";
 
-const char *intel_hex_default = "flash_nor_16bits_hwasic_evp_4902_rel.hex";
+static const char *intel_hex_default = "flash_nor_16bits_hwasic_evp_4902_rel.hex";
 
 static int pg_channel_gsm_power_set(const char *board, int position, int state)
 {
@@ -153,6 +177,8 @@ int main(int argc, char **argv)
 	char *hex = NULL;
 	char *imei = NULL;
 
+	char sim900_code_page[0x10000];
+
 	size_t i;
 
 	char t_buf[1024];
@@ -205,22 +231,28 @@ int main(int argc, char **argv)
 				imei = optarg;
 				break;
 			default: /*! '?' */
-				printf(sim900bfw_usage);
+				printf(sim900imei_usage);
 				goto main_end;
 		}
 	}
 
 	if (!device) {
 		printf("device not specified\n");
-		printf(sim900bfw_usage);
+		printf(sim900imei_usage);
 		goto main_end;
 	}
 
-	if (imei) {
-		printf("imei not present\n");
-		printf(sim900bfw_usage);
+	if (!imei) {
+		printf("IMEI not present\n");
+		printf(sim900imei_usage);
 		goto main_end;
 	}
+
+	if ((res = imei_is_valid(imei)) != EIMEI_VALID) {
+		printf("IMEI=\"%s\" invalid: %s - ", imei, imei_strerror(-res));
+		goto main_end;
+	}
+	printf("IMEI=\"%.*s(%c)\"\n", 14, imei, (char)imei_calc_check_digit(imei));
 
 	if (hex)
 		snprintf(hex_fpath, sizeof(hex_fpath), "%s", hex);
@@ -638,480 +670,762 @@ int main(int argc, char **argv)
 		}
 	}
 	printf("succeeded\n");
-#if 0
-							// Set the storage equipment
-							ast_cli(a->fd, "  -- <%s>: Set the storage equipment: started\n", chnl->name);
-							i = sizeof(sim900_set_storage_equipment_s1);
-							if(write(chnl->dev_fd, sim900_set_storage_equipment_s1, i) < 0){
-								ast_cli(a->fd, "  -- <%s>: Set the storage equipment: write() fail: %s\n", chnl->name, strerror(errno));
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							usleep(i*100);
-							// wait for success indication
-							timeout.tv_sec = 1;
-							timeout.tv_usec = 0;
-							eggsm_timer_set(timer, timeout);
-							do{
-								rc = read(chnl->dev_fd, &chr, 1);
-								if(rc < 0){
-									if(errno != EAGAIN){
-										ast_cli(a->fd, "  -- <%s>: Set the storage equipment: read() fail: %s\n", chnl->name, strerror(errno));
-										chnl->flags.enable = 0;
-										close(chnl->dev_fd);
-										return CLI_SUCCESS;
-										}
-									}
-								else if(rc == 1){
-// 									ast_cli(a->fd, "  -- <%s>: Set the storage equipment: read=0x%02x\n", chnl->name, chr);
-									if(chr == 0x04) break;
-									}
-								usleep(100);
-								}while(is_eggsm_timer_active(timer));
-							// check for completion
-							if(is_eggsm_timer_fired(timer)){
-								ast_cli(a->fd, "  -- <%s>: Set the storage equipment: timeout\n", chnl->name);
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							ast_cli(a->fd, "  -- <%s>: Set the storage equipment: succeeded\n", chnl->name);
 
-							// Read the code page
-							ast_cli(a->fd, "  -- <%s>: Read the code page: started\n", chnl->name);
-							chr = 0x17;
-							if(write(chnl->dev_fd, &chr, 1) < 0){
-								ast_cli(a->fd, "  -- <%s>: Read the code page: write() fail: %s\n", chnl->name, strerror(errno));
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							usleep(100);
-							// read marker
-							timeout.tv_sec = 1;
-							timeout.tv_usec = 0;
-							eggsm_timer_set(timer, timeout);
-							do{
-								rc = read(chnl->dev_fd, &chr, 1);
-								if(rc < 0){
-									if(errno != EAGAIN){
-										ast_cli(a->fd, "  -- <%s>: Read the code page: read() fail: %s\n", chnl->name, strerror(errno));
-										chnl->flags.enable = 0;
-										close(chnl->dev_fd);
-										return CLI_SUCCESS;
-										}
-									}
-								else if(rc == 1){
-// 									ast_cli(a->fd, "  -- <%s>: Read the code page: read=0x%02x\n", chnl->name, chr);
-									break;
-									}
-								usleep(100);
-								}while(is_eggsm_timer_active(timer));
-							ast_cli(a->fd, "  -- <%s>: Read the code page: succeeded\n", chnl->name);
-							// check for completion
-							if(is_eggsm_timer_fired(timer)){
-								ast_cli(a->fd, "  -- <%s>: Read the code page: timeout\n", chnl->name);
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							//read data
-							for(i=0; i<0x10000; i++){
-								timeout.tv_sec = 1;
-								timeout.tv_usec = 0;
-								eggsm_timer_set(timer, timeout);
-								do{
-									rc = read(chnl->dev_fd, &sim900_code_page[i], 1);
-									if(rc < 0){
-										if(errno != EAGAIN){
-											ast_cli(a->fd, "  -- <%s>: Read the code page: read() fail: %s\n", chnl->name, strerror(errno));
-											chnl->flags.enable = 0;
-											close(chnl->dev_fd);
-											return CLI_SUCCESS;
-											}
-										}
-									else if(rc == 1){
-// 										ast_cli(a->fd, "  -- <%s>: Read the code page: read=0x%02x\n", chnl->name, chr);
-										break;
-										}
-									usleep(100);
-									}while(is_eggsm_timer_active(timer));
-								// check for completion
-								if(is_eggsm_timer_fired(timer)){
-									ast_cli(a->fd, "  -- <%s>: Read the code page: timeout\n", chnl->name);
-									chnl->flags.enable = 0;
-									close(chnl->dev_fd);
-									return CLI_SUCCESS;
-									}
-								}
+	// Set the storage equipment
+	printf("Set the storage equipment...");
+	fflush(stdout);
 
-							// Set new IMEI into specified code page position
-							str_digit_to_bcd(a->argv[5], 14, buf);
-							str_digit_to_bcd(&check_digit, 1, buf+7);
-							memcpy(&sim900_code_page[0xA568], buf, 8);
+	t_ptr = (char *)&sim900_set_storage_equipment_s1;
+	t_size = sizeof(sim900_set_storage_equipment_s1);
+	t_pos = 0;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	// wait for success indication
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x04) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	printf("succeeded\n");
 
-							// Configuration for erased area of FLASH
-							ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: started\n", chnl->name);
-							i = sizeof(sim900_configuration_for_erased_area_s0);
-							if(write(chnl->dev_fd, sim900_configuration_for_erased_area_s0, i) < 0){
-								ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: write() fail: %s\n", chnl->name, strerror(errno));
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							usleep(i*100);
-							// wait for success indication
-							timeout.tv_sec = 1;
-							timeout.tv_usec = 0;
-							eggsm_timer_set(timer, timeout);
-							do{
-								rc = read(chnl->dev_fd, &chr, 1);
-								if(rc < 0){
-									if(errno != EAGAIN){
-										ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: read() fail: %s\n", chnl->name, strerror(errno));
-										chnl->flags.enable = 0;
-										close(chnl->dev_fd);
-										return CLI_SUCCESS;
-										}
-									}
-								else if(rc == 1){
-// 									ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: read=0x%02x\n", chnl->name, chr);
-									if(chr == 0x09) break;
-									}
-								usleep(100);
-								}while(is_eggsm_timer_active(timer));
-							// check for completion
-							if(is_eggsm_timer_fired(timer)){
-								ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: timeout\n", chnl->name);
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: succeeded\n", chnl->name);
+	// Read the code page
+	printf("Read the code page...");
+	fflush(stdout);
 
-							// FLASH erase
-							ast_cli(a->fd, "  -- <%s>: FLASH erase: started\n", chnl->name);
-							chr = 0x03;
-							if(write(chnl->dev_fd, &chr, 1) < 0){
-								ast_cli(a->fd, "  -- <%s>: FLASH erase: write() fail: %s\n", chnl->name, strerror(errno));
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							usleep(100);
-							// read marker
-							timeout.tv_sec = 1;
-							timeout.tv_usec = 0;
-							eggsm_timer_set(timer, timeout);
-							do{
-								rc = read(chnl->dev_fd, &chr, 1);
-								if(rc < 0){
-									if(errno != EAGAIN){
-										ast_cli(a->fd, "  -- <%s>: FLASH erase: read() fail: %s\n", chnl->name, strerror(errno));
-										chnl->flags.enable = 0;
-										close(chnl->dev_fd);
-										return CLI_SUCCESS;
-										}
-									}
-								else if(rc == 1){
-// 									ast_cli(a->fd, "  -- <%s>: FLASH erase: read=0x%02x\n", chnl->name, chr);
-									if(chr == 0x03) break;
-									}
-								usleep(100);
-								}while(is_eggsm_timer_active(timer));
-							// check for completion
-							if(is_eggsm_timer_fired(timer)){
-								ast_cli(a->fd, "  -- <%s>: FLASH erase: marker timeout\n", chnl->name);
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							// Wait for flash erase
-							timeout.tv_sec = 30;
-							timeout.tv_usec = 0;
-							eggsm_timer_set(timer, timeout);
-							do{
-								rc = read(chnl->dev_fd, &chr, 1);
-								if(rc < 0){
-									if(errno != EAGAIN){
-										ast_cli(a->fd, "  -- <%s>: FLASH erase: read() fail: %s\n", chnl->name, strerror(errno));
-										chnl->flags.enable = 0;
-										close(chnl->dev_fd);
-										return CLI_SUCCESS;
-										}
-									}
-								else if(rc == 1){
-// 									ast_cli(a->fd, "  -- <%s>: FLASH erase: read=0x%02x\n", chnl->name, chr);
-									if(chr == 0x30) break;
-									}
-								usleep(100);
-								}while(is_eggsm_timer_active(timer));
-							// check for completion
-							if(is_eggsm_timer_fired(timer)){
-								ast_cli(a->fd, "  -- <%s>: FLASH erase: wait timeout\n", chnl->name);
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							ast_cli(a->fd, "  -- <%s>: FLASH erase: succeeded\n", chnl->name);
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		// writing synchronous octet
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x17;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} if (res == 1) break;
+			}
+		} if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - write - timeout\n");
+		goto main_end;
+	}
+	// read marker
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x17) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	// read data
+	t_ptr = (char *)&sim900_code_page;
+	t_size = sizeof(sim900_code_page);
+	t_pos = 0;
+	x_timer_set_second(timer, t_size/1000 + 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &sim900_code_page[t_pos], t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+			}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	printf("succeeded\n");
 
-							// Set for downloaded code information
-							ast_cli(a->fd, "  -- <%s>: Set for downloaded code information: started\n", chnl->name);
-							i = sizeof(sim900_set_for_downloaded_code_information);
-							if(write(chnl->dev_fd, sim900_set_for_downloaded_code_information, i) < 0){
-								ast_cli(a->fd, "  -- <%s>: Set for downloaded code information: write() fail: %s\n", chnl->name, strerror(errno));
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							usleep(i*100);
-							// read marker
-							timeout.tv_sec = 1;
-							timeout.tv_usec = 0;
-							eggsm_timer_set(timer, timeout);
-							do{
-								rc = read(chnl->dev_fd, &chr, 1);
-								if(rc < 0){
-									if(errno != EAGAIN){
-										ast_cli(a->fd, "  -- <%s>: Set for downloaded code information: read() fail: %s\n", chnl->name, strerror(errno));
-										chnl->flags.enable = 0;
-										close(chnl->dev_fd);
-										return CLI_SUCCESS;
-										}
-									}
-								else if(rc == 1){
-// 									ast_cli(a->fd, "  -- <%s>: Set for downloaded code information: read=0x%02x\n", chnl->name, chr);
-									if(chr == 0x04) break;
-									}
-								usleep(100);
-								}while(is_eggsm_timer_active(timer));
-							// check for completion
-							if(is_eggsm_timer_fired(timer)){
-								ast_cli(a->fd, "  -- <%s>: Set for downloaded code information: marker timeout\n", chnl->name);
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							ast_cli(a->fd, "  -- <%s>: Set for downloaded code information: succeeded\n", chnl->name);
+	// Set new IMEI into specified code page position
+	str_digit_to_bcd(imei, 14, t_buf);
+	t_char = (char)imei_calc_check_digit(imei);
+	str_digit_to_bcd(&t_char, 1, t_buf+7);
+	memcpy(&sim900_code_page[0xA568], t_buf, 8);
 
-							ast_cli(a->fd, "  -- <%s>: Code page download: started\n", chnl->name);
-							for(i=0; i<32; i++){
-								// Set for downloaded code section
-// 								ast_cli(a->fd, "  -- <%s>: Set for downloaded code section(%d): started\n", chnl->name, i);
-								rc = sizeof(sim900_set_for_downloaded_code_section);
-								if(write(chnl->dev_fd, sim900_set_for_downloaded_code_section, rc) < 0){
-									ast_cli(a->fd, "  -- <%s>: Set for downloaded code section(%d): write() fail: %s\n", chnl->name, i, strerror(errno));
-									chnl->flags.enable = 0;
-									close(chnl->dev_fd);
-									return CLI_SUCCESS;
-									}
-								usleep(rc*100);
-								// read marker
-								timeout.tv_sec = 1;
-								timeout.tv_usec = 0;
-								eggsm_timer_set(timer, timeout);
-								do{
-									rc = read(chnl->dev_fd, &chr, 1);
-									if(rc < 0){
-										if(errno != EAGAIN){
-											ast_cli(a->fd, "  -- <%s>: Set for downloaded code section(%d): read() fail: %s\n", chnl->name, i, strerror(errno));
-											chnl->flags.enable = 0;
-											close(chnl->dev_fd);
-											return CLI_SUCCESS;
-											}
-										}
-									else if(rc == 1){
-// 										ast_cli(a->fd, "  -- <%s>: Set for downloaded code section(%d): read=0x%02x\n", chnl->name, i, chr);
-										if(chr == 0x01) break;
-										}
-									usleep(100);
-									}while(is_eggsm_timer_active(timer));
-								// check for completion
-								if(is_eggsm_timer_fired(timer)){
-									ast_cli(a->fd, "  -- <%s>: Set for downloaded code section(%d): timeout\n", chnl->name, i);
-									chnl->flags.enable = 0;
-									close(chnl->dev_fd);
-									return CLI_SUCCESS;
-									}
-// 								ast_cli(a->fd, "  -- <%s>: Set for downloaded code section(%d): succeeded\n", chnl->name, i);
+	// Configuration for erased area of FLASH
+	printf("Configuration for erased area of FLASH...");
+	fflush(stdout);
 
-								// Download code data
-// 								ast_cli(a->fd, "  -- <%s>: Download code data(%d): started - 0x%04x\n", chnl->name, i, (i*0x800));
-								if(write(chnl->dev_fd, &sim900_code_page[i*0x800], 0x800) < 0){
-									ast_cli(a->fd, "  -- <%s>: Download code data(%d): write() fail: %s\n", chnl->name, i, strerror(errno));
-									chnl->flags.enable = 0;
-									close(chnl->dev_fd);
-									return CLI_SUCCESS;
-									}
-								usleep(2048*100);
-								// read marker
-								timeout.tv_sec = 1;
-								timeout.tv_usec = 0;
-								eggsm_timer_set(timer, timeout);
-								do{
-									rc = read(chnl->dev_fd, &chr, 1);
-									if(rc < 0){
-										if(errno != EAGAIN){
-											ast_cli(a->fd, "  -- <%s>: Download code data(%d): read() fail: %s\n", chnl->name, i, strerror(errno));
-											chnl->flags.enable = 0;
-											close(chnl->dev_fd);
-											return CLI_SUCCESS;
-											}
-										}
-									else if(rc == 1){
-// 										ast_cli(a->fd, "  -- <%s>: Download code data(%d): read=0x%02x\n", chnl->name, i, chr);
-										if(chr == 0x2e) break;
-										}
-									usleep(100);
-									}while(is_eggsm_timer_active(timer));
-								// check for completion
-								if(is_eggsm_timer_fired(timer)){
-									ast_cli(a->fd, "  -- <%s>: Download code data(%d): timeout\n", chnl->name, i);
-									chnl->flags.enable = 0;
-									close(chnl->dev_fd);
-									return CLI_SUCCESS;
-									}
-								// read marker
-								timeout.tv_sec = 1;
-								timeout.tv_usec = 0;
-								eggsm_timer_set(timer, timeout);
-								do{
-									rc = read(chnl->dev_fd, &chr, 1);
-									if(rc < 0){
-										if(errno != EAGAIN){
-											ast_cli(a->fd, "  -- <%s>: Download code data(%d): read() fail: %s\n", chnl->name, i, strerror(errno));
-											chnl->flags.enable = 0;
-											close(chnl->dev_fd);
-											return CLI_SUCCESS;
-											}
-										}
-									else if(rc == 1){
-// 										ast_cli(a->fd, "  -- <%s>: Download code data(%d): read=0x%02x\n", chnl->name, i, chr);
-										if(chr == 0x30) break;
-										}
-									usleep(100);
-									}while(is_eggsm_timer_active(timer));
-								// check for completion
-								if(is_eggsm_timer_fired(timer)){
-									ast_cli(a->fd, "  -- <%s>: Download code data(%d): timeout\n", chnl->name, i);
-									chnl->flags.enable = 0;
-									close(chnl->dev_fd);
-									return CLI_SUCCESS;
-									}
-// 								ast_cli(a->fd, "  -- <%s>: Download code data(%d): succeeded\n", chnl->name, i);
-								ast_cli(a->fd, ".");
-								}
-							ast_cli(a->fd, "\n  -- <%s>: Code page download: succeeded\n", chnl->name);
+	t_ptr = (char *)&sim900_configuration_for_erased_area_s0;
+	t_size = sizeof(sim900_configuration_for_erased_area_s0);
+	t_pos = 0;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	// wait for success indication
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x09) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	printf("succeeded\n");
 
+	// FLASH erase
+	printf("FLASH erase");
+	fflush(stdout);
 
-							// Configuration for erased area of FLASH
-							ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: started\n", chnl->name);
-							i = sizeof(sim900_configuration_for_erased_area_s1);
-							if(write(chnl->dev_fd, sim900_configuration_for_erased_area_s1, i) < 0){
-								ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: write() fail: %s\n", chnl->name, strerror(errno));
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							usleep(i*100);
-							// wait for success indication
-							timeout.tv_sec = 1;
-							timeout.tv_usec = 0;
-							eggsm_timer_set(timer, timeout);
-							do{
-								rc = read(chnl->dev_fd, &chr, 1);
-								if(rc < 0){
-									if(errno != EAGAIN){
-										ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: read() fail: %s\n", chnl->name, strerror(errno));
-										chnl->flags.enable = 0;
-										close(chnl->dev_fd);
-										return CLI_SUCCESS;
-										}
-									}
-								else if(rc == 1){
-// 									ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: read=0x%02x\n", chnl->name, chr);
-									if(chr == 0x09) break;
-									}
-								usleep(100);
-								}while(is_eggsm_timer_active(timer));
-							// check for completion
-							if(is_eggsm_timer_fired(timer)){
-								ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: timeout\n", chnl->name);
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							ast_cli(a->fd, "  -- <%s>: Configuration for erased area of FLASH: succeeded\n", chnl->name);
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		// writing synchronous octet
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x03;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} if (res == 1) break;
+			}
+		} if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - write - timeout\n");
+		goto main_end;
+	}
+	// read marker
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x03) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	// Wait for flash erase
+	t_total = 0;
+	x_timer_set_second(timer, 300);
+	while(is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x30) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		} else {
+			printf(".");
+			fflush(stdout);
+			t_total++;
+		}
+	}
+	// check for completion
+	if (is_x_timer_fired(timer)) {
+		printf("failed - timeout\n");
+		goto main_end;
+	}
+	printf("succeeded - in %lu seconds\n", (unsigned long int)t_total);
 
-							// FLASH erase
-							ast_cli(a->fd, "  -- <%s>: FLASH erase: started\n", chnl->name);
-							chr = 0x03;
-							if(write(chnl->dev_fd, &chr, 1) < 0){
-								ast_cli(a->fd, "  -- <%s>: FLASH erase: write() fail: %s\n", chnl->name, strerror(errno));
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							usleep(100);
-							// read marker
-							timeout.tv_sec = 1;
-							timeout.tv_usec = 0;
-							eggsm_timer_set(timer, timeout);
-							do{
-								rc = read(chnl->dev_fd, &chr, 1);
-								if(rc < 0){
-									if(errno != EAGAIN){
-										ast_cli(a->fd, "  -- <%s>: FLASH erase: read() fail: %s\n", chnl->name, strerror(errno));
-										chnl->flags.enable = 0;
-										close(chnl->dev_fd);
-										return CLI_SUCCESS;
-										}
-									}
-								else if(rc == 1){
-// 									ast_cli(a->fd, "  -- <%s>: FLASH erase: read=0x%02x\n", chnl->name, chr);
-									if(chr == 0x03) break;
-									}
-								usleep(100);
-								}while(is_eggsm_timer_active(timer));
-							// check for completion
-							if(is_eggsm_timer_fired(timer)){
-								ast_cli(a->fd, "  -- <%s>: FLASH erase: marker timeout\n", chnl->name);
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							// Wait for flash erase
-							timeout.tv_sec = 60;
-							timeout.tv_usec = 0;
-							eggsm_timer_set(timer, timeout);
-							do{
-								rc = read(chnl->dev_fd, &chr, 1);
-								if(rc < 0){
-									if(errno != EAGAIN){
-										ast_cli(a->fd, "  -- <%s>: FLASH erase: read() fail: %s\n", chnl->name, strerror(errno));
-										chnl->flags.enable = 0;
-										close(chnl->dev_fd);
-										return CLI_SUCCESS;
-										}
-									}
-								else if(rc == 1){
-// 									ast_cli(a->fd, "  -- <%s>: FLASH erase: read=0x%02x\n", chnl->name, chr);
-									if(chr == 0x30) break;
-									}
-								usleep(100);
-								}while(is_eggsm_timer_active(timer));
-							// check for completion
-							if(is_eggsm_timer_fired(timer)){
-								ast_cli(a->fd, "  -- <%s>: FLASH erase: wait timeout\n", chnl->name);
-								chnl->flags.enable = 0;
-								close(chnl->dev_fd);
-								return CLI_SUCCESS;
-								}
-							ast_cli(a->fd, "  -- <%s>: FLASH erase: succeeded\n", chnl->name);
+	// Set for downloaded code information
+	printf("Set for downloaded code information...");
+	fflush(stdout);
 
-							ast_cli(a->fd, "  -- <%s>: IMEI write: succeeded\n", chnl->name);
-#endif
+	t_ptr = (char *)&sim900_set_for_downloaded_code_information_s0;
+	t_size = sizeof(sim900_set_for_downloaded_code_information_s0);
+	t_pos = 0;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	// wait for success indication
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x04) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	printf("succeeded\n");
+
+	printf("Code page download...");
+	fflush(stdout);
+
+	for (i=0; i<32; i++)
+	{
+		// Set for downloaded code section
+		t_ptr = (char *)&sim900_set_for_downloaded_code_section;
+		t_size = sizeof(sim900_set_for_downloaded_code_section);
+		t_pos = 0;
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 0;
+			timeout.tv_usec = (t_size - t_pos) * 1000;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - write(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res > 0) {
+						t_pos += res;
+						if (t_size == t_pos) break;
+					}
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			printf("failed - time is out\n");
+			goto main_end;
+		}
+		// read marker
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - read(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res == 1) {
+						if (t_char == 0x01) break;
+					}
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			printf("failed - time is out\n");
+			goto main_end;
+		}
+
+		// Download code data
+		t_ptr = (char *)&sim900_code_page[i*0x800];
+		t_size = 0x800;
+		t_pos = 0;
+		x_timer_set_second(timer, t_size/1000 + 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 0;
+			timeout.tv_usec = (t_size - t_pos) * 1000;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - write(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res > 0) {
+						t_pos += res;
+						if (t_size == t_pos) break;
+					}
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			printf("failed - time is out\n");
+			goto main_end;
+		}
+		// read marker 0x2e
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - read(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res == 1) {
+						if (t_char == 0x2e) break;
+					}
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			printf("failed - time is out\n");
+			goto main_end;
+		}
+		// read marker 0x30
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							printf("failed - read(): %s\n", strerror(errno));
+							goto main_end;
+						}
+					} else if (res == 1) {
+						if (t_char == 0x30) break;
+					}
+				}
+			} else if (res < 0) {
+				printf("failed - select(): %s\n", strerror(errno));
+				goto main_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			printf("failed - time is out\n");
+			goto main_end;
+		}
+
+		printf(".");
+		fflush(stdout);
+	}
+	printf("succeeded\n");
+
+	// Configuration for erased area of FLASH
+	printf("Configuration for erased area of FLASH...");
+	fflush(stdout);
+
+	t_ptr = (char *)&sim900_configuration_for_erased_area_s1;
+	t_size = sizeof(sim900_configuration_for_erased_area_s1);
+	t_pos = 0;
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	// wait for success indication
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x09) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	printf("succeeded\n");
+
+	// FLASH erase
+	printf("FLASH erase...");
+	fflush(stdout);
+
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		// writing synchronous octet
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x03;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - write(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} if (res == 1) break;
+			}
+		} if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - write - timeout\n");
+		goto main_end;
+	}
+	// read marker
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x03) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	// Wait for flash erase
+	t_total = 0;
+	x_timer_set_second(timer, 300);
+	while(is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x30) break;
+				}
+			}
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
+			goto main_end;
+		} else {
+			printf(".");
+			fflush(stdout);
+			t_total++;
+		}
+	}
+	// check for completion
+	if (is_x_timer_fired(timer)) {
+		printf("failed - timeout\n");
+		goto main_end;
+	}
+	printf("succeeded - in %lu seconds\n", (unsigned long int)t_total);
+
+	printf("IMEI write: completed\n");
+
 main_end:
 	if (hex_fptr) fclose(hex_fptr);
 	if (tty_fd > -1) {

@@ -16,7 +16,7 @@ chan_polygator_la_SOURCES = \
 chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
 chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic -lrt
 
-bin_PROGRAMS = sim900bfw sim900imei
+bin_PROGRAMS = sim900bfw sim900imei sim900dump
 sim900bfw_SOURCES = \
 		sim900bfw.c
 
@@ -24,10 +24,18 @@ sim900bfw_CFLAGS = $(AM_CFLAGS) -Wall
 sim900bfw_LDFLAGS = $(AM_LDFLAGS) -lrt
 
 sim900imei_SOURCES = \
-		sim900imei.c
+		sim900imei.c \
+		imei.c \
+		strutil.c
 
 sim900imei_CFLAGS = $(AM_CFLAGS) -Wall
 sim900imei_LDFLAGS = $(AM_LDFLAGS) -lrt
+
+sim900dump_SOURCES = \
+		sim900dump.c
+
+sim900dump_CFLAGS = $(AM_CFLAGS) -Wall
+sim900dump_LDFLAGS = $(AM_LDFLAGS) -lrt
 
 noinst_HEADERS = \
 		address.h \

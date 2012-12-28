@@ -6499,6 +6499,9 @@ static void *pg_channel_gsm_workthread(void *data)
 													AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
 													// remove entry from channel list
 													AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+													// reset last used channel
+													tr_gsm->channel_gsm_last = NULL;
+													// release unused memory
 													ast_free(ch_gsm_fold->name);
 													ast_free(ch_gsm_fold);
 												}
@@ -7797,6 +7800,9 @@ static void *pg_channel_gsm_workthread(void *data)
 														AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
 														// remove entry from channel list
 														AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+														// reset last used channel
+														tr_gsm->channel_gsm_last = NULL;
+														// release unused memory
 														ast_free(ch_gsm_fold->name);
 														ast_free(ch_gsm_fold);
 													}
@@ -8010,6 +8016,9 @@ static void *pg_channel_gsm_workthread(void *data)
 														AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
 														// remove entry from channel list
 														AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+														// reset last used channel
+														tr_gsm->channel_gsm_last = NULL;
+														// release unused memory
 														ast_free(ch_gsm_fold->name);
 														ast_free(ch_gsm_fold);
 													}
@@ -8219,6 +8228,9 @@ static void *pg_channel_gsm_workthread(void *data)
 														AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
 														// remove entry from channel list
 														AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+														// reset last used channel
+														tr_gsm->channel_gsm_last = NULL;
+														// release unused memory
 														ast_free(ch_gsm_fold->name);
 														ast_free(ch_gsm_fold);
 													}
@@ -8673,6 +8685,9 @@ static void *pg_channel_gsm_workthread(void *data)
 									AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
 									// remove entry from channel list
 									AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+									// reset last used channel
+									tr_gsm->channel_gsm_last = NULL;
+									// release unused memory
 									ast_free(ch_gsm_fold->name);
 									ast_free(ch_gsm_fold);
 								}
@@ -10706,6 +10721,9 @@ pg_channel_gsm_workthread_end:
 			AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
 			// remove entry from channel list
 			AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+			// reset last used channel
+			tr_gsm->channel_gsm_last = NULL;
+			// release unused memory
 			ast_free(ch_gsm_fold->name);
 			ast_free(ch_gsm_fold);
 		}
@@ -17362,6 +17380,9 @@ pg_channel_gsm_imei_set_end:
 									AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
 									// remove entry from channel list
 									AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+									// reset last used channel
+									tr_gsm->channel_gsm_last = NULL;
+									// release unused memory
 									ast_free(ch_gsm_fold->name);
 									ast_free(ch_gsm_fold);
 									ast_cli(a->fd, " - channel removed from GSM trunk=\"%s\"\n", a->argv[6]);
