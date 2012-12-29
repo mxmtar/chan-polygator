@@ -10,6 +10,7 @@ Makefile.in
 aclocal.m4
 autoconfig.h
 autoconfig.h.in
+compile
 config.guess
 config.log
 config.status

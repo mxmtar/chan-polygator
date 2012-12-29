@@ -1,10 +1,6 @@
 /******************************************************************************/
 /* sim900.c                                                                   */
 /******************************************************************************/
-/* $Rev:: 140                        $                                        */
-/* $Author:: maksym                  $                                        */
-/* $Date:: 2012-03-20 18:19:44 +0200#$                                        */
-/******************************************************************************/
 
 #include <sys/types.h>
 
@@ -15,8 +11,8 @@
 #include "at.h"
 #include "sim900.h"
 #include "strutil.h"
-//------------------------------------------------------------------------------
 
+#if 0
 unsigned char sim900_code_page[0x10000];
 
 const unsigned char sim900_set_storage_equipment_s0[9] = {
@@ -47,6 +43,95 @@ const unsigned char sim900_set_for_downloaded_code_information[9] = {
 const unsigned char sim900_set_for_downloaded_code_section[5] = {
 	0x01,
 	0x00, 0x08, 0x00, 0x00};
+#endif
+
+struct sim900_cmd_sel_mem_reg {
+	u_int8_t command;
+	u_int32_t start;
+	u_int32_t size;
+} __attribute__((packed));
+
+struct sim900_cmd_erase_mem_reg {
+	u_int8_t command;
+	u_int32_t start;
+	u_int32_t size;
+} __attribute__((packed));
+
+struct sim900_cmd_set_code_section {
+	u_int8_t command;
+	u_int32_t size;
+} __attribute__((packed));
+
+struct sim900_cmd_calc_checksum {
+	u_int8_t command;
+	u_int32_t start;
+	u_int32_t checksum;
+	u_int32_t size;
+} __attribute__((packed));
+
+char *sim900_cmd_sel_mem_reg_build(const char *out, u_int32_t start, u_int32_t size)
+{
+	struct sim900_cmd_sel_mem_reg *cmd = (struct sim900_cmd_sel_mem_reg *)out;
+
+	cmd->command = 0x04;
+	cmd->start = start;
+	cmd->size = size;
+
+	return (char *)cmd;
+}
+
+size_t sim900_cmd_sel_mem_reg_size(void)
+{
+	return sizeof(struct sim900_cmd_sel_mem_reg);
+}
+
+char *sim900_cmd_erase_mem_reg_build(const char *out, u_int32_t start, u_int32_t size)
+{
+	struct sim900_cmd_erase_mem_reg *cmd = (struct sim900_cmd_erase_mem_reg *)out;
+
+	cmd->command = 0x09;
+	cmd->start = start;
+	cmd->size = size;
+
+	return (char *)cmd;
+}
+
+size_t sim900_cmd_erase_mem_reg_size(void)
+{
+	return sizeof(struct sim900_cmd_erase_mem_reg);
+}
+
+char *sim900_cmd_set_code_section_build(const char *out, u_int32_t size)
+{
+	struct sim900_cmd_set_code_section *cmd = (struct sim900_cmd_set_code_section *)out;
+
+	cmd->command = 0x01;
+	cmd->size = size;
+
+	return (char *)cmd;
+}
+
+size_t sim900_cmd_set_code_section_size(void)
+{
+	return sizeof(struct sim900_cmd_set_code_section);
+}
+
+char *sim900_cmd_calc_checksum_build(const char *out, u_int32_t start, u_int32_t checksum, u_int32_t size)
+{
+	struct sim900_cmd_calc_checksum *cmd = (struct sim900_cmd_calc_checksum *)out;
+
+	cmd->command = 0x15;
+	cmd->start = start;
+	cmd->checksum = checksum;
+	cmd->size = size;
+
+	return (char *)cmd;
+}
+
+size_t sim900_cmd_calc_checksum_size(void)
+{
+	return sizeof(struct sim900_cmd_calc_checksum);
+}
 
 const struct at_command sim900_at_com_list[/*AT_SIM900_MAXNUM*/] = {
 	// int id; u_int32_t operations; char name[16]; char response[MAX_AT_CMD_RESP][16]; char description[256]; add_check_at_resp_fun_t *check_fun;
@@ -229,7 +314,7 @@ const struct at_command sim900_at_com_list[/*AT_SIM900_MAXNUM*/] = {
 	{AT_SIM900_CEMNL, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT+CEMNL",  {"+CEMNL:", ""}, "Set the list of emergency number", NULL},
 	{AT_SIM900_CELLLOCK, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT*CELLLOCK",  {"*CELLLOCK:", ""}, "Set the list of arfcn which needs to be locked", NULL},
 	{AT_SIM900_SLEDS, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT+SLEDS",  {"+SLEDS:", ""}, "Set the timer period of net light", NULL},
-	};
+};
 //------------------------------------------------------------------------------
 
 
@@ -239,8 +324,8 @@ const struct at_command sim900_at_com_list[/*AT_SIM900_MAXNUM*/] = {
 //------------------------------------------------------------------------------
 // at_sim900_csmins_read_parse()
 //------------------------------------------------------------------------------
-int at_sim900_csmins_read_parse(const char *fld, int fld_len, struct at_sim900_csmins_read *csmins){
-
+int at_sim900_csmins_read_parse(const char *fld, int fld_len, struct at_sim900_csmins_read *csmins)
+{
 	char *sp;
 	char *tp;
 	char *ep;
@@ -250,24 +335,25 @@ int at_sim900_csmins_read_parse(const char *fld, int fld_len, struct at_sim900_c
 	int param_cnt;
 
 	// check params
-	if(!fld) return -1;
+	if (!fld) return -1;
 
-	if((fld_len <= 0) || (fld_len > 256)) return -1;
+	if ((fld_len <= 0) || (fld_len > 256)) return -1;
 
-	if(!csmins) return -1;
+	if (!csmins) return -1;
 
 	// init ptr
-	if(!(sp = strchr(fld, ' ')))
+	if (!(sp = strchr(fld, ' ')))
 		return -1;
 	tp = ++sp;
 	ep = (char *)fld + fld_len;
 
 	// init params
-	for(param_cnt=0; param_cnt<MAX_CSIMINS_READ_PARAM; param_cnt++){
+	for (param_cnt=0; param_cnt<MAX_CSIMINS_READ_PARAM; param_cnt++)
+	{
 		params[param_cnt].type = PRM_TYPE_UNKNOWN;
 		params[param_cnt].buf = NULL;
 		params[param_cnt].len = -1;
-		}
+	}
 
 	// init at_sim900_csmins_read
 	csmins->n = -1;
@@ -275,65 +361,63 @@ int at_sim900_csmins_read_parse(const char *fld, int fld_len, struct at_sim900_c
 
 	// search params delimiters
 	param_cnt = 0;
-	while((tp < ep) || (param_cnt < MAX_CSIMINS_READ_PARAM)){
+	while ((tp < ep) || (param_cnt < MAX_CSIMINS_READ_PARAM))
+	{
 		// get param type
-		if(*tp == '"'){
+		if (*tp == '"') {
 			params[param_cnt].type = PRM_TYPE_STRING;
 			params[param_cnt].buf = ++tp;
-			}
-		else if(isdigit(*tp)){
+		} else if (isdigit(*tp)) {
 			params[param_cnt].type = PRM_TYPE_INTEGER;
 			params[param_cnt].buf = tp;
-			}
-		else{
+		} else {
 			params[param_cnt].type = PRM_TYPE_UNKNOWN;
 			params[param_cnt].buf = tp;
-			}
+		}
 		sp = tp;
 		// search delimiter and put terminated null-symbol
-		if(!(tp = strchr(sp, ',')))
+		if (!(tp = strchr(sp, ',')))
 			tp = ep;
 		*tp = '\0';
 		// set param len
-		if(params[param_cnt].type == PRM_TYPE_STRING){
+		if (params[param_cnt].type == PRM_TYPE_STRING) {
 			params[param_cnt].len = tp - sp - 1;
 			*(tp-1) = '\0';
-			}
-		else{
+		} else {
 			params[param_cnt].len = tp - sp;
-			}
+		}
 		//
 		param_cnt++;
 		tp++;
-		}
+	}
 
 	// processing integer params
 	// n (mandatory)
-	if(params[0].len > 0){
+	if (params[0].len > 0) {
 		tp = params[0].buf;
-		while(params[0].len--){
-			if(!isdigit(*tp++))
+		while (params[0].len--)
+		{
+			if (!isdigit(*tp++))
 				return -1;
-			}
-		csmins->n = atoi(params[0].buf);
 		}
-	else
+		csmins->n = atoi(params[0].buf);
+	} else
 		return -1;
 
 	// sim_inserted (mandatory)
-	if(params[1].len > 0){
+	if (params[1].len > 0) {
 		tp = params[1].buf;
-		while(params[1].len--){
-			if(!isdigit(*tp++))
+		while (params[1].len--)
+		{
+			if (!isdigit(*tp++))
 				return -1;
-			}
-		csmins->sim_inserted = atoi(params[1].buf);
 		}
-	else
+		csmins->sim_inserted = atoi(params[1].buf);
+	} else
 		return -1;
 
 	return param_cnt;
-	}
+}
 //------------------------------------------------------------------------------
 // end of at_sim900_csmins_read_parse()
 //------------------------------------------------------------------------------
@@ -341,8 +425,8 @@ int at_sim900_csmins_read_parse(const char *fld, int fld_len, struct at_sim900_c
 //------------------------------------------------------------------------------
 // at_sim900_parse_cmic_read_parse()
 //------------------------------------------------------------------------------
-int at_sim900_cmic_read_parse(const char *fld, int fld_len, struct at_sim900_cmic_read *cmic){
-
+int at_sim900_cmic_read_parse(const char *fld, int fld_len, struct at_sim900_cmic_read *cmic)
+{
 	char *sp;
 	char *tp;
 	char *ep;
@@ -353,24 +437,25 @@ int at_sim900_cmic_read_parse(const char *fld, int fld_len, struct at_sim900_cmi
 	int param_cnt;
 
 	// check params
-	if(!fld) return -1;
+	if (!fld) return -1;
 
-	if((fld_len <= 0) || (fld_len > 256)) return -1;
+	if ((fld_len <= 0) || (fld_len > 256)) return -1;
 
-	if(!cmic) return -1;
+	if (!cmic) return -1;
 
 	// init ptr
-	if(!(sp = strchr(fld, ' ')))
+	if (!(sp = strchr(fld, ' ')))
 		return -1;
 	tp = ++sp;
 	ep = (char *)fld + fld_len;
 
 	// init params
-	for(param_cnt=0; param_cnt<MAX_CMIC_READ_PARAM; param_cnt++){
+	for (param_cnt=0; param_cnt<MAX_CMIC_READ_PARAM; param_cnt++)
+	{
 		params[param_cnt].type = PRM_TYPE_UNKNOWN;
 		params[param_cnt].buf = NULL;
 		params[param_cnt].len = -1;
-		}
+	}
 
 	// init at_sim900_cmic_read
 	cmic->main_hs_mic = -1;
@@ -380,62 +465,62 @@ int at_sim900_cmic_read_parse(const char *fld, int fld_len, struct at_sim900_cmi
 
 	// search params delimiters
 	param_cnt = 0;
-	while((tp < ep) && (param_cnt < MAX_CMIC_READ_PARAM)){
-		while((tp < ep) && ((*tp == '(') || (*tp == ',')))
+	while ((tp < ep) && (param_cnt < MAX_CMIC_READ_PARAM))
+	{
+		while ((tp < ep) && ((*tp == '(') || (*tp == ',')))
 			tp++;
 		// get param type
-		if(*tp == '"'){
+		if (*tp == '"') {
 			params[param_cnt].type = PRM_TYPE_STRING;
 			params[param_cnt].buf = ++tp;
-			}
-		else if(isdigit(*tp)){
+		} else if (isdigit(*tp)) {
 			params[param_cnt].type = PRM_TYPE_INTEGER;
 			params[param_cnt].buf = tp;
-			}
-		else{
+		} else {
 			params[param_cnt].type = PRM_TYPE_UNKNOWN;
 			params[param_cnt].buf = tp;
-			}
+		}
 		sp = tp;
 		// search delimiter and put terminated null-symbol
-		while((tp < ep) && (*tp != ')') && (*tp != ',')) tp++;
-		if(tp >= ep) tp = ep;
+		while ((tp < ep) && (*tp != ')') && (*tp != ',')) tp++;
+		if (tp >= ep) tp = ep;
 		*tp = '\0';
 		// set param len
-		if(params[param_cnt].type == PRM_TYPE_STRING){
+		if (params[param_cnt].type == PRM_TYPE_STRING) {
 			params[param_cnt].len = tp - sp - 1;
 			*(tp-1) = '\0';
-			}
-		else{
+		} else {
 			params[param_cnt].len = tp - sp;
-			}
+		}
 		//
 		param_cnt++;
 		tp++;
-		}
+	}
 
-	for(i=0; i<param_cnt/2; i+=2){
-		if(params[i].len > 0){
+	for (i=0; i<param_cnt/2; i+=2)
+	{
+		if (params[i].len > 0) {
 			tp = params[i].buf;
-			while(params[i].len--){
-				if(!isdigit(*tp++))
+			while (params[i].len--)
+			{
+				if (!isdigit(*tp++))
 					return -1;
-				}
+			}
 			ch = atoi(params[i].buf);
-			}
-		else
+		} else
 			return -1;
-		if(params[i+1].len > 0){
+		if (params[i+1].len > 0) {
 			tp = params[i+1].buf;
-			while(params[i+1].len--){
-				if(!isdigit(*tp++))
+			while (params[i+1].len--)
+			{
+				if (!isdigit(*tp++))
 					return -1;
-				}
-			val = atoi(params[i+1].buf);
 			}
-		else
+			val = atoi(params[i+1].buf);
+		} else
 			return -1;
-		switch(ch){
+		switch (ch)
+		{
 			case 3: // Aux handfree microphone gain level
 				cmic->aux_hf_mic = val;
 				break;
@@ -450,11 +535,11 @@ int at_sim900_cmic_read_parse(const char *fld, int fld_len, struct at_sim900_cmi
 				break;
 			default:
 				break;
-			}
 		}
+	}
 
 	return param_cnt;
-	}
+}
 //------------------------------------------------------------------------------
 // end of at_sim900_cmic_read_parse()
 //------------------------------------------------------------------------------

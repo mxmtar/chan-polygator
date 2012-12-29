@@ -1,10 +1,6 @@
 /******************************************************************************/
 /* sim900.h                                                                   */
 /******************************************************************************/
-/* $Rev:: 140                        $                                        */
-/* $Author:: maksym                  $                                        */
-/* $Date:: 2012-03-20 18:19:44 +0200#$                                        */
-/******************************************************************************/
 
 #ifndef __SIM900_H__
 #define __SIM900_H__
@@ -15,7 +11,7 @@
 
 //------------------------------------------------------------------------------
 // at command id
-enum{
+enum {
 	AT_SIM900_UNKNOWN = AT_UNKNOWN,
 	// SIM900 V.25TER V1.04
 	AT_SIM900_A_SLASH = AT_A_SLASH,		// A/ - Re-issues last AT command given
@@ -196,14 +192,10 @@ enum{
 	AT_SIM900_CELLLOCK,				// AT+CELLLOCK - Set the list of arfcn which needs to be locked
 	AT_SIM900_SLEDS,				// AT+SLEDS - Set the timer period of net light
 
-	//
 	AT_SIM900_MAXNUM,
-	};
-//------------------------------------------------------------------------------
-// sim900 AT command parameters
-// read
-// cmic read
-struct at_sim900_cmic_read{
+};
+
+struct at_sim900_cmic_read {
 	// integer (mandatory)
 	int main_hs_mic;	// Main handset microphone gain level
 	// integer (mandatory)
@@ -212,30 +204,29 @@ struct at_sim900_cmic_read{
 	int main_hf_mic;	// Main handfree microphone gain level
 	// integer (mandatory)
 	int aux_hf_mic;	// Aux handfree microphone gain level
-	};
-// csmins read
-struct at_sim900_csmins_read{
+};
+
+struct at_sim900_csmins_read {
 	// integer (mandatory)
 	int n;	// Unsolicited event code status
 	// integer (mandatory)
 	int sim_inserted;	// SIM inserted status
-	};
-//------------------------------------------------------------------------------
-// extern
-extern unsigned char sim900_code_page[0x10000];
-extern const unsigned char sim900_set_storage_equipment_s0[9];
-extern const unsigned char sim900_set_storage_equipment_s1[9];
-extern const unsigned char sim900_configuration_for_erased_area_s0[9];
-extern const unsigned char sim900_configuration_for_erased_area_s1[9];
-extern const unsigned char sim900_set_for_downloaded_code_information[9];
-extern const unsigned char sim900_set_for_downloaded_code_section[5];
-extern const struct at_command sim900_at_com_list[AT_SIM900_MAXNUM];
-// prototype parse function
-// read
+};
+
+extern const struct at_command sim900_at_com_list[];
+
 extern int at_sim900_cmic_read_parse(const char *fld, int fld_len, struct at_sim900_cmic_read *cmic);
 extern int at_sim900_csmins_read_parse(const char *fld, int fld_len, struct at_sim900_csmins_read *csmins);
 
-//------------------------------------------------------------------------------
+extern char *sim900_cmd_sel_mem_reg_build(const char *out, u_int32_t start, u_int32_t size);
+extern size_t sim900_cmd_sel_mem_reg_size(void);
+extern char *sim900_cmd_erase_mem_reg_build(const char *out, u_int32_t start, u_int32_t size);
+extern size_t sim900_cmd_erase_mem_reg_size(void);
+extern char *sim900_cmd_set_code_section_build(const char *out, u_int32_t size);
+extern size_t sim900_cmd_set_code_section_size(void);
+extern char *sim900_cmd_calc_checksum_build(const char *out, u_int32_t start, u_int32_t checksum, u_int32_t size);
+extern size_t sim900_cmd_calc_checksum_size(void);
+
 #endif //__SIM900_H__
 
 /******************************************************************************/

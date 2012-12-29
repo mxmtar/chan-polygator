@@ -25,6 +25,8 @@
 #include "strutil.h"
 #include "x_timer.h"
 
+#include "sim900.h"
+/*
 static const unsigned char sim900_set_storage_equipment[9] = {
 	0x04,
 	0x00, 0x00, 0x00, 0x90,
@@ -76,6 +78,7 @@ static const unsigned char sim900_comparision_for_downloaded_information[13] = {
 	0xE7, 0xDA, 0x45, 0x0D,
 	0x00, 0x00, 0x00, 0x00,
 };
+*/
 
 static const char *sim900imei_usage = "Usage: sim900imei -d <device> -i imei [-h <File of Intel HEX>]\n";
 
@@ -176,11 +179,18 @@ int main(int argc, char **argv)
 	char *device = NULL;
 	char *hex = NULL;
 	char *imei = NULL;
+	u_int32_t offset = 0;
 
-	char sim900_code_page[0x10000];
+	u_int8_t storage_equipment[4];
+	char page[0x10000];
 
 	size_t i;
+	int res;
+	struct x_timer timer;
+	struct timeval timeout;
+	fd_set fds;
 
+	char t_char;
 	char t_buf[1024];
 	char *t_ptr;
 	size_t t_pos;
@@ -210,14 +220,7 @@ int main(int argc, char **argv)
 	char hex_fpath[PATH_MAX];
 	FILE *hex_fptr = NULL;
 
-	struct x_timer timer;
-	char t_char;
-	int res;
-
-	struct timeval timeout;
-	fd_set fds;
-
-	while ((opt = getopt(argc, argv, "d:h:i:")) != -1)
+	while ((opt = getopt(argc, argv, "d:h:i:o:")) != -1)
 	{
 		switch (opt)
 		{
@@ -227,8 +230,11 @@ int main(int argc, char **argv)
 			case 'h': /*! - File of Intel HEX, default "flash_nor_16bits_hwasic_evp_4902_rel.hex" */
 				hex = optarg;
 				break;
-			case 'i':
+			case 'i': /*! - IMEI, mandatory */
 				imei = optarg;
+				break;
+			case 'o': /*! - offset, mandatory */
+				sscanf(optarg, "%X", &offset);
 				break;
 			default: /*! '?' */
 				printf(sim900imei_usage);
@@ -253,6 +259,7 @@ int main(int argc, char **argv)
 		goto main_end;
 	}
 	printf("IMEI=\"%.*s(%c)\"\n", 14, imei, (char)imei_calc_check_digit(imei));
+	printf("Offset=0x%x\n", offset);
 
 	if (hex)
 		snprintf(hex_fpath, sizeof(hex_fpath), "%s", hex);
@@ -510,10 +517,10 @@ int main(int argc, char **argv)
 	printf("Set the storage equipment...");
 	fflush(stdout);
 
-	t_ptr = (char *)&sim900_set_storage_equipment;
-	t_size = sizeof(sim900_set_storage_equipment);
+	t_ptr = sim900_cmd_sel_mem_reg_build(t_buf, 0x90000000, 0x00000000);
+	t_size = sim900_cmd_sel_mem_reg_size();
 	t_pos = 0;
-	x_timer_set_second(timer, 1);
+	x_timer_set_second(timer, t_size/1000 + 1);
 	while (is_x_timer_active(timer))
 	{
 		timeout.tv_sec = 0;
@@ -639,46 +646,52 @@ int main(int argc, char **argv)
 		goto main_end;
 	}
 	// read data
-	for (i=0; i<4; i++)
+	t_ptr = (char *)storage_equipment;
+	t_size = sizeof(storage_equipment);
+	t_pos = 0;
+	x_timer_set_second(timer, t_size/1000 + 1);
+	while (is_x_timer_active(timer))
 	{
-		x_timer_set_second(timer, 1);
-		while (is_x_timer_active(timer))
-		{
-			timeout.tv_sec = 1;
-			timeout.tv_usec = 0;
-			FD_ZERO(&fds);
-			FD_SET(tty_fd, &fds);
-			res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
-			if (res > 0) {
-				if (FD_ISSET(tty_fd, &fds)) {
-					res = read(tty_fd, &t_char, 1);
-					if (res < 0) {
-						if (errno != EAGAIN) {
-							printf("failed - read(): %s\n", strerror(errno));
-							goto main_end;
-						}
-					} else if (res == 1) break;
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						printf("failed - read(): %s\n", strerror(errno));
+						goto main_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
 				}
-			} else if (res < 0) {
-				printf("failed - select(): %s\n", strerror(errno));
-				goto main_end;
 			}
-		}
-		if (is_x_timer_fired(timer)) {
-			printf("failed - time is out\n");
+		} else if (res < 0) {
+			printf("failed - select(): %s\n", strerror(errno));
 			goto main_end;
 		}
 	}
-	printf("succeeded\n");
+	if (is_x_timer_fired(timer)) {
+		printf("failed - time is out\n");
+		goto main_end;
+	}
+	printf("succeeded - id");
+	for (i=0; i<sizeof(storage_equipment); i++)
+		printf(" %02x", storage_equipment[i]);
+	printf("\n");
 
-	// Set the storage equipment
-	printf("Set the storage equipment...");
+	// Select page which contained initial IMEI
+	printf("Select page which contained initial IMEI...");
 	fflush(stdout);
 
-	t_ptr = (char *)&sim900_set_storage_equipment_s1;
-	t_size = sizeof(sim900_set_storage_equipment_s1);
+	t_ptr = sim900_cmd_sel_mem_reg_build(t_buf, offset&0xffff0000, 0x10000);
+	t_size = sim900_cmd_sel_mem_reg_size();
 	t_pos = 0;
-	x_timer_set_second(timer, 1);
+	x_timer_set_second(timer, t_size/1000 + 1);
 	while (is_x_timer_active(timer))
 	{
 		timeout.tv_sec = 0;
@@ -804,8 +817,8 @@ int main(int argc, char **argv)
 		goto main_end;
 	}
 	// read data
-	t_ptr = (char *)&sim900_code_page;
-	t_size = sizeof(sim900_code_page);
+	t_ptr = page;
+	t_size = sizeof(page);
 	t_pos = 0;
 	x_timer_set_second(timer, t_size/1000 + 1);
 	while (is_x_timer_active(timer))
@@ -817,7 +830,7 @@ int main(int argc, char **argv)
 		res = select(tty_fd + 1, &fds, NULL, NULL, &timeout);
 		if (res > 0) {
 			if (FD_ISSET(tty_fd, &fds)) {
-				res = read(tty_fd, &sim900_code_page[t_pos], t_size - t_pos);
+				res = read(tty_fd, t_ptr + t_pos, t_size - t_pos);
 				if (res < 0) {
 					if (errno != EAGAIN) {
 						printf("failed - read(): %s\n", strerror(errno));
@@ -843,16 +856,16 @@ int main(int argc, char **argv)
 	str_digit_to_bcd(imei, 14, t_buf);
 	t_char = (char)imei_calc_check_digit(imei);
 	str_digit_to_bcd(&t_char, 1, t_buf+7);
-	memcpy(&sim900_code_page[0xA568], t_buf, 8);
+	memcpy(&page[offset&0x0000ffff], t_buf, 8);
 
 	// Configuration for erased area of FLASH
 	printf("Configuration for erased area of FLASH...");
 	fflush(stdout);
 
-	t_ptr = (char *)&sim900_configuration_for_erased_area_s0;
-	t_size = sizeof(sim900_configuration_for_erased_area_s0);
+	t_ptr = sim900_cmd_erase_mem_reg_build(t_buf, offset&0xffff0000, 0x10000);
+	t_size = sim900_cmd_erase_mem_reg_size();
 	t_pos = 0;
-	x_timer_set_second(timer, 1);
+	x_timer_set_second(timer, t_size/1000 + 1);
 	while (is_x_timer_active(timer))
 	{
 		timeout.tv_sec = 0;
@@ -1019,10 +1032,10 @@ int main(int argc, char **argv)
 	printf("Set for downloaded code information...");
 	fflush(stdout);
 
-	t_ptr = (char *)&sim900_set_for_downloaded_code_information_s0;
-	t_size = sizeof(sim900_set_for_downloaded_code_information_s0);
+	t_ptr = sim900_cmd_sel_mem_reg_build(t_buf, offset&0xffff0000, 0x10000);
+	t_size = sim900_cmd_sel_mem_reg_size();
 	t_pos = 0;
-	x_timer_set_second(timer, 1);
+	x_timer_set_second(timer, t_size/1000 + 1);
 	while (is_x_timer_active(timer))
 	{
 		timeout.tv_sec = 0;
@@ -1090,10 +1103,10 @@ int main(int argc, char **argv)
 	for (i=0; i<32; i++)
 	{
 		// Set for downloaded code section
-		t_ptr = (char *)&sim900_set_for_downloaded_code_section;
-		t_size = sizeof(sim900_set_for_downloaded_code_section);
+		t_ptr = sim900_cmd_set_code_section_build(t_buf, 0x800);
+		t_size = sim900_cmd_set_code_section_size();
 		t_pos = 0;
-		x_timer_set_second(timer, 1);
+		x_timer_set_second(timer, t_size/1000 + 1);
 		while (is_x_timer_active(timer))
 		{
 			timeout.tv_sec = 0;
@@ -1155,7 +1168,7 @@ int main(int argc, char **argv)
 		}
 
 		// Download code data
-		t_ptr = (char *)&sim900_code_page[i*0x800];
+		t_ptr = &page[i*0x800];
 		t_size = 0x800;
 		t_pos = 0;
 		x_timer_set_second(timer, t_size/1000 + 1);
@@ -1258,10 +1271,10 @@ int main(int argc, char **argv)
 	printf("Configuration for erased area of FLASH...");
 	fflush(stdout);
 
-	t_ptr = (char *)&sim900_configuration_for_erased_area_s1;
-	t_size = sizeof(sim900_configuration_for_erased_area_s1);
+	t_ptr = sim900_cmd_erase_mem_reg_build(t_buf, 0x90510000, 0x2e0000);
+	t_size = sim900_cmd_erase_mem_reg_size();
 	t_pos = 0;
-	x_timer_set_second(timer, 1);
+	x_timer_set_second(timer, t_size/1000 + 1);
 	while (is_x_timer_active(timer))
 	{
 		timeout.tv_sec = 0;
