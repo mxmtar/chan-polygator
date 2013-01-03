@@ -68,10 +68,14 @@ AC_PROG_LIBTOOL
 m4_ifdef([AM_PROG_CC_C_O], [AM_PROG_CC_C_O])
 
 CPPFLAGS="${CPPFLAGS} -I$lt_sysroot$prefix/include"
-if test -d "$lt_sysroot$astprefix/lib64" ; then
+if test -d "$lt_sysroot$prefix/lib64" ; then
 	LIBS="${LIBS} -L$lt_sysroot$prefix/lib64"
+	LIBDIR=$lt_sysroot$prefix/lib64
+	AC_SUBST(LIBDIR)
 else
 	LIBS="${LIBS} -L$lt_sysroot$prefix/lib"
+	LIBDIR=$lt_sysroot$prefix/lib
+	AC_SUBST(LIBDIR)
 fi
 
 # Checks for header files.
@@ -89,20 +93,70 @@ PG_POLYGATOR_LINUX_VERSION_PREREQ([1.0.4])
 
 # Checks for required asterisk version.
 PG_ASTERISK_VERSION_PREREQ([1.6.0])
+AC_DEFINE_UNQUOTED([ASTERISK_VERSION_NUMBER], [${ASTERISK_VERSION_NUMBER}], [Define recognized asterisk version number.])
 
 AC_MSG_CHECKING(asterisk/select.h presence)
 AC_LANG_C
 AC_COMPILE_IFELSE(
 [AC_LANG_PROGRAM(
 [
+#undef PACKAGE_BUGREPORT
+#undef PACKAGE_NAME
+#undef PACKAGE_STRING
+#undef PACKAGE_TARNAME
+#undef PACKAGE_VERSION
 #include <asterisk.h>
 #include <asterisk/select.h>
 ],
-[[int main(void){return 0;}]])],
+[[;]])],
 AC_MSG_RESULT(yes)
-AC_DEFINE([HAVE_ASTERISK_SELECT_H], 1, [Define to 1 if you have the <asterisk/select.h> header file.]),
+AC_DEFINE([HAVE_ASTERISK_SELECT_H], [1], [Define to 1 if you have the <asterisk/select.h> header file.]),
 AC_MSG_RESULT(no)
 )
+
+TMPCPPFLAGS=${CPPFLAGS}
+CPPFLAGS="${CPPFLAGS} -Wall -Werror"
+AC_MSG_CHECKING(ast_queue_hangup_with_cause)
+AC_LANG_C
+AC_COMPILE_IFELSE(
+[AC_LANG_PROGRAM(
+[
+#undef PACKAGE_BUGREPORT
+#undef PACKAGE_NAME
+#undef PACKAGE_STRING
+#undef PACKAGE_TARNAME
+#undef PACKAGE_VERSION
+#include <asterisk.h>
+#include <asterisk/channel.h>
+],
+[[ast_queue_hangup_with_cause(NULL, 0);]])],
+AC_MSG_RESULT(yes)
+AC_DEFINE([HAVE_ASTERISK_QUEUE_HANGUP_WITH_CAUSE], [1], [Define to 1 if you have the ast_queue_hangup_with_cause() function.]),
+AC_MSG_RESULT(no)
+)
+CPPFLAGS=${TMPCPPFLAGS}
+
+TMPCPPFLAGS=${CPPFLAGS}
+CPPFLAGS="${CPPFLAGS} -Wall -Werror"
+AC_MSG_CHECKING(ast_strptime)
+AC_LANG_C
+AC_COMPILE_IFELSE(
+[AC_LANG_PROGRAM(
+[
+#undef PACKAGE_BUGREPORT
+#undef PACKAGE_NAME
+#undef PACKAGE_STRING
+#undef PACKAGE_TARNAME
+#undef PACKAGE_VERSION
+#include <asterisk.h>
+#include <asterisk/localtime.h>
+],
+[[ast_strptime(NULL, NULL, NULL);]])],
+AC_MSG_RESULT(yes)
+AC_DEFINE([HAVE_ASTERISK_STRPTIME], [1], [Define to 1 if you have the ast_strptime() function.]),
+AC_MSG_RESULT(no)
+)
+CPPFLAGS=${TMPCPPFLAGS}
 
 # Get asterisk directories
 PG_ASTERISK_GET_DIRECTORY([astetcdir])

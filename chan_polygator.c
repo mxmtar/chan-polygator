@@ -26,6 +26,7 @@
 
 #define AST_MODULE "Polygator"
 
+#include "asterisk/ast_version.h"
 #include "asterisk/causes.h"
 #include "asterisk/channel.h"
 #include "asterisk/cli.h"
@@ -36,7 +37,6 @@
 #include "asterisk/musiconhold.h"
 #include "asterisk/paths.h"
 #include "asterisk/pbx.h"
-#include "asterisk/version.h"
 
 #include "polygator/polygator-base.h"
 
@@ -183,9 +183,9 @@ struct pg_vinetic {
 
 	int patch_alm_gsm[4];
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 	struct ast_format_cap *capabilities;
-#elif ASTERISK_VERSION_NUM >= 10800
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	format_t capabilities;
 #else
 	int capabilities;
@@ -225,9 +225,9 @@ struct pg_channel_rtp {
 
 	int event_is_now_recv;
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 	struct ast_format format;
-#elif ASTERISK_VERSION_NUM >= 10800
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	format_t format;
 #else
 	int format;
@@ -591,20 +591,26 @@ struct pg_trunk_gsm {
 // end of mmin()
 //------------------------------------------------------------------------------
 
-#if ASTERISK_VERSION_NUM < 10800
+#if ASTERISK_VERSION_NUMBER < 10800
 	typedef cli_fn cli_fn_type;
 #else
 	typedef char*(*cli_fn_type)(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 #endif
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 110000
+static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *cap, const struct ast_channel *requestor, const char *data, int *cause);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *cap, const struct ast_channel *requestor, void *data, int *cause);
-#elif ASTERISK_VERSION_NUM >= 10800
+#elif ASTERISK_VERSION_NUMBER >= 10800
 static struct ast_channel *pg_gsm_requester(const char *type, format_t format, const struct ast_channel *requestor, void *data, int *cause);
 #else
 static struct ast_channel *pg_gsm_requester(const char *type, int format, void *data, int *cause);
 #endif
+#if ASTERISK_VERSION_NUMBER >= 110000
+static int pg_gsm_call(struct ast_channel *ast_ch, const char *dest, int timeout);
+#else
 static int pg_gsm_call(struct ast_channel *ast_ch, char *dest, int timeout);
+#endif
 static int pg_gsm_hangup(struct ast_channel *ast_ch);
 static int pg_gsm_answer(struct ast_channel *ast);
 static int pg_gsm_indicate(struct ast_channel *ast, int condition, const void *data, size_t datalen);
@@ -616,7 +622,7 @@ static int pg_gsm_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int 
 
 static struct timeval pg_start_time = {0, 0};
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 static struct ast_channel_tech pg_gsm_tech = {
 #else
 static struct ast_channel_tech pg_gsm_tech = {
@@ -4549,7 +4555,7 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 
 		rtp->event_is_now_recv = 0;
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 		if (!ast_best_codec(vin->capabilities, &rtp->format)) {
 			ast_log(LOG_WARNING, "ast_best_codec() failed\n");
 			pg_put_channel_rtp(rtp);
@@ -4563,7 +4569,7 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 		}
 #endif
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 		switch (rtp->format.id)
 #else
 		switch (rtp->format)
@@ -4638,7 +4644,7 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 				break;
 			default:
 				rtp->payload_type = -1;
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(&rtp->format));
 #else
 				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(rtp->format));
@@ -4646,7 +4652,7 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 				break;
 		}
 		if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -4811,7 +4817,7 @@ pg_channel_gsm_call_incoming_end:
 	// allocation channel in pbx spool
 	sprintf(calling, "%s%s", (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
 	sprintf(called, "%s%s", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
-#if ASTERISK_VERSION_NUM < 10800
+#if ASTERISK_VERSION_NUMBER < 10800
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_RING,			/* int state */
 								calling,				/* const char *cid_num */
@@ -4844,25 +4850,39 @@ pg_channel_gsm_call_incoming_end:
 	}
 
 	// init asterisk channel tag's
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 110000
+	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
+	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
+	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
+	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
+	ast_format_copy(ast_channel_readformat(ast_ch), &rtp->format);
+	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
-// 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
 	ast_ch->nativeformats = vin->capabilities;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
 	ast_ch->readformat = rtp->format;
-// 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
+	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
 #endif
-	ast_string_field_set(ast_ch, language, ch_gsm->config.language);
 
+#if ASTERISK_VERSION_NUMBER >= 110000
+	ast_channel_language_set(ast_ch, ch_gsm->config.language);
+	ast_channel_tech_set(ast_ch, &pg_gsm_tech);
+	ast_channel_tech_pvt_set(ast_ch, call);
+#else
+	ast_string_field_set(ast_ch, language, ch_gsm->config.language);
 	ast_ch->tech = &pg_gsm_tech;
 	ast_ch->tech_pvt = call;
+#endif
+
 	call->owner = ast_ch;
 	call->channel_rtp = rtp;
 
@@ -4910,8 +4930,12 @@ static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
 						ast_mutex_lock(&ch_gsm->lock);
 					}
 					ast_mutex_unlock(&ch_gsm->lock);
+#ifdef HAVE_ASTERISK_QUEUE_HANGUP_WITH_CAUSE
+					ast_queue_hangup_with_cause(call->owner, cause);
+#else
 					call->owner->hangupcause = cause;
 					ast_queue_control(call->owner, AST_CONTROL_CONGESTION);
+#endif
 					ast_mutex_lock(&ch_gsm->lock);
 					ast_channel_unlock(call->owner);
 					break;
@@ -5004,7 +5028,11 @@ static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
 				ast_queue_control(call->owner, AST_CONTROL_PROGRESS);
 			else {
 				ast_queue_control(call->owner, AST_CONTROL_RINGING);
+#if ASTERISK_VERSION_NUMBER >= 110000
+				if (ast_channel_state(call->owner) != AST_STATE_UP)
+#else
 				if (call->owner->_state != AST_STATE_UP)
+#endif
 					ast_setstate(call->owner, AST_STATE_RINGING);
 			}
 			ast_mutex_lock(&ch_gsm->lock);
@@ -5223,9 +5251,12 @@ static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
 // 				}
 				call->state = PG_CALL_GSM_STATE_RELEASE_INDICATION;
 				ast_mutex_unlock(&ch_gsm->lock);
-// 				call->owner->hangupcause = cause;
-// 				ast_queue_control(call->owner, AST_CONTROL_HANGUP);
+#ifdef HAVE_ASTERISK_QUEUE_HANGUP_WITH_CAUSE
 				ast_queue_hangup_with_cause(call->owner, cause);
+#else
+				call->owner->hangupcause = cause;
+				ast_queue_control(call->owner, AST_CONTROL_HANGUP);
+#endif
 				ast_mutex_lock(&ch_gsm->lock);
 // 				ast_channel_unlock(call->owner);
 			} else
@@ -8909,7 +8940,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						ast_mutex_unlock(&ch_gsm->lock);
 						// allocation channel in pbx spool
 						sprintf(tmpbuf, "%s%s", (pdu->raddr.type.full == 145)?("+"):(""), pdu->raddr.value);
-#if ASTERISK_VERSION_NUM < 10800
+#if ASTERISK_VERSION_NUMBER < 10800
 						ast_ch_tmp = ast_channel_alloc(0,													/* int needqueue */
 														AST_STATE_DOWN,										/* int state */
 														tmpbuf,												/* const char *cid_num */
@@ -10929,14 +10960,14 @@ static void *pg_vinetic_workthread(void *data)
 					vin->context.resources[6] = 1;
 					vin->context.resources[7] = 1;
 				}
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				vin->capabilities = ast_format_cap_destroy(vin->capabilities);
 #else
 				vin->capabilities = 0;
 #endif
 				if ((vin->context.edsp_sw_version_register.mv == 0) &&
 						(vin->context.edsp_sw_version_register.prt == 0)) {
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 					struct ast_format tmpfmt;
 					vin->capabilities = ast_format_cap_alloc();
 					switch (vin->context.edsp_sw_version_register.features)
@@ -11297,7 +11328,7 @@ static int pg_config_file_build(char *filename)
 	gettimeofday(&curtime, NULL);
 	len += fprintf(fp, "; created at: %s", ctime(&curtime.tv_sec));
 	len += fprintf(fp, "; polygator version: %s\n", VERSION);
-	len += fprintf(fp, "; asterisk version: %s\n", ASTERISK_VERSION);
+	len += fprintf(fp, "; asterisk version: %s\n", ast_get_version());
 	len += fprintf(fp, FORMAT_SEPARATOR_LINE);
 
 	// build general category
@@ -11507,9 +11538,11 @@ static int pg_config_file_copy(char *dst, char *src)
 //------------------------------------------------------------------------------
 // pg_gsm_requester()
 //------------------------------------------------------------------------------
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 110000
+static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *format, const struct ast_channel *requestor, const char *data, int *cause)
+#elif ASTERISK_VERSION_NUMBER >= 100000
 static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *format, const struct ast_channel *requestor, void *data, int *cause)
-#elif ASTERISK_VERSION_NUM >= 10800
+#elif ASTERISK_VERSION_NUMBER >= 10800
 static struct ast_channel *pg_gsm_requester(const char *type, format_t format, const struct ast_channel *requestor, void *data, int *cause)
 #else
 static struct ast_channel *pg_gsm_requester(const char *type, int format, void *data, int *cause)
@@ -11521,17 +11554,17 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 	char channel[256];
 	char imsi[32];
 	char iccid[32];
-#if ASTERISK_VERSION_NUM >= 10800
+#if ASTERISK_VERSION_NUMBER >= 10800
 	char conference[256];
 #endif	
 	char flags[256];
 	char called_name[MAX_ADDRESS_LENGTH];
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 	struct ast_format_cap *joint = NULL;
-#elif ASTERISK_VERSION_NUM >= 10800
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	format_t joint = 0;
 #else
-	int joint;
+	int joint = 0;
 #endif
 	ssize_t res;
 	struct ast_channel *ast_ch;
@@ -11560,7 +11593,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 	channel[0] = '\0';
 	imsi[0] = '\0';
 	iccid[0] = '\0';
-#if ASTERISK_VERSION_NUM >= 10800
+#if ASTERISK_VERSION_NUMBER >= 10800
 	conference[0] = '\0';
 #endif
 	flags[0] = '\0';
@@ -11578,7 +11611,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 					(sscanf(cpd, "IMSI[%31[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", imsi, flags, called_name) != 3) &&
 						(sscanf(cpd, "ICCID[%31[0-9A-Za-z-_]]/%63[0-9+]", iccid, called_name) != 2) &&
 						(sscanf(cpd, "ICCID[%31[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", iccid, flags, called_name) != 3) &&
-#if ASTERISK_VERSION_NUM >= 10800
+#if ASTERISK_VERSION_NUMBER >= 10800
 							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%63[0-9+]", conference, called_name) != 2) &&
 							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", conference, flags, called_name) != 3) &&
 							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%63[0-9+]", conference, called_name) != 2) &&
@@ -11614,7 +11647,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 						(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 						((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
 						(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 						((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 						((joint = format & vin->capabilities)) &&
@@ -11674,7 +11707,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 						(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 						((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
 						(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 						((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 						((joint = format & vin->capabilities)) &&
@@ -11723,7 +11756,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
 				(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 				((joint = format & vin->capabilities)) &&
@@ -11756,7 +11789,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
 				(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 				((joint = format & vin->capabilities)) &&
@@ -11789,7 +11822,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
 				(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 				((joint = format & vin->capabilities)) &&
@@ -11810,7 +11843,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			ast_verb(3, "Polygator: requested GSM channel with ICCID=\"%s\" not found\n", iccid);
 		}
-#if ASTERISK_VERSION_NUM >= 10800
+#if ASTERISK_VERSION_NUMBER >= 10800
 	} else if (strlen(conference)) {
 		// get requested conference channel from general channel list
 		if ((ch_gsm = pg_get_channel_gsm_by_name(conference))) {
@@ -11821,7 +11854,11 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(ch_gsm->config.outgoing_type == PG_CALL_GSM_OUTGOING_TYPE_ALLOW) &&
 				(!ch_gsm->config.trunkonly) &&
 				(ch_gsm->config.conference_allowed) &&
+#if ASTERISK_VERSION_NUMBER >= 110000
+				(pg_is_channel_gsm_has_same_requestor(ch_gsm, ast_channel_caller((struct ast_channel *)requestor)->id.number.str)) &&
+#else
 				(pg_is_channel_gsm_has_same_requestor(ch_gsm, requestor->caller.id.number.str)) &&
+#endif
 				(!pg_is_channel_gsm_has_active_calls(ch_gsm))
 			) {
 				if (ch_gsm->channel_rtp) {
@@ -11829,7 +11866,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 					vin = rtp->vinetic;
 				} else if ((!(vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) ||
 						(!pg_is_vinetic_run(vin)) ||
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 						(!(joint = ast_format_cap_joint(format, vin->capabilities))) ||
 #else
 						(!(joint = format & vin->capabilities)) ||
@@ -11882,7 +11919,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
 				(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 				((joint = format & vin->capabilities)) &&
@@ -11917,7 +11954,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 	}
 
 	if (!ch_gsm) {
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 		ast_format_cap_destroy(joint);
 #endif
 		return NULL;
@@ -11937,7 +11974,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 
 		rtp->event_is_now_recv = 0;
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 		if (!ast_best_codec(joint, &rtp->format)) {
 			*cause = AST_CAUSE_BEARERCAPABILITY_NOTIMPL;
 			pg_put_channel_rtp(rtp);
@@ -11956,7 +11993,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 		}
 #endif
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 		switch (rtp->format.id)
 #else
 		switch (rtp->format)
@@ -12031,7 +12068,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				break;
 			default:
 				rtp->payload_type = -1;
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(&rtp->format));
 #else
 				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(rtp->format));
@@ -12039,7 +12076,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				break;
 		}
 		if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -12047,7 +12084,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			pg_put_channel_rtp(rtp);
 			pg_channel_gsm_put_call(ch_gsm, call);
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(joint);
 #endif
 			ast_mutex_unlock(&ch_gsm->lock);
@@ -12195,7 +12232,7 @@ pg_gsm_requester_vinetic_end:
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			pg_put_channel_rtp(rtp);
 			pg_channel_gsm_put_call(ch_gsm, call);
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(joint);
 #endif
 			ast_mutex_unlock(&ch_gsm->lock);
@@ -12214,7 +12251,7 @@ pg_gsm_requester_vinetic_end:
 	ch_id = channel_id++;
 	ast_mutex_unlock(&pg_lock);
 	// allocation channel in pbx spool
-#if ASTERISK_VERSION_NUM < 10800
+#if ASTERISK_VERSION_NUMBER < 10800
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_DOWN,			/* int state */
 								"",						/* const char *cid_num */
@@ -12246,35 +12283,49 @@ pg_gsm_requester_vinetic_end:
 		*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 		if (!ch_gsm->channel_rtp_usage) pg_put_channel_rtp(rtp);
 		pg_channel_gsm_put_call(ch_gsm, call);
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 		ast_format_cap_destroy(joint);
 #endif
 		ast_mutex_unlock(&ch_gsm->lock);
 		return NULL;
 	}
 	// init asterisk channel tag's
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 110000
+	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
+	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
+	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
+	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
+	ast_format_copy(ast_channel_readformat(ast_ch), &rtp->format);
+	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
-// 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
 	ast_ch->nativeformats = vin->capabilities;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
 	ast_ch->readformat = rtp->format;
-// 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
+	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
 #endif
-	ast_string_field_set(ast_ch, language, ch_gsm->config.language);
 
+#if ASTERISK_VERSION_NUMBER >= 110000
+	ast_channel_language_set(ast_ch, ch_gsm->config.language);
+	ast_channel_tech_set(ast_ch, &pg_gsm_tech);
+	ast_channel_tech_pvt_set(ast_ch, call);
+#else
+	ast_string_field_set(ast_ch, language, ch_gsm->config.language);
 	ast_ch->tech = &pg_gsm_tech;
 	ast_ch->tech_pvt = call;
+#endif
+
 	call->owner = ast_ch;
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_destroy(joint);
 #endif
 	ast_mutex_unlock(&ch_gsm->lock);
@@ -12287,18 +12338,26 @@ pg_gsm_requester_vinetic_end:
 //------------------------------------------------------------------------------
 // pg_gsm_call()
 //------------------------------------------------------------------------------
-static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeout)
+#if ASTERISK_VERSION_NUMBER >= 110000
+static int pg_gsm_call(struct ast_channel *ast_ch, const char *dest, int timeout)
+#else
+static int pg_gsm_call(struct ast_channel *ast_ch, char *dest, int timeout)
+#endif
 {
 	char *cpd;
 	char device[256];
 	char flags[256];
 	char called_name[MAX_ADDRESS_LENGTH];
 	time_t dial_timeout;
-	struct pg_call_gsm *call = (struct pg_call_gsm *)ast_ch->tech_pvt;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call_gsm *call = ast_ch->tech_pvt;
+#endif
 	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
 
 	// parse destination
-	cpd = ast_strdupa(destination);
+	cpd = ast_strdupa(dest);
 	if ((sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
 		(sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
 		(sscanf(cpd, "TRUNK[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
@@ -12319,7 +12378,11 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeou
 							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
 								(sscanf(cpd, "%63[0-9+]", called_name) != 1) &&
 								(sscanf(cpd, "%255[A-Za-z]/%63[0-9+]", flags, called_name) != 2)) {
+#if ASTERISK_VERSION_NUMBER >= 110000
+		ast_log(LOG_WARNING, "ast channel=\"%s\" has invalid called name=\"%s\"\n", ast_channel_name(ast_ch), called_name);
+#else
 		ast_log(LOG_WARNING, "ast channel=\"%s\" has invalid called name=\"%s\"\n", ast_ch->name, called_name);
+#endif
 		return -1;
 	}
 
@@ -12328,12 +12391,15 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeou
 	// get called name
 	address_classify(called_name, &call->called_name);
 	// get calling name
-#if ASTERISK_VERSION_NUM < 10800
-	if (ast_ch->cid.cid_num)
-		address_classify(ast_ch->cid.cid_num, &call->calling_name);
-#else
+#if ASTERISK_VERSION_NUMBER >= 110000
+	if (ast_channel_connected(ast_ch)->id.number.str)
+		address_classify(ast_channel_connected(ast_ch)->id.number.str, &call->calling_name);
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	if (ast_ch->connected.id.number.str)
 		address_classify(ast_ch->connected.id.number.str, &call->calling_name);
+#else
+	if (ast_ch->cid.cid_num)
+		address_classify(ast_ch->cid.cid_num, &call->calling_name);
 #endif
 	else
 		address_classify("s", &call->calling_name);
@@ -12369,12 +12435,16 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *destination, int timeou
 static int pg_gsm_hangup(struct ast_channel *ast_ch)
 {
 	struct pg_vinetic *vin;
-	struct pg_call_gsm *call;
 	struct pg_channel_gsm *ch_gsm;
 	int res = 0;
 
-	if (!(call = (struct pg_call_gsm *)ast_ch->tech_pvt))
-		return res;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call_gsm *call = ast_ch->tech_pvt;
+#endif
+
+	if (!call) return res;
 
 	ch_gsm = call->channel_gsm;
 	
@@ -12384,7 +12454,11 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 
 	ast_setstate(ast_ch, AST_STATE_DOWN);
 	res = pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_REQ, 0);
+#if ASTERISK_VERSION_NUMBER >= 110000
+	ast_channel_tech_pvt_set(ast_ch, NULL);
+#else
 	ast_ch->tech_pvt = NULL;
+#endif
 
 	ch_gsm->channel_rtp_usage--;
 	if (!ch_gsm->channel_rtp_usage) {
@@ -12475,7 +12549,11 @@ pg_gsm_hangup_vinetic_end:
 static int pg_gsm_answer(struct ast_channel *ast_ch)
 {
 	int res;
-	struct pg_call_gsm *call = (struct pg_call_gsm *)ast_ch->tech_pvt;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call_gsm *call = ast_ch->tech_pvt;
+#endif
 	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
 
 	ast_verb(4, "GSM channel=\"%s\": call line=%d answer\n", ch_gsm->alias, call->line);
@@ -12497,9 +12575,9 @@ static int pg_gsm_answer(struct ast_channel *ast_ch)
 //------------------------------------------------------------------------------
 static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void *data, size_t datalen)
 {
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 	struct ast_format_cap *joint = NULL;
-#elif ASTERISK_VERSION_NUM >= 10800
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	format_t joint;
 #else
 	int joint;
@@ -12508,7 +12586,11 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 	struct pg_vinetic *vin;
 	struct ast_channel *bridge;
 	int res = -1;
-	struct pg_call_gsm *call = (struct pg_call_gsm *)ast_ch->tech_pvt;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call_gsm *call = ast_ch->tech_pvt;
+#endif
 	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
 
 	ast_mutex_lock(&ch_gsm->lock);
@@ -12522,7 +12604,11 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_BUSY:
+#if ASTERISK_VERSION_NUMBER >= 110000
+			if (ast_channel_state(ast_ch) != AST_STATE_UP) {
+#else
 			if (ast_ch->_state != AST_STATE_UP) {
+#endif
 				ast_verb(4, "GSM channel=\"%s\": call line=%d indicate busy\n", ch_gsm->alias, call->line);
 				ast_softhangup_nolock(ast_ch, AST_SOFTHANGUP_DEV);
 				res = 0;
@@ -12531,7 +12617,11 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_CONGESTION:
+#if ASTERISK_VERSION_NUMBER >= 110000
+			if (ast_channel_state(ast_ch) != AST_STATE_UP) {
+#else
 			if (ast_ch->_state != AST_STATE_UP) {
+#endif
 				ast_verb(4, "GSM channel=\"%s\": call line=%d indicate congestion\n", ch_gsm->alias, call->line);
 				ast_softhangup_nolock(ast_ch, AST_SOFTHANGUP_DEV);
 				res = 0;
@@ -12575,14 +12665,16 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 		case AST_CONTROL_SRCUPDATE:
 			ast_debug(4, "GSM channel=\"%s\": call line=%d src update\n", ch_gsm->alias, call->line);
 			if (((bridge = ast_bridged_channel(call->owner))) &&
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 110000
+					((joint = ast_format_cap_joint(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch))))) {
+#elif ASTERISK_VERSION_NUMBER >= 100000
 					((joint = ast_format_cap_joint(bridge->nativeformats, ast_ch->nativeformats)))) {
 #else
 					((joint = bridge->nativeformats & ast_ch->nativeformats))) {
 #endif
 				rtp = ch_gsm->channel_rtp;
 				vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				if (!ast_best_codec(joint, &rtp->format)) {
 					ast_format_cap_destroy(joint);
 					break;
@@ -12593,7 +12685,7 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 				}
 #endif
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				switch (rtp->format.id)
 #else
 				switch (rtp->format)
@@ -12668,7 +12760,7 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 						break;
 					default:
 						rtp->payload_type = -1;
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 						ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(&rtp->format));
 #else
 						ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(rtp->format));
@@ -12676,12 +12768,12 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 						break;
 				}
 				if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
 #endif
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 					ast_format_cap_destroy(joint);
 #endif
 					break;;
@@ -12712,22 +12804,29 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 				}
 pg_gsm_indicate_srcupdate_end:
 				ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 110000
+				ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
+				ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
+				ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
+				ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
+				ast_format_copy(ast_channel_readformat(ast_ch), &rtp->format);
+				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
 				ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 				ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 				ast_format_copy(&ast_ch->writeformat, &rtp->format);
 				ast_format_copy(&ast_ch->readformat, &rtp->format);
-// 				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
 				ast_ch->nativeformats = vin->capabilities;
 				ast_ch->rawreadformat = rtp->format;
 				ast_ch->rawwriteformat = rtp->format;
 				ast_ch->writeformat = rtp->format;
 				ast_ch->readformat = rtp->format;
-// 				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
+				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
 #endif
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 				ast_format_cap_destroy(joint);
 #endif
 			}
@@ -12766,7 +12865,11 @@ static int pg_gsm_write(struct ast_channel *ast_ch, struct ast_frame *frame)
 	char *data_ptr;
 	int rc;
 	int send_len;
-	struct pg_call_gsm *call = (struct pg_call_gsm *)ast_ch->tech_pvt;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call_gsm *call = ast_ch->tech_pvt;
+#endif
 	struct pg_channel_rtp *rtp = call->channel_rtp;
 
 	ast_mutex_lock(&rtp->lock);
@@ -12800,7 +12903,7 @@ static int pg_gsm_write(struct ast_channel *ast_ch, struct ast_frame *frame)
 		ast_mutex_unlock(&rtp->lock);
 		return 0;
 	}
-#if ASTERISK_VERSION_NUM == 10600
+#if ASTERISK_VERSION_NUMBER == 10600
 	if (!frame->data) {
 #else
 	if (!frame->data.ptr) {
@@ -12809,7 +12912,7 @@ static int pg_gsm_write(struct ast_channel *ast_ch, struct ast_frame *frame)
 		ast_mutex_unlock(&rtp->lock);
 		return 0;
 	}
-#if ASTERISK_VERSION_NUM == 10600
+#if ASTERISK_VERSION_NUMBER == 10600
 	data_ptr = (char *)frame->data/* + frame->offset*/;
 #else
 	data_ptr = (char *)frame->data.ptr/* + frame->offset*/;
@@ -12877,7 +12980,11 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 	unsigned int timestamp;
 	unsigned int ssrc;
 
-	struct pg_call_gsm *call = (struct pg_call_gsm *)ast_ch->tech_pvt;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call_gsm *call = ast_ch->tech_pvt;
+#endif
 	struct pg_channel_rtp *rtp = call->channel_rtp;
 
 	ast_mutex_lock(&rtp->lock);
@@ -12963,14 +13070,14 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 			memset(&rtp->frame, 0, sizeof(struct ast_frame));
 			if (dtmf_sym == 'X') {
 				rtp->frame.frametype = AST_FRAME_CONTROL;
-#if ASTERISK_VERSION_NUM < 10800
+#if ASTERISK_VERSION_NUMBER < 10800
 				rtp->frame.subclass = AST_CONTROL_FLASH;
 #else
 				rtp->frame.subclass.integer = AST_CONTROL_FLASH;
 #endif
 			} else {
 				rtp->frame.frametype = AST_FRAME_DTMF;
-#if ASTERISK_VERSION_NUM < 10800
+#if ASTERISK_VERSION_NUMBER < 10800
 				rtp->frame.subclass = dtmf_sym;
 #else
 				rtp->frame.subclass.integer = dtmf_sym;
@@ -13045,9 +13152,9 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 // 	ast_log(LOG_DEBUG, "<%s>: read %d bytes - %d samples\n", chnl->name, data_len, samples);
 // 	memset(&chnl->frame, 0x00, sizeof(struct ast_frame));
 	rtp->frame.frametype = AST_FRAME_VOICE;
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_copy(&rtp->frame.subclass.format, &rtp->format);
-#elif ASTERISK_VERSION_NUM >= 10800
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	rtp->frame.subclass.codec = rtp->format;
 #else
 	rtp->frame.subclass = rtp->format;
@@ -13059,7 +13166,7 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 	rtp->frame.mallocd = 0;
 	rtp->frame.delivery.tv_sec = 0;
 	rtp->frame.delivery.tv_usec = 0;
-#if ASTERISK_VERSION_NUM == 10600
+#if ASTERISK_VERSION_NUMBER == 10600
 	rtp->frame.data = data_ptr;
 #else
 	rtp->frame.data.ptr = data_ptr;
@@ -13080,7 +13187,6 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 //------------------------------------------------------------------------------
 static int pg_gsm_fixup(struct ast_channel *old_ast_ch, struct ast_channel *new_ast_ch)
 {
-	struct pg_call_gsm *call;
 	struct pg_channel_gsm *ch_gsm;
 
 	if (!old_ast_ch) {
@@ -13091,16 +13197,24 @@ static int pg_gsm_fixup(struct ast_channel *old_ast_ch, struct ast_channel *new_
 		ast_log(LOG_ERROR, "bad fixup request - not new channel\n");
 		return 0;
 	}
-
-	call = (struct pg_call_gsm *)old_ast_ch->tech_pvt;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call_gsm *call = ast_channel_tech_pvt(old_ast_ch);
+#else
+	struct pg_call_gsm *call = old_ast_ch->tech_pvt;
+#endif
 	ch_gsm = call->channel_gsm;
 
 	ast_mutex_lock(&ch_gsm->lock);
 
 	if (call) {
-		ast_verb(4, "GSM channel=\"%s\": call line=%d fixup \"%s\" -> \"%s\"\n", ch_gsm->alias, call->line, old_ast_ch->name, new_ast_ch->name);
 		call->owner = new_ast_ch;
+#if ASTERISK_VERSION_NUMBER >= 110000
+		ast_verb(4, "GSM channel=\"%s\": call line=%d fixup \"%s\" -> \"%s\"\n", ch_gsm->alias, call->line, ast_channel_name(old_ast_ch), ast_channel_name(new_ast_ch));
+		ast_channel_tech_pvt_set(new_ast_ch, call);
+#else
+		ast_verb(4, "GSM channel=\"%s\": call line=%d fixup \"%s\" -> \"%s\"\n", ch_gsm->alias, call->line, old_ast_ch->name, new_ast_ch->name);
 		new_ast_ch->tech_pvt = call;
+#endif
 	}
 
 	ast_mutex_unlock(&ch_gsm->lock);
@@ -13116,7 +13230,11 @@ static int pg_gsm_fixup(struct ast_channel *old_ast_ch, struct ast_channel *new_
 //------------------------------------------------------------------------------
 static int pg_gsm_dtmf_start(struct ast_channel *ast_ch, char digit)
 {
-	struct pg_call_gsm *call = (struct pg_call_gsm *)ast_ch->tech_pvt;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call_gsm *call = ast_ch->tech_pvt;
+#endif
 	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
 
 	ast_mutex_lock(&ch_gsm->lock);
@@ -13161,7 +13279,11 @@ static int pg_gsm_dtmf_start(struct ast_channel *ast_ch, char digit)
 //------------------------------------------------------------------------------
 static int pg_gsm_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int duration)
 {
-	struct pg_call_gsm *call = (struct pg_call_gsm *)ast_ch->tech_pvt;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call_gsm *call = ast_ch->tech_pvt;
+#endif
 	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
 
 	ast_mutex_lock(&ch_gsm->lock);
@@ -14186,7 +14308,7 @@ static char *pg_cli_show_modinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 	// show polygator module version
 	ast_cli(a->fd, "  -- module version: %s\n", VERSION);
 	// show polygator asterisk version
-	ast_cli(a->fd, "  -- asterisk version: %s\n", ASTERISK_VERSION);
+	ast_cli(a->fd, "  -- asterisk version: %s\n", ast_get_version());
 	// show polygator module uptime
 	gettimeofday(&curr_time_mark, NULL);
 
@@ -14717,12 +14839,18 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 	char *gline;
 	char *gargv[AST_MAX_ARGS];
 	int gargc;
-
+#if ASTERISK_VERSION_NUMBER >= 10800
 	static const char * const choices_pos6[] = { "last",  "from", "to", NULL };
 	static const char * const choices_pos7[] = { "hour", "day", "week", NULL };
 	static const char * const choices_pos8_from[] = { "to", NULL };
 	static const char * const choices_pos8_last[] = { "minutes", "hours", "days", "weeks", NULL };
-
+#else
+	static char * const choices_pos6[] = { "last",  "from", "to", NULL };
+	static char * const choices_pos7[] = { "hour", "day", "week", NULL };
+	static char * const choices_pos8_from[] = { "to", NULL };
+	static char * const choices_pos8_last[] = { "minutes", "hours", "days", "weeks", NULL };
+#endif
+	
 	switch (cmd)
 	{
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -14774,10 +14902,18 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 				tv_begin.tv_sec = tv_end.tv_sec - 60 * 60 * 24 * 7;
 			}
 		} else if (!strcmp(a->argv[6], "from")) {
+#ifdef HAVE_ASTERISK_STRPTIME
 			ast_strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", &tm_begin);
+#else
+			strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", (struct tm *)&tm_begin);
+#endif
 			tv_begin = ast_mktime(&tm_begin, NULL); 
 		} else if (!strcmp(a->argv[6], "to")) {
+#ifdef HAVE_ASTERISK_STRPTIME
 			ast_strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", &tm_end);
+#else
+			strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", (struct tm *)&tm_end);
+#endif
 			tv_end = ast_mktime(&tm_begin, NULL); 
 		}
 	} else if (a->argc == 9) {
@@ -14796,9 +14932,14 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 		}
 	} else if (a->argc == 10) {
 		if ((!strcmp(a->argv[6], "from")) && (!strcmp(a->argv[8], "to"))) {
+#ifdef HAVE_ASTERISK_STRPTIME
 			ast_strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", &tm_begin);
-			tv_begin = ast_mktime(&tm_begin, NULL); 
 			ast_strptime(a->argv[9], "%Y-%m-%d %H:%M:%S", &tm_end);
+#else
+			strptime(a->argv[7], "%Y-%m-%d %H:%M:%S", (struct tm *)&tm_begin);
+			strptime(a->argv[9], "%Y-%m-%d %H:%M:%S", (struct tm *)&tm_end);
+#endif
+			tv_begin = ast_mktime(&tm_begin, NULL); 
 			tv_end = ast_mktime(&tm_end, NULL); 
 		}
 	}
@@ -15033,7 +15174,6 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 // pg_man_show_gsm_netinfo()
 //------------------------------------------------------------------------------
 const char *pg_man_show_gsm_netinfo_synopsis = "Show GSM network information of Polygator channels.";
-const char *pg_man_show_gsm_netinfo_decription = "Similar to the CLI command \"polygator show gsm netinfo\".";
 static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m)
 {
 	struct pg_channel_gsm *ch_gsm;
@@ -19533,7 +19673,7 @@ static void pg_cleanup(void)
 	// unregistering PGGSM channel technology
 	if (pg_gsm_tech_registered) {
 		ast_channel_unregister(&pg_gsm_tech);
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 		ast_format_cap_destroy(pg_gsm_tech.capabilities);
 #endif
 	}
@@ -19646,7 +19786,7 @@ static void pg_cleanup(void)
 				ast_free(rtp->path);
 				ast_free(rtp);
 			}
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(vin->capabilities);
 #endif
 			ast_free(vin->name);
@@ -20219,7 +20359,7 @@ static int pg_load(void)
 		}
 		pg_gsm_tech_registered = 1;
 
-#if ASTERISK_VERSION_NUM >= 100000
+#if ASTERISK_VERSION_NUMBER >= 100000
 		pg_gsm_tech.capabilities = ast_format_cap_alloc();
 #endif
 	}
@@ -20230,11 +20370,7 @@ static int pg_load(void)
 	pg_cli_registered = 1;
 
 	// registering Polygator Manager commands
-#if 0
-	ast_manager_register_xml("PolygatorShowGSMNetinfo", 0, pg_man_show_gsm_netinfo);
-#else
-	ast_manager_register2("PolygatorShowGSMNetinfo", 0, pg_man_show_gsm_netinfo, pg_man_show_gsm_netinfo_synopsis, pg_man_show_gsm_netinfo_decription);
-#endif
+	ast_manager_register("PolygatorShowGSMNetinfo", 0, pg_man_show_gsm_netinfo, pg_man_show_gsm_netinfo_synopsis);
 	ast_verbose("%s: Manager commands registered\n", AST_MODULE);
 	pg_man_registered = 1;
 

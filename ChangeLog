@@ -72,3 +72,6 @@ Use ast_queue_hangup_with_cause(ast, cause) instead ast_queue_control(ast, AST_C
 without lock asterisk channel.
 27.12.12
 Fix trunk last used channel on channel removing.
+03.01.13
+Add support asterisk version 11.
+Change configure macro for retrieve asterisk version by calling asterisk executable with option -V.
