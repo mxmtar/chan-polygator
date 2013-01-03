@@ -16,32 +16,6 @@ chan_polygator_la_SOURCES = \
 chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
 chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic -lrt
 
-bin_PROGRAMS = sim900bfw sim900imei sim900dump
-sim900bfw_SOURCES = \
-		sim900bfw.c \
-		sim900.c \
-		strutil.c
-
-sim900bfw_CFLAGS = $(AM_CFLAGS) -Wall
-sim900bfw_LDFLAGS = $(AM_LDFLAGS) -lrt
-
-sim900imei_SOURCES = \
-		sim900imei.c \
-		imei.c \
-		sim900.c \
-		strutil.c
-
-sim900imei_CFLAGS = $(AM_CFLAGS) -Wall
-sim900imei_LDFLAGS = $(AM_LDFLAGS) -lrt
-
-sim900dump_SOURCES = \
-		sim900dump.c \
-		sim900.c \
-		strutil.c
-
-sim900dump_CFLAGS = $(AM_CFLAGS) -Wall
-sim900dump_LDFLAGS = $(AM_LDFLAGS) -lrt
-
 noinst_HEADERS = \
 		address.h \
 		imei.h \
@@ -69,8 +43,6 @@ dist_firmware_DATA = \
 	firmware/ALM_2484_AB_01.dwl \
 	firmware/ALM_2484_CD_01.dwl \
 	firmware/cram.byt \
-	firmware/1137B08SIM900M64_ST_DTMF_JD_MMS.cla \
-	firmware/1137B09SIM900M64_ST_DTMF_JD_MMS.cla \
 	firmware/flash_nor_16bits_hwasic_evp_4902_rel.hex
 
 CLEANFILES = *~
