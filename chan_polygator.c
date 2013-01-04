@@ -444,7 +444,6 @@ struct pg_channel_gsm {
 		unsigned int shutdown_now:1;
 		unsigned int restart:1;
 		unsigned int restart_now:1;
-		unsigned int suspend_now:1;
 		unsigned int resume_now:1;
 		unsigned int init:1;
 		unsigned int balance_req:1;
@@ -707,7 +706,6 @@ static struct ast_cli_entry pg_cli[] = {
 // polygator CLI GSM channel actions
 static char *pg_cli_channel_gsm_action_power(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
-static char *pg_cli_channel_gsm_action_suspend_resume(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_debug(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
@@ -719,8 +717,6 @@ static struct pg_cli_action pg_cli_channel_gsm_action_handlers[] = {
 	PG_CLI_ACTION("enable", pg_cli_channel_gsm_action_enable_disable),
 	PG_CLI_ACTION("disable", pg_cli_channel_gsm_action_enable_disable),
 	PG_CLI_ACTION("restart", pg_cli_channel_gsm_action_enable_disable),
-	PG_CLI_ACTION("suspend", pg_cli_channel_gsm_action_suspend_resume),
-	PG_CLI_ACTION("resume", pg_cli_channel_gsm_action_suspend_resume),
 	PG_CLI_ACTION("get", pg_cli_channel_gsm_action_param),
 	PG_CLI_ACTION("set", pg_cli_channel_gsm_action_param),
 	PG_CLI_ACTION("query", pg_cli_channel_gsm_action_param),
@@ -797,7 +793,7 @@ static struct pg_cgannel_gsm_param pg_channel_gsm_params[] = {
 	PG_CHANNEL_GSM_PARAM("alias", PG_CHANNEL_GSM_PARAM_ALIAS, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
 	PG_CHANNEL_GSM_PARAM("pin", PG_CHANNEL_GSM_PARAM_PIN, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
 	PG_CHANNEL_GSM_PARAM("puk", PG_CHANNEL_GSM_PARAM_PUK, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("imei", PG_CHANNEL_GSM_PARAM_IMEI, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
+	PG_CHANNEL_GSM_PARAM("imei", PG_CHANNEL_GSM_PARAM_IMEI, PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
 	PG_CHANNEL_GSM_PARAM("number", PG_CHANNEL_GSM_PARAM_NUMBER, PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
 	PG_CHANNEL_GSM_PARAM("progress", PG_CHANNEL_GSM_PARAM_PROGRESS, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
 	PG_CHANNEL_GSM_PARAM("incoming", PG_CHANNEL_GSM_PARAM_INCOMING, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
@@ -916,7 +912,7 @@ static x_timeout_global(pinwait_timeout, 16, 0);
 static x_timeout_global(registering_timeout, 60, 0);
 static x_timeout_global(proceeding_timeout, 5, 0);
 
-static char pg_config_file[] = "polygator.conf";
+static char *pg_config_file = "polygator.conf";
 
 static int pg_at_response_timeout = 2;
 
@@ -4492,6 +4488,1269 @@ pg_channel_gsm_write_imei_sim300_end:
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_channel_gsm_write_imei_sim900()
+//------------------------------------------------------------------------------
+static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const char *imei, int print_type, uintptr_t print_out)
+{
+	struct termios tty_termios, old_termios;
+
+	char *action, *state;
+
+	u_int32_t offset = 0;
+
+	u_int8_t storage_equipment[4];
+	char page[0x10000];
+
+	size_t i;
+	int res;
+	struct x_timer timer;
+	struct timeval timeout;
+#ifdef HAVE_ASTERISK_SELECT_H
+	ast_fdset fds;
+#else
+	fd_set fds;
+#endif
+
+	char t_char;
+	char t_buf[1024];
+	char *t_ptr;
+	size_t t_pos;
+	ssize_t t_size;
+
+	char hex_fpath[PATH_MAX];
+	FILE *hex_fptr = NULL;
+
+	int tty_fd = -1;
+
+	int result = -1;
+
+	if (!ast_strlen_zero(ch_gsm->firmware)) {
+		if (!strcasecmp(ch_gsm->firmware, "Revision:1137B08SIM900M64_ST_DTMF_JD_MMS")) {
+			offset = 0x9023a568;
+		} else if (!strcasecmp(ch_gsm->firmware, "Revision:1137B09SIM900M64_ST_DTMF_JD_MMS")) {
+			offset = 0x9023b7c8;
+		} else {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": unsupported firmware revision \"%s\"\n", ch_gsm->alias, ch_gsm->firmware);
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	} else {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": unknown firmware revision\n", ch_gsm->alias);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// open TTY device
+	if ((tty_fd = open(ch_gsm->tty_path, O_RDWR | O_NOCTTY | O_NONBLOCK)) < 0) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": can't open \"%s\": %s\n", ch_gsm->alias, ch_gsm->tty_path, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// get termios
+	if (tcgetattr(tty_fd, &old_termios)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": tcgetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	if (tcgetattr(tty_fd, &tty_termios)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": tcgetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	cfmakeraw(&tty_termios);
+	tty_termios.c_cc[VMIN] = 0;
+	tty_termios.c_cc[VTIME] = 0;
+	cfsetispeed(&tty_termios, B115200);
+	cfsetospeed(&tty_termios, B115200);
+	if (tcsetattr(tty_fd, TCSANOW, &tty_termios) < 0) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	if (pg_channel_gsm_serial_set(ch_gsm, 0) < 0) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": pg_channel_gsm_serial_set() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	if (tcflush(tty_fd, TCIOFLUSH) < 0)
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
+
+	if (pg_channel_gsm_key_press(ch_gsm, 0) < 0) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": pg_channel_gsm_key_press() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	if (pg_channel_gsm_power_set(ch_gsm, 0) < 0) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": pg_channel_gsm_power_set() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	ast_mutex_unlock(&ch_gsm->lock);
+	sleep(1);
+	ast_mutex_lock(&ch_gsm->lock);
+	if (pg_channel_gsm_key_press(ch_gsm, 1) < 0) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": pg_channel_gsm_key_press() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	if (pg_channel_gsm_power_set(ch_gsm, 1) < 0) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": pg_channel_gsm_power_set() error: %s\n", ch_gsm->alias, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// Detection of synchronous bytes
+	action = "Detection of synchronous bytes";
+	x_timer_set_second(timer, 10);
+	while (is_x_timer_active(timer))
+	{
+		// writing synchronous octet 0x16
+		state = "writing synchronous octet (0x16)";
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x16;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				}
+			}
+		} if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+		// wait for synchronous octet 0x16
+		state = "wait for synchronous octet (0x16)";
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 10000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x16) break;	// synchronous octet received
+				}
+			} if (res < 0) {
+				pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+				goto pg_channel_gsm_write_imei_sim900_end;
+			}
+		}
+	}
+	// check for entering into downloading procedure
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s failed - run in normal mode\n", ch_gsm->alias, action);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	if (tcflush(tty_fd, TCIOFLUSH) < 0)
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
+
+	// File of Intel HEX download
+	action = "File of Intel HEX download";
+	// open hex file
+	snprintf(hex_fpath, sizeof(hex_fpath), "%s/polygator/flash_nor_16bits_hwasic_evp_4902_rel.hex", ast_config_AST_DATA_DIR);
+	if (!(hex_fptr = fopen(hex_fpath, "r"))) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s failed - fopen(%s): %s\n", ch_gsm->alias, action, hex_fpath, strerror(errno));
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// write hex file
+	state = "write hex file";
+	while (fgets(t_buf, sizeof(t_buf), hex_fptr))
+	{
+		t_ptr = t_buf;
+		t_size = strlen(t_buf);
+		t_pos = 0;
+		x_timer_set_second(timer, t_size/1000 + 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 0;
+			timeout.tv_usec = (t_size - t_pos) * 1000;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			ast_mutex_unlock(&ch_gsm->lock);
+			res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+			ast_mutex_lock(&ch_gsm->lock);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+							goto pg_channel_gsm_write_imei_sim900_end;
+						}
+					} else if (res > 0) {
+						t_pos += res;
+						if (t_size == t_pos) break;
+					}
+				}
+			} else if (res < 0) {
+				pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+				goto pg_channel_gsm_write_imei_sim900_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	// wait for success indication 0x00
+	state = "wait for success indication (0x00)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x00) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	fclose(hex_fptr);
+	hex_fptr = NULL;
+
+	// Set the storage equipment
+	action = "Set the storage equipment";
+	// write command
+	state = "write command";
+	t_ptr = sim900_cmd_sel_mem_reg_build(t_buf, 0x90000000, 0x00000000);
+	t_size = sim900_cmd_sel_mem_reg_size();
+	t_pos = 0;
+	x_timer_set_second(timer, t_size/1000 + 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// wait for success indication 0x04
+	state = "wait for success indication (0x04)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x04) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// Read the flash manufacturer information
+	action = "Read the flash manufacturer information";
+	// write command
+	state = "write command";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x02;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} if (res == 1) break;
+			}
+		} if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// read marker 0x02
+	state = "read marker (0x02)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x02) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// read data
+	state = "read data";
+	t_ptr = (char *)storage_equipment;
+	t_size = sizeof(storage_equipment);
+	t_pos = 0;
+	x_timer_set_second(timer, t_size/1000 + 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// Select code page with IMEI for read
+	action = "Select code page with IMEI for read";
+	// write command
+	state = "write command";
+	t_ptr = sim900_cmd_sel_mem_reg_build(t_buf, offset&0xffff0000, 0x10000);
+	t_size = sim900_cmd_sel_mem_reg_size();
+	t_pos = 0;
+	x_timer_set_second(timer, t_size/1000 + 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// wait for success indication 0x04
+	state = "wait for success indication (0x04)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x04) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// Read code page with IMEI
+	action = "Read code page with IMEI";
+	// write command
+	state = "write command";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x17;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} if (res == 1) break;
+			}
+		} if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// read marker 0x17
+	state = "read marker (0x17)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x17) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// read data
+	state = "read data";
+	t_ptr = page;
+	t_size = sizeof(page);
+	t_pos = 0;
+	x_timer_set_second(timer, t_size/1000 + 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+			}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// Set new IMEI into specified code page position
+	str_digit_to_bcd(imei, 14, t_buf);
+	t_char = (char)imei_calc_check_digit(imei);
+	str_digit_to_bcd(&t_char, 1, t_buf+7);
+	memcpy(&page[offset&0x0000ffff], t_buf, 8);
+
+	// Select code page with IMEI for erase
+	action = "Select code page with IMEI for erase";
+	// write command
+	state = "write command";
+	t_ptr = sim900_cmd_erase_mem_reg_build(t_buf, offset&0xffff0000, 0x10000);
+	t_size = sim900_cmd_erase_mem_reg_size();
+	t_pos = 0;
+	x_timer_set_second(timer, t_size/1000 + 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// wait for success indication 0x09
+	state = "wait for success indication (0x09)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x09) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// Erase code page with IMEI
+	action = "Erase code page with IMEI";
+	// write command
+	state = "write command";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x03;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} if (res == 1) break;
+			}
+		} if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// read marker 0x03
+	state = "read marker (0x03)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x03) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// wait for erase 0x30
+	state = "wait for erase (0x30)";
+	x_timer_set_second(timer, 300);
+	while(is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x30) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	// check for completion
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// Select code page with IMEI for write
+	action = "Select code page with IMEI for write";
+	// write command
+	state = "write command";
+	t_ptr = sim900_cmd_sel_mem_reg_build(t_buf, offset&0xffff0000, 0x10000);
+	t_size = sim900_cmd_sel_mem_reg_size();
+	t_pos = 0;
+	x_timer_set_second(timer, t_size/1000 + 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// wait for success indication 0x04
+	state = "wait for success indication (0x04)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x04) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// Write code page with IMEI
+	for (i=0; i<32; i++)
+	{
+		// Set downloaded code section
+		action = "Set downloaded code section";
+		// write command
+		state = "write command";
+		t_ptr = sim900_cmd_set_code_section_build(t_buf, 0x800);
+		t_size = sim900_cmd_set_code_section_size();
+		t_pos = 0;
+		x_timer_set_second(timer, t_size/1000 + 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 0;
+			timeout.tv_usec = (t_size - t_pos) * 1000;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			ast_mutex_unlock(&ch_gsm->lock);
+			res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+			ast_mutex_lock(&ch_gsm->lock);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+							goto pg_channel_gsm_write_imei_sim900_end;
+						}
+					} else if (res > 0) {
+						t_pos += res;
+						if (t_size == t_pos) break;
+					}
+				}
+			} else if (res < 0) {
+				pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+				goto pg_channel_gsm_write_imei_sim900_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+		// read marker 0x01
+		state = "read marker (0x01)";
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			ast_mutex_unlock(&ch_gsm->lock);
+			res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			ast_mutex_lock(&ch_gsm->lock);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+							goto pg_channel_gsm_write_imei_sim900_end;
+						}
+					} else if (res == 1) {
+						if (t_char == 0x01) break;
+					}
+				}
+			} else if (res < 0) {
+				pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+				goto pg_channel_gsm_write_imei_sim900_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+
+		// Download code section
+		action = "Download code section";
+		// write data
+		state = "write data";
+		t_ptr = &page[i*0x800];
+		t_size = 0x800;
+		t_pos = 0;
+		x_timer_set_second(timer, t_size/1000 + 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 0;
+			timeout.tv_usec = (t_size - t_pos) * 1000;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			ast_mutex_unlock(&ch_gsm->lock);
+			res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+			ast_mutex_lock(&ch_gsm->lock);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+							goto pg_channel_gsm_write_imei_sim900_end;
+						}
+					} else if (res > 0) {
+						t_pos += res;
+						if (t_size == t_pos) break;
+					}
+				}
+			} else if (res < 0) {
+				pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+				goto pg_channel_gsm_write_imei_sim900_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+		// read marker 0x2e
+		state = "read marker (0x2e)";
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			ast_mutex_unlock(&ch_gsm->lock);
+			res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			ast_mutex_lock(&ch_gsm->lock);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+							goto pg_channel_gsm_write_imei_sim900_end;
+						}
+					} else if (res == 1) {
+						if (t_char == 0x2e) break;
+					}
+				}
+			} else if (res < 0) {
+				pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+				goto pg_channel_gsm_write_imei_sim900_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+		// read marker 0x30
+		state = "read marker (0x30)";
+		x_timer_set_second(timer, 1);
+		while (is_x_timer_active(timer))
+		{
+			timeout.tv_sec = 1;
+			timeout.tv_usec = 0;
+			FD_ZERO(&fds);
+			FD_SET(tty_fd, &fds);
+			ast_mutex_unlock(&ch_gsm->lock);
+			res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+			ast_mutex_lock(&ch_gsm->lock);
+			if (res > 0) {
+				if (FD_ISSET(tty_fd, &fds)) {
+					res = read(tty_fd, &t_char, 1);
+					if (res < 0) {
+						if (errno != EAGAIN) {
+							pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+							goto pg_channel_gsm_write_imei_sim900_end;
+						}
+					} else if (res == 1) {
+						if (t_char == 0x30) break;
+					}
+				}
+			} else if (res < 0) {
+				pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+				goto pg_channel_gsm_write_imei_sim900_end;
+			}
+		}
+		if (is_x_timer_fired(timer)) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+
+	// Select settings space for erase
+	action = "Select settings space for erase";
+	// write command
+	state = "write command";
+	t_ptr = sim900_cmd_erase_mem_reg_build(t_buf, 0x90510000, 0x2e0000);
+	t_size = sim900_cmd_erase_mem_reg_size();
+	t_pos = 0;
+	x_timer_set_second(timer, t_size/1000 + 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = (t_size - t_pos) * 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = write(tty_fd, t_ptr + t_pos, t_size - t_pos);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res > 0) {
+					t_pos += res;
+					if (t_size == t_pos) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// wait for success indication 0x09
+	state = "wait for success indication (0x09)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x09) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	// Erase settings space
+	action = "Erase settings space";
+	// write command
+	state = "write command";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, NULL, &fds, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				t_char = 0x03;
+				res = write(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} if (res == 1) break;
+			}
+		} if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// read marker 0x03
+	state = "read marker (0x03)";
+	x_timer_set_second(timer, 1);
+	while (is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x03) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+	// wait for erase 0x30
+	state = "wait for erase (0x30)";
+	x_timer_set_second(timer, 300);
+	while(is_x_timer_active(timer))
+	{
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		FD_ZERO(&fds);
+		FD_SET(tty_fd, &fds);
+		ast_mutex_unlock(&ch_gsm->lock);
+		res = ast_select(tty_fd + 1, &fds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
+		if (res > 0) {
+			if (FD_ISSET(tty_fd, &fds)) {
+				res = read(tty_fd, &t_char, 1);
+				if (res < 0) {
+					if (errno != EAGAIN) {
+						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - read(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+						goto pg_channel_gsm_write_imei_sim900_end;
+					}
+				} else if (res == 1) {
+					if (t_char == 0x30) break;
+				}
+			}
+		} else if (res < 0) {
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
+			goto pg_channel_gsm_write_imei_sim900_end;
+		}
+	}
+	// check for completion
+	if (is_x_timer_fired(timer)) {
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - timeout\n", ch_gsm->alias, action, state);
+		goto pg_channel_gsm_write_imei_sim900_end;
+	}
+
+	ch_gsm->imei[0] = '\0';
+	pg_printf(print_type, print_out, "GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
+
+	result = 0;
+
+pg_channel_gsm_write_imei_sim900_end:
+
+	if (hex_fptr) fclose(hex_fptr);
+	if (tty_fd > -1) {
+		// restore termios
+		if (tcsetattr(tty_fd, TCSANOW, &old_termios) < 0)
+			pg_printf(print_type, print_out, "GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+		// close TTY device
+		close(tty_fd);
+	}
+	// disable GSM module
+	if (pg_channel_gsm_key_press(ch_gsm, 0) < 0)
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": pg_channel_gsm_key_press() error: %s\n", ch_gsm->alias, strerror(errno));
+	if (pg_channel_gsm_power_set(ch_gsm, 0) < 0)
+		pg_printf(print_type, print_out, "GSM channel=\"%s\": pg_channel_gsm_power_set() error: %s\n", ch_gsm->alias, strerror(errno));
+
+	return result;
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_gsm_write_imei_sim900()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_channel_gsm_write_imei_m10()
+//------------------------------------------------------------------------------
+static int pg_channel_gsm_write_imei_m10(struct pg_channel_gsm* ch_gsm, const char *imei, int print_type, uintptr_t print_out)
+{
+	char imei_buf[16];
+
+	snprintf(imei_buf, sizeof(imei_buf), "%.*s%c", 14, imei, (char)imei_calc_check_digit(imei));
+
+	pg_atcommand_queue_append(ch_gsm, AT_M10_EGMR, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1,7,\"%s\"", imei_buf);
+
+	ch_gsm->imei[0] = '\0';
+	pg_printf(print_type, print_out, "GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
+
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_gsm_write_imei_m10()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_channel_gsm_suspend_action()
 //------------------------------------------------------------------------------
 static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
@@ -4509,7 +5768,9 @@ static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
 
 	if (strlen(ch_gsm->imei_new)) {
 		if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
-			pg_channel_gsm_write_imei_sim300(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 2);
+			pg_channel_gsm_write_imei_sim300(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
+		else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
+			pg_channel_gsm_write_imei_m10(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
 		ch_gsm->imei_new[0] = '\0';
 	}
 
@@ -5408,6 +6669,28 @@ static void *pg_channel_gsm_workthread(void *data)
 		goto pg_channel_gsm_workthread_end;
 	}
 
+	// set IMEI for SIM900 GSM module
+	if (strlen(ch_gsm->imei_new)) {
+		if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
+			pg_channel_gsm_write_imei_sim900(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
+		ch_gsm->imei_new[0] = '\0';
+	}
+
+	// reset GSM module power control
+	if (pg_channel_gsm_key_press(ch_gsm, 0) < 0) {
+		ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM key to off: %s\n", ch_gsm->alias, strerror(errno));
+		ast_mutex_unlock(&ch_gsm->lock);
+		goto pg_channel_gsm_workthread_end;
+	}
+	if (pg_channel_gsm_power_set(ch_gsm, 0) < 0) {
+		ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM power suply to off: %s\n", ch_gsm->alias, strerror(errno));
+		ast_mutex_unlock(&ch_gsm->lock);
+		goto pg_channel_gsm_workthread_end;
+	}
+	ast_mutex_unlock(&ch_gsm->lock);
+	sleep(1);
+	ast_mutex_lock(&ch_gsm->lock);
+
 	// enable power suply
 	if (pg_channel_gsm_power_set(ch_gsm, 1)) {
 		ast_log(LOG_ERROR, "GSM channel=\"%s\": can't set GSM power suply to on: %s\n", ch_gsm->alias, strerror(errno));
@@ -5420,7 +6703,7 @@ static void *pg_channel_gsm_workthread(void *data)
 	ast_mutex_lock(&ch_gsm->lock);
 
 	// open TTY device
-	if ((ch_gsm->tty_fd = open(ch_gsm->tty_path, O_RDWR | O_NONBLOCK)) < 0) {
+	if ((ch_gsm->tty_fd = open(ch_gsm->tty_path, O_RDWR | O_NOCTTY | O_NONBLOCK)) < 0) {
 		ast_log(LOG_ERROR, "GSM channel=\"%s\": can't open \"%s\": %s\n", ch_gsm->alias, ch_gsm->tty_path, strerror(errno));
 		ast_mutex_unlock(&ch_gsm->lock);
 		goto pg_channel_gsm_workthread_end;
@@ -5912,14 +7195,16 @@ static void *pg_channel_gsm_workthread(void *data)
 						case AT_GMM:
 						case AT_CGMM:
 							if (strcmp(r_buf, "OK") && !strstr(r_buf, "ERROR")) {
-								if (!ch_gsm->model) ch_gsm->model = ast_strdup(r_buf);
+								if (ch_gsm->model) ast_free(ch_gsm->model);
+								ch_gsm->model = ast_strdup(r_buf);
 							}
 							break;
 						//+++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_GMR:
 						case AT_CGMR:
 							if (strcmp(r_buf, "OK") && !strstr(r_buf, "ERROR")) {
-								if (!ch_gsm->firmware) ch_gsm->firmware = ast_strdup(r_buf);
+								if (ch_gsm->firmware) ast_free(ch_gsm->firmware);
+								ch_gsm->firmware = ast_strdup(r_buf);
 							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -5947,7 +7232,8 @@ static void *pg_channel_gsm_workthread(void *data)
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CIMI:
 							if (is_str_digit(r_buf)) {
-								if (!ch_gsm->imsi) ch_gsm->imsi = ast_strdup(r_buf);
+								if (ch_gsm->imsi) ast_free(ch_gsm->imsi);
+								ch_gsm->imsi = ast_strdup(r_buf);
 								if (ch_gsm->flags.dcr_table_needed) {
 									pg_dcr_table_create(ch_gsm->imsi, &ch_gsm->lock);
 									ch_gsm->flags.dcr_table_needed = 0;
@@ -6592,17 +7878,8 @@ static void *pg_channel_gsm_workthread(void *data)
 											pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
 											pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-										//
-										if (ch_gsm->flags.suspend_now) {
-											// stop all timers
-											memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-											ch_gsm->flags.suspend_now = 0;
-											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-											ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
-											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-											// start waitsuspend timer
-											x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
-										} else if (ch_gsm->flags.sim_change) {
+										// check flags
+										if (ch_gsm->flags.sim_change) {
 											// disable GSM module functionality
 											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 
@@ -6751,16 +8028,8 @@ static void *pg_channel_gsm_workthread(void *data)
 									ast_verbose("%s: GSM channel=\"%s\": PIN accepted\n", AST_MODULE, ch_gsm->alias);
 									ch_gsm->flags.pin_required = 0;
 									ch_gsm->flags.pin_accepted = 1;
-									if (ch_gsm->flags.suspend_now) {
-										// stop all timers
-										memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-										ch_gsm->flags.suspend_now = 0;
-										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-										ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
-										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-										// start waitsuspend timer
-										x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
-									} else if (ch_gsm->flags.sim_change) {
+									// check flags
+									if (ch_gsm->flags.sim_change) {
 										// disable GSM module functionality
 										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 
@@ -6781,16 +8050,8 @@ static void *pg_channel_gsm_workthread(void *data)
 									pg_set_pin_by_iccid(ch_gsm->iccid, ch_gsm->pin, &ch_gsm->lock);
 									ch_gsm->flags.puk_required = 0;
 									ch_gsm->flags.pin_accepted = 1;
-									if (ch_gsm->flags.suspend_now) {
-										// stop all timers
-										memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-										ch_gsm->flags.suspend_now = 0;
-										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-										ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
-										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-										// start waitsuspend timer
-										x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
-									} else if (ch_gsm->flags.sim_change) {
+									// check flags
+									if (ch_gsm->flags.sim_change) {
 										// disable GSM module functionality
 										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 
@@ -8777,17 +10038,8 @@ static void *pg_channel_gsm_workthread(void *data)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
 							pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-						//
-						if (ch_gsm->flags.suspend_now) {
-							// stop all timers
-							memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-							ch_gsm->flags.suspend_now = 0;
-							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-							ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
-							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-							// start waitsuspend timer
-							x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
-						} else if (ch_gsm->flags.sim_change) {
+						// check flags
+						if (ch_gsm->flags.sim_change) {
 							//
 							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 							//
@@ -8874,43 +10126,33 @@ static void *pg_channel_gsm_workthread(void *data)
 					x_timer_stop(ch_gsm->timers.callready);
 					// stop pinwait timer
 					x_timer_stop(ch_gsm->timers.pinwait);
-					//
-					if (ch_gsm->flags.suspend_now) {
-						ch_gsm->flags.suspend_now = 0;
-						// try to switch GSM module into suspend state
-						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-						ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
+
+					if (ch_gsm->flags.init) {
+						// try to set initial settings
+						ch_gsm->state = PG_CHANNEL_GSM_STATE_INIT;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-						// start waitsuspend timer
-						x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
+						// get imsi
+						pg_atcommand_queue_append(ch_gsm, AT_CIMI, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					} else {
-						if (ch_gsm->flags.init) {
-							// try to set initial settings
-							ch_gsm->state = PG_CHANNEL_GSM_STATE_INIT;
-							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-							// get imsi
-							pg_atcommand_queue_append(ch_gsm, AT_CIMI, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-						} else {
-							// start runquartersecond timer
-							x_timer_set(ch_gsm->timers.runquartersecond, onesec_timeout);
-							// start runhalfsecond timer
-							x_timer_set(ch_gsm->timers.runhalfsecond, onesec_timeout);
-							// start runonesecond timer
-							x_timer_set(ch_gsm->timers.runonesecond, onesec_timeout);
-							// start runhalfminute timer
-							x_timer_set(ch_gsm->timers.runhalfminute, onesec_timeout);
-							// start runoneminute timer
-							x_timer_set(ch_gsm->timers.runoneminute, onesec_timeout);
-							// start runvifesecond timer
-							x_timer_set(ch_gsm->timers.runfivesecond, runfivesecond_timeout);
-							// start registering timer
-							x_timer_set(ch_gsm->timers.registering, registering_timeout);
-							// start smssend timer
-							x_timer_set(ch_gsm->timers.smssend, halfminute_timeout);
-							// set run state
-							ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
-							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-						}
+						// start runquartersecond timer
+						x_timer_set(ch_gsm->timers.runquartersecond, onesec_timeout);
+						// start runhalfsecond timer
+						x_timer_set(ch_gsm->timers.runhalfsecond, onesec_timeout);
+						// start runonesecond timer
+						x_timer_set(ch_gsm->timers.runonesecond, onesec_timeout);
+						// start runhalfminute timer
+						x_timer_set(ch_gsm->timers.runhalfminute, onesec_timeout);
+						// start runoneminute timer
+						x_timer_set(ch_gsm->timers.runoneminute, onesec_timeout);
+						// start runvifesecond timer
+						x_timer_set(ch_gsm->timers.runfivesecond, runfivesecond_timeout);
+						// start registering timer
+						x_timer_set(ch_gsm->timers.registering, registering_timeout);
+						// start smssend timer
+						x_timer_set(ch_gsm->timers.smssend, halfminute_timeout);
+						// set run state
+						ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
+						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 					}
 				}
 			}
@@ -9424,23 +10666,16 @@ static void *pg_channel_gsm_workthread(void *data)
 				ast_verb(5, "GSM channel=\"%s\": registering timer fired\n", ch_gsm->alias);
 				// stop registering timer
 				x_timer_stop(ch_gsm->timers.registering);
-				// try to disable GSM module full functionality
+
+				// disable GSM module functionality
 				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 
-				if (ch_gsm->flags.suspend_now) {
-					// stop all timers
-					memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-					ast_verbose("GSM channel=\"%s\": module switch to suspend state\n", ch_gsm->alias);
-					ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
-					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-					ch_gsm->flags.suspend_now = 0;
-				}
-				// start simpoll timer
-				if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND) {
-					// wake up SIM
-					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
-					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
-				}
+				ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
+				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+
+				// wake up SIM
+				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
+				x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 			}
 		}
 		// testfun
@@ -9734,20 +10969,15 @@ static void *pg_channel_gsm_workthread(void *data)
 				// try to disable GSM module full functionality
 				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 
-				if (ch_gsm->flags.suspend_now) {
-					// stop all timers
-					memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-					ast_verbose("GSM channel=\"%s\": module switch to suspend state\n", ch_gsm->alias);
-					ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
-					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-					ch_gsm->flags.suspend_now = 0;
-				}
+				// disable GSM module functionality
+				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 
-				if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND) {
-					// wake up SIM
-					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
-					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
-				}
+				ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
+				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+
+				// wake up SIM
+				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
+				x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 			}
 		}
 		// smssend
@@ -10531,6 +11761,14 @@ static void *pg_channel_gsm_workthread(void *data)
 				ch_gsm->baudrate = ch_gsm->baudrate_test;
 				ast_verb(4, "GSM channel=\"%s\": serial port work at speed = %d baud\n", ch_gsm->alias, ch_gsm->baudrate);
 // 				pg_atcommand_queue_append(ch_gsm, AT_UNKNOWN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "AT+IPR=%d;&W", ch_gsm->baudrate);
+
+				// get imei
+				pg_atcommand_queue_append(ch_gsm, AT_GSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+				// get model
+				pg_atcommand_queue_append(ch_gsm, AT_GMM, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+				// get firmware
+				pg_atcommand_queue_append(ch_gsm, AT_GMR, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+
 
 				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 
@@ -15937,9 +17175,9 @@ static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, i
 					if (a->argc == 6) {
 						if ((res = imei_is_valid(a->argv[5])) == EIMEI_VALID) {
 							strcpy(ch_gsm->imei_new, a->argv[5]);
-							ast_cli(a->fd, " - IMEI=\"%s\" valid - ", a->argv[5]);
+							ast_cli(a->fd, "IMEI=\"%s\" valid - ", a->argv[5]);
 						} else 
-							ast_cli(a->fd, " - IMEI=\"%s\" invalid: %s - ", a->argv[5], imei_strerror(-res));
+							ast_cli(a->fd, "IMEI=\"%s\" invalid: %s - ", a->argv[5], imei_strerror(-res));
 					}
 					// start GSM channel workthread
 					ch_gsm->flags.enable = 1;
@@ -15997,101 +17235,10 @@ static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, i
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_cli_channel_gsm_action_suspend_resume()
-//------------------------------------------------------------------------------
-static char *pg_cli_channel_gsm_action_suspend_resume(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
-{
-	struct pg_channel_gsm *ch_gsm;
-	struct pg_call_gsm *call;
-
-	size_t total;
-
-	switch (cmd)
-	{
-		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		case CLI_INIT:
-			ast_cli(a->fd, "is ch_act_pwr subhandler -- CLI_INIT unsupported in this context\n");
-			return CLI_FAILURE;
-		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		case CLI_GENERATE:
-			return NULL;
-		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		case CLI_HANDLER:
-			break;
-		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		default:
-			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
-			return CLI_FAILURE;
-	}
-
-	total = 0;
-	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-	{
-		ast_mutex_lock(&ch_gsm->lock);
-		if (!strcmp(a->argv[3], "all") || !strcmp(a->argv[3], ch_gsm->alias)) {
-			total++;
-			ast_cli(a->fd, "  GSM channel=\"%s\": ", ch_gsm->alias);
-			if (!strcmp(a->argv[4], "suspend")) {
-				// suspend
-				ast_cli(a->fd, "suspend...\n");
-				if (ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) {
-					// stop all timers
-					memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-					// hangup active calls
-					while (pg_channel_gsm_get_calls_count(ch_gsm))
-					{
-						AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-						{
-							pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
-							break;
-						}
-						ast_mutex_unlock(&ch_gsm->lock);
-						usleep(1000);
-						ast_mutex_lock(&ch_gsm->lock);
-					}
-					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-					ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
-					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-					x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
-				} else if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SUSPEND) {
-					ast_cli(a->fd, " module now is suspended\n");
-				} else if ((ch_gsm->state == PG_CHANNEL_GSM_STATE_CHECK_PIN) || (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_CALL_READY))
-				  	ch_gsm->flags.suspend_now = 1;
-				else
-					ast_cli(a->fd, " switching to suspend state from \"%s\" not allowed\n", pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-			} else {
-				// resume
-				ast_cli(a->fd, "resume...\n");
-				if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SUSPEND) {
-					// wake up SIM
-					ch_gsm->flags.resume_now = 1;
-					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
-					x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
-					// set new state
-					ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
-					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-				} else
-					ast_cli(a->fd, " switching to run state from \"%s\" not allowed\n", pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-			}
-		}
-		ast_mutex_unlock(&ch_gsm->lock);
-	}
-
-	if (!total)
-		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
-
-	return CLI_SUCCESS;
-}
-//------------------------------------------------------------------------------
-// end of pg_cli_channel_gsm_action_suspend_resume()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
 // pg_cli_channel_gsm_action_param()
 //------------------------------------------------------------------------------
 static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
-	int pos;
 	int tmpi;
 	float tmpf;
 	struct pg_channel_rtp *rtp;
@@ -16106,22 +17253,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 	struct pg_trunk_gsm *tr_gsm;
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold;
 	char *cp;
-	unsigned char tmpchr;
 	char tmpbuf[256];
-	char imei_buf[16];
-	int imei_len;
-	char imei_check_digit;
-	struct x_timer timer;
-	int res;
-	struct timeval tv;
-#ifdef HAVE_ASTERISK_SELECT_H
-	ast_fdset fds;
-#else
-	fd_set fds;
-#endif
-	struct termios old_termios;
-	struct termios raw_termios;
-	int old_state;
 
 	switch (cmd)
 	{
@@ -16449,411 +17581,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_IMEI:
-							// check IMEI for valid length
-							imei_len = strlen(a->argv[6]);
-							if ((imei_len != 14) && (imei_len != 15)) {
-								ast_cli(a->fd, " - IMEI=%s has wrong length=%d\n", a->argv[6], imei_len);
-								break;
-							}
-							// copy IMEI
-							memset(imei_buf, 0, 16);
-							memcpy(imei_buf, a->argv[6], (imei_len < 15)?(imei_len):(15));
-							// calc IMEI check digit
-							if ((tmpi = imei_calc_check_digit(imei_buf)) < 0) {
-								if (tmpi == -2)
-									ast_cli(a->fd, " - IMEI is too short\n");
-								if (tmpi == -3)
-									ast_cli(a->fd, " - IMEI has illegal character\n");
-								else
-									ast_cli(a->fd, " - can't calc IMEI check digit\n");
-								break;
-							}
-							imei_check_digit = (char)tmpi;
-							if (imei_len == 15) {
-								if (imei_check_digit != imei_buf[14]) {
-									ast_cli(a->fd, " - IMEI=%s has wrong check digit \"%c\" must be \"%c\"\n", a->argv[6], imei_buf[14], imei_check_digit);
-									break;
-								}
-							}
-
-							ast_cli(a->fd, " - write IMEI=%.*s(%c)...\n", 14, a->argv[6], imei_check_digit);
-							imei_buf[14] = imei_check_digit;
-
-							// check channel state
-							if ((ch_gsm->state != PG_CHANNEL_GSM_STATE_RUN) &&
-									(ch_gsm->state != PG_CHANNEL_GSM_STATE_WAIT_SUSPEND) &&
-										(ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND)) {
-								ast_cli(a->fd, "  GSM channel=\"%s\": unaplicable state \"%s\" - must be \"run\", \"wait for suspend\" or \"suspend\"\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-								break;
-							}
-							// store initial state
-							old_state = ch_gsm->state;
-							// backup termios
-							if (tcgetattr(ch_gsm->tty_fd, &old_termios)) {
-								ast_cli(a->fd, "  GSM channel=\"%s\": tcgetattr() error: %s\n", ch_gsm->alias, strerror(errno));
-								break;
-							}
-							if (tcgetattr(ch_gsm->tty_fd, &raw_termios)) {
-								ast_cli(a->fd, "  GSM channel=\"%s\": tcgetattr() error: %s\n", ch_gsm->alias, strerror(errno));
-								break;
-							}
-							//  check for IMEI is the same
-							if (!strcmp(ch_gsm->imei, imei_buf)) {
-								ast_cli(a->fd, "  GSM channel=\"%s\": this IMEI value already set\n", ch_gsm->alias);
-								break;
-							}
-							ast_cli(a->fd, "  GSM channel=\"%s\": check for suspend...", ch_gsm->alias);
-							// action for RUN state
-							if (ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) {
-								// check channel for active calls
-								if (pg_channel_gsm_get_calls_count(ch_gsm)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": has active call - try later\n", ch_gsm->alias);
-									break;
-								}
-								// stop all timers
-								memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
-								pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-								ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
-								ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-								x_timer_set(ch_gsm->timers.waitsuspend, waitsuspend_timeout);
-							}
-							// action for WAIT_SUSPEND state
-							if (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_SUSPEND) {
-								tmpi = 30;
-								while (tmpi-- > 0)
-								{
-									if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SUSPEND)
-										break;
-									// waiting
-									ast_mutex_unlock(&ch_gsm->lock);
-									sleep(1);
-									ast_mutex_lock(&ch_gsm->lock);
-								}
-							}
-							// check for SUSPEND state
-							if (ch_gsm->state != PG_CHANNEL_GSM_STATE_SUSPEND) {
-								ast_cli(a->fd, "failed\n");
-								break;
-							}
-							ast_cli(a->fd, "succeeded\n");
-
-							// hardware depend procedure
-							if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
-								// SIM300
-								// set raw termios
-								cfmakeraw(&raw_termios);
-								if (tcsetattr(ch_gsm->tty_fd, TCSANOW, &raw_termios)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
-									goto pg_channel_gsm_imei_set_end;
-								}
-								// select AUXILARY channel of SERIAL port
-								ch_gsm->flags.main_tty = 0;
-								if (pg_channel_gsm_serial_set(ch_gsm, 1) < 0) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": can't switch serial port to auxilary channel: %s\n", ch_gsm->alias, strerror(errno));
-									goto pg_channel_gsm_imei_set_end;
-								}
-								if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
-									goto pg_channel_gsm_imei_set_end;
-								}
-								// imei data1
-								sim300_build_imei_data1(tmpbuf, &tmpi);
-								// write imei data1
-								pos = 0;
-								x_timer_set_second(timer, 10);
-								while (is_x_timer_active(timer))
-								{
-									tv.tv_sec = 1;
-									tv.tv_usec = 0;
-									FD_ZERO(&fds);
-									FD_SET(ch_gsm->tty_fd, &fds);
-									ast_mutex_unlock(&ch_gsm->lock);
-									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
-									ast_mutex_lock(&ch_gsm->lock);
-									// check select result code
-									if (res > 0) {
-										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
-											if ((res = write(ch_gsm->tty_fd, &tmpbuf[pos], tmpi)) < 0) {
-												ast_cli(a->fd, "  GSM channel=\"%s\": write(imei data1): %s\n", ch_gsm->alias, strerror(errno));
-												goto pg_channel_gsm_imei_set_end;
-											} else {
-												tmpi -= res;
-												pos += res;
-												if (tmpi <= 0) break;
-											}
-										}
-									} else if (res < 0) {
-										ast_cli(a->fd, "  GSM channel=\"%s\": select(write imei data1): %s\n", ch_gsm->alias, strerror(errno));
-										goto pg_channel_gsm_imei_set_end;
-									}
-								}
-								if (is_x_timer_fired(timer)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": write imei data1 - time is out\n", ch_gsm->alias);
-									goto pg_channel_gsm_imei_set_end;
-								}
-								// wait for 0x06 from GSM module
-								x_timer_set_second(timer, 10);
-								while (is_x_timer_active(timer))
-								{
-									tv.tv_sec = 1;
-									tv.tv_usec = 0;
-									FD_ZERO(&fds);
-									FD_SET(ch_gsm->tty_fd, &fds);
-									ast_mutex_unlock(&ch_gsm->lock);
-									res = ast_select(ch_gsm->tty_fd + 1, &fds, NULL, NULL, &tv);
-									ast_mutex_lock(&ch_gsm->lock);
-									// check select result code
-									if (res > 0) {
-										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
-											if ((res = read(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
-												if (errno != EAGAIN) {
-													ast_cli(a->fd, "  GSM channel=\"%s\": read(wait for 0x06 imei data1): %s\n", ch_gsm->alias, strerror(errno));
-													goto pg_channel_gsm_imei_set_end;
-												}
-											} else {
-												if (tmpchr == 0x06) break;
-											}
-										}
-									} else if (res < 0) {
-										ast_cli(a->fd, "  GSM channel=\"%s\": select(wait for 0x06 imei data1): %s\n", ch_gsm->alias, strerror(errno));
-										goto pg_channel_gsm_imei_set_end;
-									}
-								}
-								if (is_x_timer_fired(timer)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": wait for 0x06 imei data1 - time is out\n", ch_gsm->alias);
-									goto pg_channel_gsm_imei_set_end;
-								}
-								// imei data2
-								sim300_build_imei_data2(tmpbuf, &tmpi);
-								// write imei data2
-								pos = 0;
-								x_timer_set_second(timer, 10);
-								while (is_x_timer_active(timer))
-								{
-									tv.tv_sec = 1;
-									tv.tv_usec = 0;
-									FD_ZERO(&fds);
-									FD_SET(ch_gsm->tty_fd, &fds);
-									ast_mutex_unlock(&ch_gsm->lock);
-									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
-									ast_mutex_lock(&ch_gsm->lock);
-									// check select result code
-									if (res > 0) {
-										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
-											if ((res = write(ch_gsm->tty_fd, &tmpbuf[pos], tmpi)) < 0) {
-												ast_cli(a->fd, "  GSM channel=\"%s\": write(imei data2): %s\n", ch_gsm->alias, strerror(errno));
-												goto pg_channel_gsm_imei_set_end;
-											} else {
-												tmpi -= res;
-												pos += res;
-												if (tmpi <= 0) break;
-											}
-										}
-									} else if (res < 0) {
-										ast_cli(a->fd, "  GSM channel=\"%s\": select(write imei data2): %s\n", ch_gsm->alias, strerror(errno));
-										goto pg_channel_gsm_imei_set_end;
-									}
-								}
-								if (is_x_timer_fired(timer)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": write imei data2 - time is out\n", ch_gsm->alias);
-									goto pg_channel_gsm_imei_set_end;
-								}
-								// wait for 0x06 from GSM module
-								x_timer_set_second(timer, 10);
-								while (is_x_timer_active(timer))
-								{
-									tv.tv_sec = 1;
-									tv.tv_usec = 0;
-									FD_ZERO(&fds);
-									FD_SET(ch_gsm->tty_fd, &fds);
-									ast_mutex_unlock(&ch_gsm->lock);
-									res = ast_select(ch_gsm->tty_fd + 1, &fds, NULL, NULL, &tv);
-									ast_mutex_lock(&ch_gsm->lock);
-									// check select result code
-									if (res > 0) {
-										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
-											if ((res = read(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
-												if (errno != EAGAIN) {
-													ast_cli(a->fd, "  GSM channel=\"%s\": read(wait for 0x06 imei data2): %s\n", ch_gsm->alias, strerror(errno));
-													goto pg_channel_gsm_imei_set_end;
-												}
-											} else {
-												if (tmpchr == 0x06) break;
-											}
-										}
-									} else if (res < 0) {
-										ast_cli(a->fd, "  GSM channel=\"%s\": select(wait for 0x06 imei data2): %s\n", ch_gsm->alias, strerror(errno));
-										goto pg_channel_gsm_imei_set_end;
-									}
-								}
-								if (is_x_timer_fired(timer)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": wait for 0x06 imei data2 - time is out\n", ch_gsm->alias);
-									goto pg_channel_gsm_imei_set_end;
-								}
-								// write 0x06
-								tmpchr = 0x06;
-								x_timer_set_second(timer, 10);
-								while (is_x_timer_active(timer))
-								{
-									tv.tv_sec = 1;
-									tv.tv_usec = 0;
-									FD_ZERO(&fds);
-									FD_SET(ch_gsm->tty_fd, &fds);
-									ast_mutex_unlock(&ch_gsm->lock);
-									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
-									ast_mutex_lock(&ch_gsm->lock);
-									// check select result code
-									if (res > 0) {
-										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
-											if ((res = write(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
-												ast_cli(a->fd, "  GSM channel=\"%s\": write(0x06 a): %s\n", ch_gsm->alias, strerror(errno));
-												goto pg_channel_gsm_imei_set_end;
-											} else
-												break;
-										}
-									} else if (res < 0) {
-										ast_cli(a->fd, "  GSM channel=\"%s\": select(write 0x06 a): %s\n", ch_gsm->alias, strerror(errno));
-										goto pg_channel_gsm_imei_set_end;
-									}
-								}
-								if (is_x_timer_fired(timer)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": write 0x06 a - time is out\n", ch_gsm->alias);
-									goto pg_channel_gsm_imei_set_end;
-								}
-								// build imei data3
-								sim300_build_imei_data3(imei_buf, imei_check_digit, tmpbuf, &tmpi);
-								// write imei data3
-								pos = 0;
-								x_timer_set_second(timer, 10);
-								while (is_x_timer_active(timer))
-								{
-									tv.tv_sec = 1;
-									tv.tv_usec = 0;
-									FD_ZERO(&fds);
-									FD_SET(ch_gsm->tty_fd, &fds);
-									ast_mutex_unlock(&ch_gsm->lock);
-									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
-									ast_mutex_lock(&ch_gsm->lock);
-									// check select result code
-									if (res > 0) {
-										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
-											if ((res = write(ch_gsm->tty_fd, &tmpbuf[pos], tmpi)) < 0) {
-												ast_cli(a->fd, "  GSM channel=\"%s\": write(imei data3): %s\n", ch_gsm->alias, strerror(errno));
-												goto pg_channel_gsm_imei_set_end;
-											} else {
-												tmpi -= res;
-												pos += res;
-												if (tmpi <= 0) break;
-											}
-										}
-									} else if (res < 0) {
-										ast_cli(a->fd, "  GSM channel=\"%s\": select(write imei data3): %s\n", ch_gsm->alias, strerror(errno));
-										goto pg_channel_gsm_imei_set_end;
-									}
-								}
-								if (is_x_timer_fired(timer)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": write imei data3 - time is out\n", ch_gsm->alias);
-									goto pg_channel_gsm_imei_set_end;
-								}
-								// wait for 0x06 from GSM module
-								x_timer_set_second(timer, 10);
-								while (is_x_timer_active(timer))
-								{
-									tv.tv_sec = 1;
-									tv.tv_usec = 0;
-									FD_ZERO(&fds);
-									FD_SET(ch_gsm->tty_fd, &fds);
-									ast_mutex_unlock(&ch_gsm->lock);
-									res = ast_select(ch_gsm->tty_fd + 1, &fds, NULL, NULL, &tv);
-									ast_mutex_lock(&ch_gsm->lock);
-									// check select result code
-									if (res > 0) {
-										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
-											if ((res = read(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
-												if (errno != EAGAIN) {
-													ast_cli(a->fd, "  GSM channel=\"%s\": read(wait for 0x06 imei data3): %s\n", ch_gsm->alias, strerror(errno));
-													goto pg_channel_gsm_imei_set_end;
-												}
-											} else {
-												if (tmpchr == 0x06) break;
-											}
-										}
-									} else if (res < 0) {
-										ast_cli(a->fd, "  GSM channel=\"%s\": select(wait for 0x06 imei data3): %s\n", ch_gsm->alias, strerror(errno));
-										goto pg_channel_gsm_imei_set_end;
-									}
-								}
-								if (is_x_timer_fired(timer)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": wait for 0x06 imei data3 - time is out\n", ch_gsm->alias);
-									goto pg_channel_gsm_imei_set_end;
-								}
-								// write 0x06
-								tmpchr = 0x06;
-								x_timer_set_second(timer, 10);
-								while (is_x_timer_active(timer))
-								{
-									tv.tv_sec = 1;
-									tv.tv_usec = 0;
-									FD_ZERO(&fds);
-									FD_SET(ch_gsm->tty_fd, &fds);
-									ast_mutex_unlock(&ch_gsm->lock);
-									res = ast_select(ch_gsm->tty_fd + 1, NULL, &fds, NULL, &tv);
-									ast_mutex_lock(&ch_gsm->lock);
-									// check select result code
-									if (res > 0) {
-										if (FD_ISSET(ch_gsm->tty_fd, &fds)) {
-											if ((res = write(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
-												ast_cli(a->fd, "  GSM channel=\"%s\": write(0x06 b): %s\n", ch_gsm->alias, strerror(errno));
-												goto pg_channel_gsm_imei_set_end;
-											} else
-												break;
-										}
-									} else if (res < 0) {
-										ast_cli(a->fd, "  GSM channel=\"%s\": select(write 0x06 b): %s\n", ch_gsm->alias, strerror(errno));
-										goto pg_channel_gsm_imei_set_end;
-									}
-								}
-								if (is_x_timer_fired(timer)) {
-									ast_cli(a->fd, "  GSM channel=\"%s\": write 0x06 b - time is out\n", ch_gsm->alias);
-									goto pg_channel_gsm_imei_set_end;
-								}
-							} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
-								// M10
-								pg_atcommand_queue_append(ch_gsm, AT_M10_EGMR, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1,7,\"%s\"", imei_buf);
-							} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
-								// SIM900
-								ast_cli(a->fd, "  GSM channel=\"%s\": IMEI change command for SIM900 under working\n", ch_gsm->alias);
-								goto pg_channel_gsm_imei_set_end;
-							} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
-								// SIM5215
-								ast_cli(a->fd, "  GSM channel=\"%s\": IMEI change command for SIM5215 under working\n", ch_gsm->alias);
-								goto pg_channel_gsm_imei_set_end;
-							} else {
-								// UNKNOWN
-								ast_cli(a->fd, "  GSM channel=\"%s\": unknown module type\n", ch_gsm->alias);
-								goto pg_channel_gsm_imei_set_end;
-							}
-							ch_gsm->imei[0] = '\0';
-							ast_cli(a->fd, "  GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
-pg_channel_gsm_imei_set_end:
-							// restore old termios
-							if (tcsetattr(ch_gsm->tty_fd, TCSANOW, &old_termios))
-								ast_cli(a->fd, "  GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
-							// select MAIN channel of SERIAL port
-							ch_gsm->flags.main_tty = 1;
-							if (pg_channel_gsm_serial_set(ch_gsm, 0) < 0)
-								ast_cli(a->fd, "  GSM channel=\"%s\": can't switch serial port to main channel: %s\n", ch_gsm->alias, strerror(errno));
-							if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0)
-								ast_cli(a->fd, "  GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
-							// restore previous state
-							if (old_state == PG_CHANNEL_GSM_STATE_RUN) {
-								ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
-								ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-								ch_gsm->flags.resume_now = 1;
-								// wake up SIM
-								pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1");
-								x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
-							}
+							ast_cli(a->fd, " - unsupported operation\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NUMBER:

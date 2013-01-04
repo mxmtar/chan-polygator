@@ -59,7 +59,7 @@ static unsigned char sim900_comparision_for_downloaded_information[13] = {
 */
 static const char *sim900bfw_usage = "Usage: sim900bfw -d <device> [-f <firmware>] [-h <File of Intel HEX>]\n";
 static const char *intel_hex_default = "flash_nor_16bits_hwasic_evp_4902_rel.hex";
-static const char *sim900_firmware_default = "1137B09SIM900M64_ST_DTMF_JD_MMS.cla";
+static const char *sim900_firmware_default = "1137B08SIM900M64_ST_DTMF_JD_MMS.cla";
 
 struct sim900_cmd_sel_mem_reg {
 	u_int8_t command;
@@ -505,7 +505,6 @@ int main(int argc, char **argv)
 						goto main_end;
 					}
 				} else if (res == 1) {
-// 					printf("read 0x%02x - %c\n", (unsigned char)t_char, isprint(t_char)?t_char:'?');
 					if (t_char == 0x16)
 						break;	// synchronous octet received
 				}
@@ -520,10 +519,6 @@ int main(int argc, char **argv)
 		printf("run in normal mode - quit from program\n");
 		goto main_end;
 	}
-// 	if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 0) < 0) {
-// 		printf("pg_channel_gsm_key_press() error: %s\n", strerror(errno));
-// 		goto main_end;
-// 	}
 	if (tcflush(tty_fd, TCIOFLUSH) < 0)
 		printf("can't flush tty device: %s\n", strerror(errno));
 	// entering into downloading procedure
@@ -1356,14 +1351,10 @@ main_end:
 		// close TTY device
 		close(tty_fd);
 		// disable GSM module
-		if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 0) < 0) {
+		if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 0) < 0)
 			printf("pg_channel_gsm_key_press() error: %s\n", strerror(errno));
-			goto main_end;
-		}
-		if (pg_channel_gsm_power_set(board_fpath, pos_on_board, 0) < 0) {
+		if (pg_channel_gsm_power_set(board_fpath, pos_on_board, 0) < 0)
 			printf("pg_channel_gsm_power_set() error: %s\n", strerror(errno));
-			goto main_end;
-		}
 	}
 	close(fw_fd);
 	exit(EXIT_SUCCESS);

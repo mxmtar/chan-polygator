@@ -421,10 +421,6 @@ int main(int argc, char **argv)
 		printf("run in normal mode - quit from program\n");
 		goto main_end;
 	}
-// 	if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 0) < 0) {
-// 		printf("pg_channel_gsm_key_press() error: %s\n", strerror(errno));
-// 		goto main_end;
-// 	}
 	if (tcflush(tty_fd, TCIOFLUSH) < 0)
 		printf("can't flush tty device: %s\n", strerror(errno));
 	// entering into downloading procedure
@@ -928,7 +924,7 @@ int main(int argc, char **argv)
 	printf("succeeded\n");
 
 	// FLASH erase
-	printf("FLASH erase");
+	printf("FLASH erase...");
 	fflush(stdout);
 
 	x_timer_set_second(timer, 1);
@@ -1448,14 +1444,10 @@ main_end:
 		// close TTY device
 		close(tty_fd);
 		// disable GSM module
-		if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 0) < 0) {
+		if (pg_channel_gsm_key_press(board_fpath, pos_on_board, 0) < 0)
 			printf("pg_channel_gsm_key_press() error: %s\n", strerror(errno));
-			goto main_end;
-		}
-		if (pg_channel_gsm_power_set(board_fpath, pos_on_board, 0) < 0) {
+		if (pg_channel_gsm_power_set(board_fpath, pos_on_board, 0) < 0)
 			printf("pg_channel_gsm_power_set() error: %s\n", strerror(errno));
-			goto main_end;
-		}
 	}
 	exit(EXIT_SUCCESS);
 }
