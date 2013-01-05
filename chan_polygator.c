@@ -892,7 +892,7 @@ static struct pg_generic_param pg_vinetic_ali_nelec_nlpms[] = {
 	PG_GENERIC_PARAM("white", VIN_NLPM_WHITE_NOISE),
 };
 
-static x_timeout_global(waitrdy_timeout, 20, 0);
+static x_timeout_global(waitrdy_timeout, 8, 0);
 static x_timeout_global(waitsuspend_timeout, 30, 0);
 static x_timeout_global(testfun_timeout, 10, 0);
 static x_timeout_global(testfunsend_timeout, 1, 0);
