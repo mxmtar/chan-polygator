@@ -62,11 +62,56 @@
 		<syntax>
 			<xi:include xpointer="xpointer(/docs/manager[@name='Login']/syntax/parameter[@name='ActionID'])" />
 			<parameter name="Channel">
-				<para>Specify the GSM channel to show.  Show all GSM channels if not present.</para>
+				<para>Specify the GSM channel to show. Show all GSM channels if not present.</para>
 			</parameter>
 		</syntax>
 		<description>
 			<para>Similar to the CLI command "polygator show gsm netinfo".</para>
+		</description>
+	</manager>
+	<manager name="PolygatorShowGSMDevinfo" language="en_US">
+		<synopsis>
+			Show GSM device information of Polygator channels.
+		</synopsis>
+		<syntax>
+			<xi:include xpointer="xpointer(/docs/manager[@name='Login']/syntax/parameter[@name='ActionID'])" />
+			<parameter name="Channel">
+				<para>Specify the GSM channel to show. Show all GSM channels if not present.</para>
+			</parameter>
+		</syntax>
+		<description>
+			<para>Similar to the CLI command "polygator show gsm devinfo".</para>
+		</description>
+	</manager>
+	<manager name="PolygatorChannelGSMEnable" language="en_US">
+		<synopsis>
+			Polygator channel GSM enable.
+		</synopsis>
+		<syntax>
+			<xi:include xpointer="xpointer(/docs/manager[@name='Login']/syntax/parameter[@name='ActionID'])" />
+			<parameter name="Channel">
+				<para>Specify the GSM channel to enable.</para>
+			</parameter>
+			<parameter name="IMEI">
+				<para>Specify IMEI for set on specified channel. GSM channel use old IMEI if not present.</para>
+			</parameter>
+		</syntax>
+		<description>
+			<para>Similar to the CLI command "polygator channel gsm <channel> enable".</para>
+		</description>
+	</manager>
+	<manager name="PolygatorChannelGSMDisable" language="en_US">
+		<synopsis>
+			Polygator channel GSM disable.
+		</synopsis>
+		<syntax>
+			<xi:include xpointer="xpointer(/docs/manager[@name='Login']/syntax/parameter[@name='ActionID'])" />
+			<parameter name="Channel">
+				<para>Specify the GSM channel to disable.</para>
+			</parameter>
+		</syntax>
+		<description>
+			<para>Similar to the CLI command "polygator channel gsm <channel> disable".</para>
 		</description>
 	</manager>
  ***/
@@ -676,7 +721,7 @@ static char *pg_cli_show_trunks(struct ast_cli_entry *e, int cmd, struct ast_cli
 static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
-static char *pg_cli_show_devinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_show_gsm_devinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_board(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
@@ -694,7 +739,7 @@ static struct ast_cli_entry pg_cli[] = {
 	AST_CLI_DEFINE(pg_cli_show_calls, "Show PG calls information summary"),
 	AST_CLI_DEFINE(pg_cli_show_gsm_call_stat_out, "Show PG outgoing GSM calls statistic"),
 	AST_CLI_DEFINE(pg_cli_show_gsm_netinfo, "Show PG GSM network information summary"),
-	AST_CLI_DEFINE(pg_cli_show_devinfo, "Show PG device information summary"),
+	AST_CLI_DEFINE(pg_cli_show_gsm_devinfo, "Show PG GSM device information summary"),
 	AST_CLI_DEFINE(pg_cli_show_board, "Show PG board information"),
 	AST_CLI_DEFINE(pg_cli_show_vinetic, "Show VINETIC information"),
 	AST_CLI_DEFINE(pg_cli_show_channel_gsm, "Show PG GSM channel information"),
@@ -6651,6 +6696,7 @@ static void *pg_channel_gsm_workthread(void *data)
 
 	ast_debug(4, "GSM channel=\"%s\": thread start\n", ch_gsm->alias);
 	ast_verbose("%s: GSM channel=\"%s\" enabled\n", AST_MODULE, ch_gsm->alias);
+	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelGSMPwrstatus", "Channel: %s\r\nStatus: enabled\r\n", ch_gsm->alias);
 
 	ast_mutex_lock(&ch_gsm->lock);
 	res = ch_gsm->power_sequence_number;
@@ -7616,6 +7662,7 @@ static void *pg_channel_gsm_workthread(void *data)
 									ch_gsm->reg_stat = parser_ptrs.creg_rd->stat;
 									if (ch_gsm->reg_stat_old != ch_gsm->reg_stat) {
 										ast_verbose("%s: GSM channel=\"%s\": registration status - %s\n", AST_MODULE, ch_gsm->alias, reg_status_print(ch_gsm->reg_stat));
+										manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelGSMRegstatus", "Channel: %s\r\nStatus: %s\r\n", ch_gsm->alias, reg_status_print(ch_gsm->reg_stat));
 										// processing registaration status
 										if ((ch_gsm->reg_stat == REG_STAT_NOTREG_NOSEARCH) || (ch_gsm->reg_stat == REG_STAT_REG_DENIED)) {
 											// "0" no search, "3" denied
@@ -12057,6 +12104,7 @@ pg_channel_gsm_workthread_end:
 	ch_gsm->thread = AST_PTHREADT_NULL;
 	ast_debug(4, "GSM channel=\"%s\": thread stop\n", ch_gsm->alias);
 	ast_verbose("%s: GSM channel=\"%s\" disabled\n", AST_MODULE, ch_gsm->alias);
+	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelGSMPwrstatus", "Channel: %s\r\nStatus: disabled\r\n", ch_gsm->alias);
 	ast_mutex_unlock(&ch_gsm->lock);
 	return NULL;
 }
@@ -16412,7 +16460,7 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 //------------------------------------------------------------------------------
 // pg_man_show_gsm_netinfo()
 //------------------------------------------------------------------------------
-const char *pg_man_show_gsm_netinfo_synopsis = "Show GSM network information of Polygator channels.";
+static const char *pg_man_show_gsm_netinfo_synopsis = "Show GSM network information of Polygator channels.";
 static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m)
 {
 	struct pg_channel_gsm *ch_gsm;
@@ -16476,9 +16524,9 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_cli_show_devinfo()
+// pg_cli_show_gsm_devinfo()
 //------------------------------------------------------------------------------
-static char *pg_cli_show_devinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+static char *pg_cli_show_gsm_devinfo(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	size_t count;
 	size_t total;
@@ -16498,8 +16546,8 @@ static char *pg_cli_show_devinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 	{
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
-			e->command = "polygator show devinfo";
-			e->usage = "Usage: polygator show devinfo\n";
+			e->command = "polygator show gsm devinfo";
+			e->usage = "Usage: polygator show gsm devinfo\n";
 			return NULL;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_GENERATE:
@@ -16576,7 +16624,68 @@ static char *pg_cli_show_devinfo(struct ast_cli_entry *e, int cmd, struct ast_cl
 	return CLI_SUCCESS;
 }
 //------------------------------------------------------------------------------
-// end of pg_cli_show_devinfo()
+// end of pg_cli_show_gsm_devinfo()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_man_show_gsm_devinfo()
+//------------------------------------------------------------------------------
+static const char *pg_man_show_gsm_devinfo_synopsis = "Show GSM device information of Polygator channels.";
+static int pg_man_show_gsm_devinfo(struct mansession *s, const struct message *m)
+{
+	struct pg_channel_gsm *ch_gsm;
+	const char *id = astman_get_header(m, "ActionID");
+	const char *alias = astman_get_header(m, "Channel");
+	char idText[256] = "";
+	size_t total = 0;
+
+	astman_send_ack(s, m, "Polygator GSM channel device information will follow");
+	if (!ast_strlen_zero(id)) snprintf(idText, sizeof(idText), "ActionID: %s\r\n", id);
+
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
+	{
+		ast_mutex_lock(&ch_gsm->lock);
+
+		if (ast_strlen_zero(alias) || !strcmp(alias, ch_gsm->alias)) {
+
+			astman_append(s,
+				"Event: PolygatorShowGSMDevinfo\r\n"
+				"%s"
+				"Channel: %s\r\n"
+				"Device: %s\r\n"
+				"Module: %s\r\n"
+				"Status: %s\r\n"
+				"Hardware: %s\r\n"
+				"Firmware: %s\r\n"
+				"IMEI: %s\r\n"
+				"\r\n",
+				idText,
+				ch_gsm->alias,
+				ch_gsm->device,
+				pg_gsm_module_type_to_string(ch_gsm->gsm_module_type),
+				ch_gsm->flags.enable?"enabled":"disabled",
+				ch_gsm->model?ch_gsm->model:"unknown",
+				ch_gsm->firmware?ch_gsm->firmware:"unknown",
+				ast_strlen_zero(ch_gsm->imei)?"unknown":ch_gsm->imei);
+
+			total++;
+		}
+
+		ast_mutex_unlock(&ch_gsm->lock);
+	}
+
+	astman_append(s, 
+				  "Event: PolygatorShowGSMDevinfoComplete\r\n"
+				  "%s"
+				  "Items: %lu\r\n"
+				  "\r\n",
+			   idText,
+			   (unsigned long int)total);
+
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_man_show_gsm_devinfo()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -17157,7 +17266,7 @@ static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, i
 
 	if (a->argc < 5) {
 		snprintf(pg_cli_channel_gsm_actions_usage, sizeof(pg_cli_channel_gsm_actions_usage),
-				"Usage: polygator channel gsm <channel> enbale|disable [<imei>]\n");
+				"Usage: polygator channel gsm <channel> enable|disable [<imei>]\n");
 		return CLI_SHOWUSAGE;
 	}
 
@@ -17233,6 +17342,96 @@ static char *pg_cli_channel_gsm_action_enable_disable(struct ast_cli_entry *e, i
 }
 //------------------------------------------------------------------------------
 // end of pg_cli_channel_gsm_action_enable_disable()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_man_channel_gsm_enable()
+//------------------------------------------------------------------------------
+static const char *pg_man_channel_gsm_enable_synopsis = "Polygator channel GSM enable.";
+static int pg_man_channel_gsm_enable(struct mansession *s, const struct message *m)
+{
+	char msgbuf[256];
+	struct pg_channel_gsm *ch_gsm;
+	const char *alias = astman_get_header(m, "Channel");
+	const char *imei = astman_get_header(m, "IMEI");
+
+	if (!ast_strlen_zero(alias)) {
+		ch_gsm = pg_get_channel_gsm_by_name(alias);
+		if (ch_gsm) {
+
+			ast_mutex_lock(&ch_gsm->lock);
+
+			if (!ch_gsm->flags.enable) {
+				// check for additional IMEI present
+				if (ast_strlen_zero(imei) || ((!ast_strlen_zero(imei)) && (imei_is_valid(imei) == EIMEI_VALID))) {
+					if ((!ast_strlen_zero(imei)) && (imei_is_valid(imei) == EIMEI_VALID))
+						strcpy(ch_gsm->imei_new, imei);
+					// start GSM channel workthread
+					ch_gsm->flags.enable = 1;
+					ch_gsm->power_sequence_number = pg_get_channel_gsm_power_sequence_number();
+					if (ast_pthread_create_detached(&ch_gsm->thread, NULL, pg_channel_gsm_workthread, ch_gsm) < 0) {
+						astman_send_error(s, m, "Unable to start channel workthread");
+						ch_gsm->flags.enable = 0;
+						ch_gsm->thread = AST_PTHREADT_NULL;
+					} else
+						astman_send_ack(s, m, "Wait for channel registration");
+				} else {
+					snprintf(msgbuf, sizeof(msgbuf), "Invalid IMEI (%s)", imei_strerror(-imei_is_valid(imei)));
+					astman_send_error(s, m, msgbuf);
+				}
+			} else
+				astman_send_error(s, m, "Channel already enabled");
+
+			ast_mutex_unlock(&ch_gsm->lock);
+
+		} else
+			astman_send_error(s, m, "Channel not found");
+	} else
+		astman_send_error(s, m, "Channel not specified");
+
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_man_channel_gsm_enable()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_man_channel_gsm_disable()
+//------------------------------------------------------------------------------
+static const char *pg_man_channel_gsm_disable_synopsis = "Polygator channel GSM disable.";
+static int pg_man_channel_gsm_disable(struct mansession *s, const struct message *m)
+{
+	struct pg_channel_gsm *ch_gsm;
+	const char *alias = astman_get_header(m, "Channel");
+
+	if (!ast_strlen_zero(alias)) {
+		ch_gsm = pg_get_channel_gsm_by_name(alias);
+		if (ch_gsm) {
+
+			ast_mutex_lock(&ch_gsm->lock);
+
+			if (ch_gsm->flags.enable) {
+				// check shutdown flag
+				if (!ch_gsm->flags.shutdown_now) {
+					ch_gsm->flags.shutdown = 1;
+					ch_gsm->flags.shutdown_now = 1;
+					astman_send_ack(s, m, "Send shutdown signal\n");
+				} else
+					astman_send_error(s, m, "Shutdown signal already sent\n");
+			} else
+				astman_send_error(s, m, "Channel already disabled\n");
+
+			ast_mutex_unlock(&ch_gsm->lock);
+
+		} else
+			astman_send_error(s, m, "Channel not found");
+	} else
+		astman_send_error(s, m, "Channel not specified");
+
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_man_channel_gsm_disable()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -20390,6 +20589,9 @@ static void pg_cleanup(void)
 	// unregistering Polygator Manager commands
 	if (pg_man_registered) {
 		ast_manager_unregister("PolygatorShowGSMNetinfo");
+		ast_manager_unregister("PolygatorShowGSMDevinfo");
+		ast_manager_unregister("PolygatorChannelGSMEnable");
+		ast_manager_unregister("PolygatorChannelGSMDisable");
 		ast_verbose("%s: Manager commands unregistered\n", AST_MODULE);
 	}
 
@@ -21100,6 +21302,9 @@ static int pg_load(void)
 
 	// registering Polygator Manager commands
 	ast_manager_register("PolygatorShowGSMNetinfo", 0, pg_man_show_gsm_netinfo, pg_man_show_gsm_netinfo_synopsis);
+	ast_manager_register("PolygatorShowGSMDevinfo", 0, pg_man_show_gsm_devinfo, pg_man_show_gsm_devinfo_synopsis);
+	ast_manager_register("PolygatorChannelGSMEnable", 0, pg_man_channel_gsm_enable, pg_man_channel_gsm_enable_synopsis);
+	ast_manager_register("PolygatorChannelGSMDisable", 0, pg_man_channel_gsm_disable, pg_man_channel_gsm_disable_synopsis);
 	ast_verbose("%s: Manager commands registered\n", AST_MODULE);
 	pg_man_registered = 1;
 

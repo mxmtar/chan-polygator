@@ -81,3 +81,6 @@ Supported SIM900 Firmware:
 a) 1137B08SIM900M64_ST_DTMF_JD_MMS,
 b) 1137B09SIM900M64_ST_DTMF_JD_MMS.
 Removed gsm channel commands "suspend" "resume".
+08.01.13
+Add asterisk manager interface command PolygatorShowGSMDevinfo,
+PolygatorChannelGSMEnable, PolygatorChannelGSMDisable.
