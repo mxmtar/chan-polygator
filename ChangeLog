@@ -75,3 +75,9 @@ Fix trunk last used channel on channel removing.
 03.01.13
 Add support asterisk version 11.
 Change configure macro for retrieve asterisk version by calling asterisk executable with option -V.
+04.01.13
+Add SIM900 IMEI change code.
+Supported SIM900 Firmware:
+a) 1137B08SIM900M64_ST_DTMF_JD_MMS,
+b) 1137B09SIM900M64_ST_DTMF_JD_MMS.
+Removed gsm channel commands "suspend" "resume".
