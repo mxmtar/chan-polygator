@@ -6671,9 +6671,10 @@ static void *pg_channel_gsm_workthread(void *data)
 
 	// set IMEI for SIM900 GSM module
 	if (strlen(ch_gsm->imei_new)) {
-		if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
+		if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 			pg_channel_gsm_write_imei_sim900(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
-		ch_gsm->imei_new[0] = '\0';
+			ch_gsm->imei_new[0] = '\0';
+		}
 	}
 
 	// reset GSM module power control
