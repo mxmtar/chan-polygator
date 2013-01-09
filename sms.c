@@ -352,59 +352,51 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		// is abnormally - sanity check
 		if (err) *err = __LINE__;
 		goto pdu_parser_error;
-/*
-	} else if (pdu->len == pdu->full_len) {
-		// SCA not present in PDU
+	}
+
+	// SCA present in PDU
+	tlen = (unsigned char)(*cp++ & 0xff);
+	if (tlen > 9) {
+		if (err) *err = __LINE__;
+		goto pdu_parser_error;
+	}
+	if ((cp - pdu->buf) > pdu->full_len) {
+		if (err) *err = __LINE__;
+		goto pdu_parser_error;
+	}
+	if (tlen) {
+		pdu->scaddr.type.full = *cp++; // get type of sms center address
+		pdu->scaddr.length = 0;
+		tlen--;
+		tp = pdu->scaddr.value;
+		while (tlen > 0)
+		{
+			// low nibble
+			if (((*cp & 0x0f) !=  0x0f)) {
+				*tp++ = (*cp & 0x0f) + '0';
+				pdu->scaddr.length++;
+			}
+			// high nibble
+			if ((((*cp >> 4) & 0x0f) !=  0x0f)) {
+				*tp++ = ((*cp >> 4) & 0x0f) + '0';
+				pdu->scaddr.length++;
+			}
+			tlen--;
+			cp++;
+			if ((cp - pdu->buf) > pdu->full_len) {
+				if (err) *err = __LINE__;
+				goto pdu_parser_error;
+			}
+		}
+	} else {
 		sprintf(pdu->scaddr.value, "unknown");
 		pdu->scaddr.length = strlen(pdu->scaddr.value);
 		pdu->scaddr.type.bits.reserved = 1;
 		pdu->scaddr.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
 		pdu->scaddr.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
-*/
-	} else {
-		// SCA present in PDU
-		tlen = (unsigned char)(*cp++ & 0xff);
-		if (tlen > 9) {
-			if (err) *err = __LINE__;
-			goto pdu_parser_error;
-		}
-		if ((cp - pdu->buf) > pdu->full_len) {
-			if (err) *err = __LINE__;
-			goto pdu_parser_error;
-		}
-		if (tlen) {
-			pdu->scaddr.type.full = *cp++; // get type of sms center address
-			pdu->scaddr.length = 0;
-			tlen--;
-			tp = pdu->scaddr.value;
-			while (tlen > 0)
-			{
-				// low nibble
-				if (((*cp & 0x0f) !=  0x0f)) {
-					*tp++ = (*cp & 0x0f) + '0';
-					pdu->scaddr.length++;
-				}
-				// high nibble
-				if ((((*cp >> 4) & 0x0f) !=  0x0f)) {
-					*tp++ = ((*cp >> 4) & 0x0f) + '0';
-					pdu->scaddr.length++;
-				}
-				tlen--;
-				cp++;
-				if ((cp - pdu->buf) > pdu->full_len) {
-					if (err) *err = __LINE__;
-					goto pdu_parser_error;
-				}
-			}
-		} else {
-			sprintf(pdu->scaddr.value, "unknown");
-			pdu->scaddr.length = strlen(pdu->scaddr.value);
-			pdu->scaddr.type.bits.reserved = 1;
-			pdu->scaddr.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
-			pdu->scaddr.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
-		}
-		address_normalize(&pdu->scaddr);
 	}
+	address_normalize(&pdu->scaddr);
+
 	// check PDU length
 	if ((cp - pdu->buf) > pdu->full_len) {
 		if (err) *err = __LINE__;
@@ -513,7 +505,6 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			// year
 			tmc.tm_year = (tml->tm_year/100)*100 + (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
 			cp++;
-			// check PDU length
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) *err = __LINE__;
 				goto pdu_parser_error;
@@ -847,6 +838,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		if (err) *err = __LINE__;
 		goto pdu_parser_error;
 	}
+
 	// processing user data
 	pdu->concat_ref = 0;
 	pdu->concat_cnt = 1;
@@ -915,7 +907,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			}
 			olen = 0;
 			for (tlen=0; tlen<pdu->udl; tlen++)
-				olen += sprintf(cp+olen,"%02x ", (unsigned char)*(cp+tlen));
+				olen += sprintf(pdu->ud + olen, "%02x", (unsigned char)*(cp+tlen));
 		} else if (pdu->dcs.charset == DCS_CS_UCS2) {
 			// ucs2
 			// check for user data header

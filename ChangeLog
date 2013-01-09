@@ -84,3 +84,5 @@ Removed gsm channel commands "suspend" "resume".
 08.01.13
 Add asterisk manager interface command PolygatorShowGSMDevinfo,
 PolygatorChannelGSMEnable, PolygatorChannelGSMDisable.
+09.01.13
+Fix PDU data corruption on receiving with DCS 8-bit.
