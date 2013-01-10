@@ -22,13 +22,15 @@ int is_address_string(const char *buf)
 	if (!buf || !strlen(buf))
 		return 0;
 	// check first symbol
-	if ((!isdigit(*buf)) && (*buf != '+') && (*buf != '*')&& (*buf != '#'))
+	if ((!isdigit(*buf)) && (*buf != '+') && (*buf != '*')
+		&& (*buf != '#') && (*buf != 'p') && (*buf != 'w'))
 		return 0;
 	buf++;
 	// check rest symbols
 	while (*buf)
 	{
-		if (!isdigit(*buf) && (*buf != '*')&& (*buf != '#'))
+		if (!isdigit(*buf) && (*buf != '*')
+			&& (*buf != '#') && (*buf != 'p') && (*buf != 'w'))
 			return 0;
 		buf++;
 	}
@@ -41,12 +43,12 @@ int is_address_string(const char *buf)
 //------------------------------------------------------------------------------
 // is_address_equal()
 //------------------------------------------------------------------------------
-int is_address_equal(struct address *a1, struct address *a2)
+int is_address_equal(struct address *lhs, struct address *rhs)
 {
-	if (!a1 || !a2) return 0;
+	if (!lhs || !rhs) return 0;
 
-	if (a1->type.full == a2->type.full) {
-		if(strcmp(a1->value, a2->value))
+	if (lhs->type.full == rhs->type.full) {
+		if (strcmp(lhs->value, rhs->value))
 			return 0;
 	} else
 		return 0;

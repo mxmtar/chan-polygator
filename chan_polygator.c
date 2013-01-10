@@ -12884,28 +12884,28 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 	conference[0] = '\0';
 #endif
 	flags[0] = '\0';
-	if ((sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%63[0-9+]", trunk, called_name) != 2) &&
-		(sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", trunk, flags, called_name) != 3) &&
-		(sscanf(cpd, "TRUNK[%255[0-9A-Za-z-_]]/%63[0-9+]", trunk, called_name) != 2) &&
-		(sscanf(cpd, "TRUNK[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", trunk, flags, called_name) != 3) &&
-			(sscanf(cpd, "PLMN[%15[0-9A-Za-z-_]]/%63[0-9+]", plmn, called_name) != 2) &&
-			(sscanf(cpd, "PLMN[%15[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", plmn, flags, called_name) != 3) &&
-				(sscanf(cpd, "CH[%255[0-9A-Za-z-_]]/%63[0-9+]", channel, called_name) != 2) &&
-				(sscanf(cpd, "CH[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", channel, flags, called_name) != 3) &&
-				(sscanf(cpd, "CHANNEL[%255[0-9A-Za-z-_]]/%63[0-9+]", channel, called_name) != 2) &&
-				(sscanf(cpd, "CHANNEL[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", channel, flags, called_name) != 3) &&
-					(sscanf(cpd, "IMSI[%31[0-9A-Za-z-_]]/%63[0-9+]", imsi, called_name) != 2) &&
-					(sscanf(cpd, "IMSI[%31[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", imsi, flags, called_name) != 3) &&
-						(sscanf(cpd, "ICCID[%31[0-9A-Za-z-_]]/%63[0-9+]", iccid, called_name) != 2) &&
-						(sscanf(cpd, "ICCID[%31[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", iccid, flags, called_name) != 3) &&
+	if ((sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", trunk, called_name) != 2) &&
+		(sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", trunk, flags, called_name) != 3) &&
+		(sscanf(cpd, "TRUNK[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", trunk, called_name) != 2) &&
+		(sscanf(cpd, "TRUNK[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", trunk, flags, called_name) != 3) &&
+			(sscanf(cpd, "PLMN[%15[0-9A-Za-z-_]]/%63[*+pw#0-9]", plmn, called_name) != 2) &&
+			(sscanf(cpd, "PLMN[%15[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", plmn, flags, called_name) != 3) &&
+				(sscanf(cpd, "CH[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", channel, called_name) != 2) &&
+				(sscanf(cpd, "CH[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", channel, flags, called_name) != 3) &&
+				(sscanf(cpd, "CHANNEL[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", channel, called_name) != 2) &&
+				(sscanf(cpd, "CHANNEL[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", channel, flags, called_name) != 3) &&
+					(sscanf(cpd, "IMSI[%31[0-9A-Za-z-_]]/%63[*+pw#0-9]", imsi, called_name) != 2) &&
+					(sscanf(cpd, "IMSI[%31[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", imsi, flags, called_name) != 3) &&
+						(sscanf(cpd, "ICCID[%31[0-9A-Za-z-_]]/%63[*+pw#0-9]", iccid, called_name) != 2) &&
+						(sscanf(cpd, "ICCID[%31[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", iccid, flags, called_name) != 3) &&
 #if ASTERISK_VERSION_NUMBER >= 10800
-							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%63[0-9+]", conference, called_name) != 2) &&
-							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", conference, flags, called_name) != 3) &&
-							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%63[0-9+]", conference, called_name) != 2) &&
-							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", conference, flags, called_name) != 3) &&
+							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", conference, called_name) != 2) &&
+							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", conference, flags, called_name) != 3) &&
+							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", conference, called_name) != 2) &&
+							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", conference, flags, called_name) != 3) &&
 #endif
-								(sscanf(cpd, "%63[0-9+]", called_name) != 1) &&
-								(sscanf(cpd, "%255[A-Za-z]/%63[0-9+]", flags, called_name) != 2)) {
+								(sscanf(cpd, "%63[*+pw#0-9]", called_name) != 1) &&
+								(sscanf(cpd, "%255[A-Za-z]/%63[*+pw#0-9]", flags, called_name) != 2)) {
 		ast_log(LOG_WARNING, "can't parse request data=\"%s\"\n", (char *)data);
 		*cause = AST_CAUSE_INCOMPATIBLE_DESTINATION;
 		return NULL;
@@ -13645,26 +13645,26 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *dest, int timeout)
 
 	// parse destination
 	cpd = ast_strdupa(dest);
-	if ((sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
-		(sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
-		(sscanf(cpd, "TRUNK[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
-		(sscanf(cpd, "TRUNK[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
-			(sscanf(cpd, "PLMN[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
-			(sscanf(cpd, "PLMN[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
-				(sscanf(cpd, "CH[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
-				(sscanf(cpd, "CH[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
-				(sscanf(cpd, "CHANNEL[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
-				(sscanf(cpd, "CHANNEL[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
-					(sscanf(cpd, "IMSI[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
-					(sscanf(cpd, "IMSI[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
-						(sscanf(cpd, "ICCID[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
-						(sscanf(cpd, "ICCID[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
-							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
-							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
-							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%63[0-9+]", device, called_name) != 2) &&
-							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[0-9+]", device, flags, called_name) != 3) &&
-								(sscanf(cpd, "%63[0-9+]", called_name) != 1) &&
-								(sscanf(cpd, "%255[A-Za-z]/%63[0-9+]", flags, called_name) != 2)) {
+	if ((sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", device, called_name) != 2) &&
+		(sscanf(cpd, "TR[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", device, flags, called_name) != 3) &&
+		(sscanf(cpd, "TRUNK[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", device, called_name) != 2) &&
+		(sscanf(cpd, "TRUNK[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", device, flags, called_name) != 3) &&
+			(sscanf(cpd, "PLMN[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", device, called_name) != 2) &&
+			(sscanf(cpd, "PLMN[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", device, flags, called_name) != 3) &&
+				(sscanf(cpd, "CH[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", device, called_name) != 2) &&
+				(sscanf(cpd, "CH[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", device, flags, called_name) != 3) &&
+				(sscanf(cpd, "CHANNEL[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", device, called_name) != 2) &&
+				(sscanf(cpd, "CHANNEL[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", device, flags, called_name) != 3) &&
+					(sscanf(cpd, "IMSI[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", device, called_name) != 2) &&
+					(sscanf(cpd, "IMSI[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", device, flags, called_name) != 3) &&
+						(sscanf(cpd, "ICCID[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", device, called_name) != 2) &&
+						(sscanf(cpd, "ICCID[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", device, flags, called_name) != 3) &&
+							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", device, called_name) != 2) &&
+							(sscanf(cpd, "CONF[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", device, flags, called_name) != 3) &&
+							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%63[*+pw#0-9]", device, called_name) != 2) &&
+							(sscanf(cpd, "CONFERENCE[%255[0-9A-Za-z-_]]/%255[A-Za-z]/%63[*+pw#0-9]", device, flags, called_name) != 3) &&
+								(sscanf(cpd, "%63[*+pw#0-9]", called_name) != 1) &&
+								(sscanf(cpd, "%255[A-Za-z]/%63[*+pw#0-9]", flags, called_name) != 2)) {
 #if ASTERISK_VERSION_NUMBER >= 110000
 		ast_log(LOG_WARNING, "ast channel=\"%s\" has invalid called name=\"%s\"\n", ast_channel_name(ast_ch), called_name);
 #else
