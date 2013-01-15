@@ -6070,13 +6070,13 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_enable(): line %d\n", vin->name, vin->context.errorline);
 				goto pg_channel_gsm_call_incoming_end;
 			}
-			// set coder configuration RTP
-			vin_coder_config_rtp_set_timestamp(vin->context, 0);
-			if ((res = vin_coder_config_rtp(vin->context)) < 0) {
-				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
-				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): line %d\n", vin->name, vin->context.errorline);
-				goto pg_channel_gsm_call_incoming_end;
-			}
+		}
+		// set coder configuration RTP
+		vin_coder_config_rtp_set_timestamp(vin->context, 0);
+		if ((res = vin_coder_config_rtp(vin->context)) < 0) {
+			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
+			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): line %d\n", vin->name, vin->context.errorline);
+			goto pg_channel_gsm_call_incoming_end;
 		}
 		// set coder channel RTP
 		vin_coder_channel_config_rtp_set_ssrc(vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);
@@ -13701,13 +13701,13 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_enable(): line %d\n", vin->name, vin->context.errorline);
 				goto pg_gsm_requester_vinetic_end;
 			}
-			// set coder configuration RTP
-			vin_coder_config_rtp_set_timestamp(vin->context, 0);
-			if ((res = vin_coder_config_rtp(vin->context)) < 0) {
-				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
-				ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): line %d\n", vin->name, vin->context.errorline);
-				goto pg_gsm_requester_vinetic_end;
-			}
+		}
+		// set coder configuration RTP
+		vin_coder_config_rtp_set_timestamp(vin->context, 0);
+		if ((res = vin_coder_config_rtp(vin->context)) < 0) {
+			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): %s\n", vin->name, vin_error_str(&vin->context));
+			ast_log(LOG_ERROR, "vinetic=\"%s\": vin_coder_config_rtp(): line %d\n", vin->name, vin->context.errorline);
+			goto pg_gsm_requester_vinetic_end;
 		}
 		// set coder channel RTP
 		vin_coder_channel_config_rtp_set_ssrc(vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);

@@ -86,5 +86,7 @@ Add asterisk manager interface command PolygatorShowGSMDevinfo,
 PolygatorChannelGSMEnable, PolygatorChannelGSMDisable.
 09.01.13
 Fix PDU data corruption on receiving with DCS 8-bit.
-10.01.13
+15.01.13
 Allow '+', '*', '#', 'p', 'w' and '0 - 9' in dialed number.
+10.01.13
+Reset Vinetics Timestamp on new call create.
