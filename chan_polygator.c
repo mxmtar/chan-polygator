@@ -19182,12 +19182,14 @@ static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, st
 				if (res > 0) {
 					if (FD_ISSET(ch_gsm->ussd_pipe[0], &rfds)) {
 						resp_datalen = read(ch_gsm->ussd_pipe[0], resp_databuf, sizeof(resp_databuf));
-						if (resp_datalen > 0)
+						if (resp_datalen > 0) {
 							ast_cli(a->fd, "%.*s\n", resp_datalen, resp_databuf);
-						else if (resp_datalen < 0)
+						} else if (resp_datalen < 0) {
 							ast_cli(a->fd, "  GSM channel=\"%s\": read(): %s\n", ch_gsm->alias, strerror(errno));
-						else
+						} else {
+							ast_cli(a->fd, "done.\n");
 							break;
+						}
 					}
 				} else if (res < 0) {
 					ast_cli(a->fd, "  GSM channel=\"%s\": select(): %s\n", ch_gsm->alias, strerror(errno));

@@ -90,3 +90,7 @@ Fix PDU data corruption on receiving with DCS 8-bit.
 Allow '+', '*', '#', 'p', 'w' and '0 - 9' in dialed number.
 10.01.13
 Reset Vinetics Timestamp on new call create.
+23.01.13
+Added "done." string at the end of USSD communication.
+For complete indication in case USSD has non-ASCII characters that
+not displayed by ast_cli().
