@@ -78,6 +78,9 @@ else
 	AC_SUBST(LIBDIR)
 fi
 
+# Get asterisk source path
+AC_ARG_WITH([asterisk], AC_HELP_STRING([--with-asterisk=PATH],[use asterisk files in PATH]), [ASTERISK_SRC_PATH=${withval}; echo "used asterisk files in ${withval}"])
+
 # Checks for header files.
 AC_CHECK_HEADER([polygator/version.h], [], [echo "Polygator kernel module not installed" ; exit 1])
 AC_CHECK_HEADER([polygator/polygator-base.h], [], [echo "Polygator kernel module not installed" ; exit 1])
@@ -92,7 +95,7 @@ AC_CHECK_HEADER([sqlite3.h], [], [echo "sqlite3 not installed - please install s
 PG_POLYGATOR_LINUX_VERSION_PREREQ([1.0.4])
 
 # Checks for required asterisk version.
-PG_ASTERISK_VERSION_PREREQ([1.6.0])
+PG_ASTERISK_VERSION_PREREQ([1.6.0], [${ASTERISK_SRC_PATH}])
 AC_DEFINE_UNQUOTED([ASTERISK_VERSION_NUMBER], [${ASTERISK_VERSION_NUMBER}], [Define recognized asterisk version number.])
 
 AC_MSG_CHECKING(asterisk/select.h presence)
