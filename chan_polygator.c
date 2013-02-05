@@ -55,7 +55,7 @@
 #include "sim900.h"
 
 /*** DOCUMENTATION
-	<manager name="PolygatorShowGSMNetinfo" language="en_US">
+	<manager name="PolygatorShowGSMNetInfo" language="en_US">
 		<synopsis>
 			Show GSM network information of Polygator channels.
 		</synopsis>
@@ -69,7 +69,7 @@
 			<para>Similar to the CLI command "polygator show gsm netinfo".</para>
 		</description>
 	</manager>
-	<manager name="PolygatorShowGSMDevinfo" language="en_US">
+	<manager name="PolygatorShowGSMDevInfo" language="en_US">
 		<synopsis>
 			Show GSM device information of Polygator channels.
 		</synopsis>
@@ -385,7 +385,7 @@ struct pg_call_gsm {
 };
 
 enum {
-	PG_CHANNEL_GSM_STATE_DISABLE = 1,
+	PG_CHANNEL_GSM_STATE_DISABLED = 1,
 	PG_CHANNEL_GSM_STATE_WAIT_RDY,
 	PG_CHANNEL_GSM_STATE_WAIT_CFUN,
 	PG_CHANNEL_GSM_STATE_CHECK_PIN,
@@ -3027,7 +3027,7 @@ static char *pg_cahnnel_gsm_state_to_string(int state)
 {
 	switch (state)
 	{
-		case PG_CHANNEL_GSM_STATE_DISABLE: return "disable";
+		case PG_CHANNEL_GSM_STATE_DISABLED: return "disabled";
 		case PG_CHANNEL_GSM_STATE_WAIT_RDY: return "wait for ready";
 		case PG_CHANNEL_GSM_STATE_WAIT_CFUN: return "wait for cfun";
 		case PG_CHANNEL_GSM_STATE_CHECK_PIN: return "check pin";
@@ -3499,8 +3499,11 @@ static inline struct pg_vinetic *pg_get_vinetic_from_board(struct pg_board *brd,
 
 	if (brd) {
 		ast_mutex_lock(&brd->lock);
-		AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry)
-			if (vin->position_on_board == pos) break;
+		AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry) {
+			if (vin->position_on_board == pos) {
+				break;
+			}
+		}
 		ast_mutex_unlock(&brd->lock);
 	}
 
@@ -3520,13 +3523,18 @@ static struct pg_vinetic *pg_get_vinetic_by_name(const char *name)
 	// check for name present
 	if (name) {
 		// traverse board list for matching entry name
-		AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
-		{
+		AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry) {
 			ast_mutex_lock(&brd->lock);
-			AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry)
+			AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry) {
 				// compare name strings
-				if (!strcmp(name, vin->name)) break;
+				if (!strcmp(name, vin->name)) {
+					break;
+				}
+			}
 			ast_mutex_unlock(&brd->lock);
+			if (vin) {
+				break;
+			}
 		}
 	}
 	return vin;
@@ -6849,7 +6857,7 @@ static void *pg_channel_gsm_workthread(void *data)
 	}
 
 	// set initial state
-	ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLE;
+	ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLED;
 	ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 
 	ast_mutex_unlock(&ch_gsm->lock);
@@ -9972,7 +9980,7 @@ static void *pg_channel_gsm_workthread(void *data)
 			// NORMAL POWER DOWN
 			else if (is_str_begin_by(r_buf, "NORMAL POWER DOWN")) {
 				ast_verb(4, "GSM channel=\"%s\": normal power down\n", ch_gsm->alias);
-				ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLE;
+				ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLED;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 				// stop testviodown timer
 				x_timer_stop(ch_gsm->timers.testviodown);
@@ -9983,7 +9991,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					ast_mutex_unlock(&ch_gsm->lock);
 					goto pg_channel_gsm_workthread_end;
 				}
-				ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLE;
+				ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLED;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 				// disable power suply
 				if (pg_channel_gsm_power_set(ch_gsm, 0)) {
@@ -11736,7 +11744,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				ast_mutex_unlock(&ch_gsm->lock);
 				goto pg_channel_gsm_workthread_end;
 			}
-			ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLE;
+			ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLED;
 			ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 			// disable power suply
 			if (pg_channel_gsm_power_set(ch_gsm, 0)) {
@@ -11779,7 +11787,7 @@ static void *pg_channel_gsm_workthread(void *data)
 			// power status is down -- successfull
 			if (!ch_gsm->vio) {
 				ast_verb(4, "GSM channel=\"%s\": power status VIO set to down\n", ch_gsm->alias);
-				ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLE;
+				ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLED;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 				// stop testviodown timer
 				x_timer_stop(ch_gsm->timers.testviodown);
@@ -11905,7 +11913,7 @@ static void *pg_channel_gsm_workthread(void *data)
 		switch (ch_gsm->state)
 		{
 			//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-			case PG_CHANNEL_GSM_STATE_DISABLE:
+			case PG_CHANNEL_GSM_STATE_DISABLED:
 				// reset registaration status
 				ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
 				// reset callwait state
@@ -12851,11 +12859,9 @@ static int pg_config_file_build(char *filename)
 	len += fprintf(fp, FORMAT_SEPARATOR_LINE);
 
 	// build vinetics categories
-	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry) {
 		ast_mutex_lock(&brd->lock);
-		AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry)
-		{
+		AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry) {
 			ast_mutex_lock(&vin->lock);
 			// vinetic category
 			len += fprintf(fp, "[%s]\n", vin->name);
@@ -12877,11 +12883,9 @@ static int pg_config_file_build(char *filename)
 	}
 
 	// build GSM channels categories
-	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry) {
 		ast_mutex_lock(&brd->lock);
-		AST_LIST_TRAVERSE(&brd->channel_gsm_list, ch_gsm, pg_board_channel_gsm_list_entry)
-		{
+		AST_LIST_TRAVERSE(&brd->channel_gsm_list, ch_gsm, pg_board_channel_gsm_list_entry) {
 			ast_mutex_lock(&ch_gsm->lock);
 			// GSM channel category
 			len += fprintf(fp, "[%s-gsm%u]\n", ch_gsm->board->name, ch_gsm->position_on_board);
@@ -14899,19 +14903,19 @@ static char *pg_cli_generate_complete_vinetic_name(const char *begin, int count)
 	which = 0;
 	beginlen = strlen(begin);
 
-	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry) {
 		ast_mutex_lock(&brd->lock);
-		AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry)
-		{
+		AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry) {
 			// compare begin of vinetic name
-			if ((!strncmp(begin, vin->name, beginlen)) && (++which > count))
-			{
+			if ((!strncmp(begin, vin->name, beginlen)) && (++which > count)) {
 				res = ast_strdup(vin->name);
 				break;
 			}
 		}
 		ast_mutex_unlock(&brd->lock);
+		if (res) {
+			break;
+		}
 	}
 
 	return res;
@@ -14936,8 +14940,9 @@ static char *pg_cli_generate_complete_config_filename(const char *begin, int cou
 	
 	if ((dir = opendir(ast_config_AST_CONFIG_DIR))) {
 		while ((dirent = readdir(dir))) {
-			if (strncasecmp(dirent->d_name, "polygator.", 6))
+			if (strncasecmp(dirent->d_name, "polygator.", 10)) {
 				continue;
+			}
 			if ((!strncasecmp(dirent->d_name, begin, beginlen)) && (++which > count)) {
 				res = ast_strdup(dirent->d_name);
 				break;
@@ -16705,7 +16710,7 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 		if (ast_strlen_zero(alias) || !strcmp(alias, ch_gsm->alias)) {
 
 			astman_append(s,
-				"Event: PolygatorShowGSMNetinfo\r\n"
+				"Event: PolygatorShowGSMNetInfo\r\n"
 				"%s"
 				"Channel: %s\r\n"
 				"Status: %s\r\n"
@@ -16735,7 +16740,7 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 	}
 
 	astman_append(s, 
-				  "Event: PolygatorShowGSMNetinfoComplete\r\n"
+				  "Event: PolygatorShowGSMNetInfoComplete\r\n"
 				  "%s"
 				  "Items: %lu\r\n"
 				  "\r\n",
@@ -16874,7 +16879,7 @@ static int pg_man_show_gsm_devinfo(struct mansession *s, const struct message *m
 		if (ast_strlen_zero(alias) || !strcmp(alias, ch_gsm->alias)) {
 
 			astman_append(s,
-				"Event: PolygatorShowGSMDevinfo\r\n"
+				"Event: PolygatorShowGSMDevInfo\r\n"
 				"%s"
 				"Channel: %s\r\n"
 				"Device: %s\r\n"
@@ -16883,6 +16888,7 @@ static int pg_man_show_gsm_devinfo(struct mansession *s, const struct message *m
 				"Hardware: %s\r\n"
 				"Firmware: %s\r\n"
 				"IMEI: %s\r\n"
+				"State: %s\r\n"
 				"\r\n",
 				idText,
 				ch_gsm->alias,
@@ -16891,7 +16897,8 @@ static int pg_man_show_gsm_devinfo(struct mansession *s, const struct message *m
 				ch_gsm->flags.enable?"enabled":"disabled",
 				ch_gsm->model?ch_gsm->model:"unknown",
 				ch_gsm->firmware?ch_gsm->firmware:"unknown",
-				ast_strlen_zero(ch_gsm->imei)?"unknown":ch_gsm->imei);
+				ast_strlen_zero(ch_gsm->imei)?"unknown":ch_gsm->imei,
+				pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 
 			total++;
 		}
@@ -16900,7 +16907,7 @@ static int pg_man_show_gsm_devinfo(struct mansession *s, const struct message *m
 	}
 
 	astman_append(s, 
-				  "Event: PolygatorShowGSMDevinfoComplete\r\n"
+				  "Event: PolygatorShowGSMDevInfoComplete\r\n"
 				  "%s"
 				  "Items: %lu\r\n"
 				  "\r\n",
@@ -17054,7 +17061,7 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 			ast_cli(a->fd, "  -- module = %s\n", pg_gsm_module_type_to_string(ch_gsm->gsm_module_type));
 			ast_cli(a->fd, "  -- power = %s\n", ch_gsm->flags.power?"on":"off");
 			ast_cli(a->fd, "  -- status = %s\n", ch_gsm->flags.enable?"enabled":"disabled");
-			ast_cli(a->fd, "  -- state = %s\n",  pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+			ast_cli(a->fd, "  -- state = %s\n", pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 #if 0
 			sprintf(buf, "%p", (void *)chnl->channel_thread);
 			ast_cli(a->fd, "  -- thread = %s\n", (chnl->channel_thread == AST_PTHREADT_NULL)?("null"):(buf));
@@ -18311,9 +18318,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						case PG_CHANNEL_GSM_PARAM_SMSSENDINTERVAL:
 							if (is_str_digit(a->argv[6])) {
 								tmpi = atoi(a->argv[6]);
-								if (tmpi < 10) {
-									tmpi = 10;
-									ast_cli(a->fd, " - value %d less than 10 - set smssendinterval to 10\n", tmpi);
+								if (tmpi < 1) {
+									tmpi = 1;
+									ast_cli(a->fd, " - value %d less than 1 - set smssendinterval to 1\n", tmpi);
 								}
 								ch_gsm->config.sms_send_interval = tmpi;
 								ast_cli(a->fd, " - ok\n");
@@ -20815,8 +20822,8 @@ static void pg_cleanup(void)
 
 	// unregistering Polygator Manager commands
 	if (pg_man_registered) {
-		ast_manager_unregister("PolygatorShowGSMNetinfo");
-		ast_manager_unregister("PolygatorShowGSMDevinfo");
+		ast_manager_unregister("PolygatorShowGSMNetInfo");
+		ast_manager_unregister("PolygatorShowGSMDevInfo");
 		ast_manager_unregister("PolygatorChannelGSMEnable");
 		ast_manager_unregister("PolygatorChannelGSMDisable");
 		ast_verbose("%s: Manager commands unregistered\n", AST_MODULE);
@@ -20837,8 +20844,7 @@ static void pg_cleanup(void)
 	}
 
 	// destroy trunk gsm list
-	while ((tr_gsm = AST_LIST_REMOVE_HEAD(&pg_general_trunk_gsm_list, pg_general_trunk_gsm_list_entry)))
-	{
+	while ((tr_gsm = AST_LIST_REMOVE_HEAD(&pg_general_trunk_gsm_list, pg_general_trunk_gsm_list_entry))) {
 		ast_free(tr_gsm->name);
 		ast_free(tr_gsm);
 	}
@@ -20847,12 +20853,10 @@ static void pg_cleanup(void)
 	do {
 		is_wait = 0;
 		// traverse all boards
-		AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
-		{
+		AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry) {
 			ast_mutex_lock(&brd->lock);
 			// traverse all vinetics
-			AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry)
-			{
+			AST_LIST_TRAVERSE(&brd->vinetic_list, vin, pg_board_vinetic_list_entry) {
 				ast_mutex_lock(&vin->lock);
 				// clean run flag
 				vin->run = 0;
@@ -20903,14 +20907,11 @@ static void pg_cleanup(void)
 	while ((ch_gsm = AST_LIST_REMOVE_HEAD(&pg_general_channel_gsm_list, pg_general_channel_gsm_list_entry)));
 
 	// destroy general board list
-	while ((brd = AST_LIST_REMOVE_HEAD(&pg_general_board_list, pg_general_board_list_entry)))
-	{
+	while ((brd = AST_LIST_REMOVE_HEAD(&pg_general_board_list, pg_general_board_list_entry))) {
 		// destroy board GSM channel list
-		while ((ch_gsm = AST_LIST_REMOVE_HEAD(&brd->channel_gsm_list, pg_board_channel_gsm_list_entry)))
-		{
+		while ((ch_gsm = AST_LIST_REMOVE_HEAD(&brd->channel_gsm_list, pg_board_channel_gsm_list_entry))) {
 			// destroy channel gsm trunk entry
-			while ((ch_gsm_fold = AST_LIST_REMOVE_HEAD(&ch_gsm->trunk_list, pg_trunk_gsm_channel_gsm_fold_channel_list_entry)))
-			{
+			while ((ch_gsm_fold = AST_LIST_REMOVE_HEAD(&ch_gsm->trunk_list, pg_trunk_gsm_channel_gsm_fold_channel_list_entry))) {
 				ast_free(ch_gsm_fold->name);
 				ast_free(ch_gsm_fold);
 			}
@@ -20935,11 +20936,9 @@ static void pg_cleanup(void)
 			ast_free(ch_gsm);
 		}
 		// destroy board vinetic list
-		while ((vin = AST_LIST_REMOVE_HEAD(&brd->vinetic_list, pg_board_vinetic_list_entry)))
-		{
+		while ((vin = AST_LIST_REMOVE_HEAD(&brd->vinetic_list, pg_board_vinetic_list_entry))) {
 			// destroy vinetic RTP channel list
-			while ((rtp = AST_LIST_REMOVE_HEAD(&vin->channel_rtp_list, pg_vinetic_channel_rtp_list_entry)))
-			{
+			while ((rtp = AST_LIST_REMOVE_HEAD(&vin->channel_rtp_list, pg_vinetic_channel_rtp_list_entry))) {
 				ast_free(rtp->name);
 				ast_free(rtp->path);
 				ast_free(rtp);
@@ -21079,8 +21078,7 @@ static int pg_load(void)
 	// scan polygator subsystem
 	snprintf(path, PATH_MAX, "/dev/%s", "polygator/subsystem");
 	if ((fp = fopen(path, "r"))) {
-		while (fgets(buf, sizeof(buf), fp))
-		{
+		while (fgets(buf, sizeof(buf), fp)) {
 			if (sscanf(buf, "%[0-9a-z-] %[0-9a-z/!-]", type, name) == 2) {
 				str_xchg(name, '!', '/');
 				cp =  strrchr(name, '/');
@@ -21111,14 +21109,12 @@ static int pg_load(void)
 	// scan polygator board
 	brd_num = 0;
 	pwr_seq_num = 0;
-	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry) {
 		if (!(fp = fopen(brd->path, "r"))) {
 			ast_log(LOG_ERROR, "unable to scan Polygator board \"%s\": %s\n", brd->name, strerror(errno));
 			goto pg_load_error;
 		}
-		while (fgets(buf, sizeof(buf), fp))
-		{
+		while (fgets(buf, sizeof(buf), fp)) {
 			if (sscanf(buf, "GSM%u %[0-9A-Za-z-] %[0-9A-Za-z/!-] %[0-9A-Za-z/!-] VIN%u%[ACMLP]%u VIO=%u", &pos, type, name, sim, &vin_num, vc_type, &vc_slot, &vio) == 8) {
 				snprintf(buf, sizeof(buf), "%s-gsm%u", brd->name, pos);
 				ast_verbose("%s: found GSM channel=\"%s\"\n", AST_MODULE, buf);
@@ -21138,8 +21134,7 @@ static int pg_load(void)
 				ch_gsm->board = brd;
 				ch_gsm->device = ast_strdup(buf);
 				pos = 0;
-				for (;;)
-				{
+				for (;;) {
 					snprintf(buf, sizeof(buf), "chan-%u%u", brd_num, pos++);
 					if (!pg_get_channel_gsm_by_name(buf)) break;
 				}
@@ -21156,10 +21151,11 @@ static int pg_load(void)
 				ch_gsm->vinetic_number = vin_num;
 				ch_gsm->vinetic_alm_slot = -1;
 				ch_gsm->vinetic_pcm_slot = -1;
-				if (!strcasecmp(vc_type, "ALM"))
+				if (!strcasecmp(vc_type, "ALM")) {
 					ch_gsm->vinetic_alm_slot = vc_slot;
-				else if (!strcasecmp(vc_type, "PCM"))
+				} else if (!strcasecmp(vc_type, "PCM")) {
 					ch_gsm->vinetic_pcm_slot = vc_slot;
+				}
 				// reset registaration status
 				ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
 				// reset callwait state
@@ -21179,8 +21175,7 @@ static int pg_load(void)
 						ast_free(ch_gsm->alias);
 						ch_gsm->alias = NULL;
 						pos = 0;
-						for (;;)
-						{
+						for (;;) {
 							snprintf(buf, sizeof(buf), "chan-%u%u", brd_num, pos++);
 							if (!pg_get_channel_gsm_by_name(buf)) break;
 						}
@@ -21303,8 +21298,8 @@ static int pg_load(void)
 				ch_gsm->config.sms_send_interval = 20;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "sms.send.interval")) && (is_str_digit(cvar)))
 					ch_gsm->config.sms_send_interval = atoi(cvar);
-				if (ch_gsm->config.sms_send_interval < 10)
-					ch_gsm->config.sms_send_interval = 10;
+				if (ch_gsm->config.sms_send_interval < 1)
+					ch_gsm->config.sms_send_interval = 1;
 				// sms.max.attempt
 				ch_gsm->config.sms_send_attempt = 2;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "sms.send.attempt")) && (is_str_digit(cvar)))
@@ -21333,8 +21328,7 @@ static int pg_load(void)
 				// trunk
 				if (ast_cfg) {
 					ast_var = ast_variable_browse(ast_cfg, ch_gsm->device);
-					while (ast_var)
-					{
+					while (ast_var) {
 						if (!strcmp(ast_var->name, "trunk")) {
 							// search trunk gsm
 							tr_gsm = pg_get_trunk_gsm_by_name(ast_var->value, PG_TRUNK_GSM_MANUAL);
@@ -21486,8 +21480,7 @@ static int pg_load(void)
 				vin->run = 1;
 				vin->thread = AST_PTHREADT_NULL;
 				vin->state = PG_VINETIC_STATE_INIT;
-				AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-				{
+				AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 					ast_mutex_lock(&ch_gsm->lock);
 					if ((!strcmp(vin->board->name, ch_gsm->board->name)) &&
 							(vin->position_on_board == ch_gsm->vinetic_number) &&
@@ -21528,8 +21521,8 @@ static int pg_load(void)
 	pg_cli_registered = 1;
 
 	// registering Polygator Manager commands
-	ast_manager_register("PolygatorShowGSMNetinfo", 0, pg_man_show_gsm_netinfo, pg_man_show_gsm_netinfo_synopsis);
-	ast_manager_register("PolygatorShowGSMDevinfo", 0, pg_man_show_gsm_devinfo, pg_man_show_gsm_devinfo_synopsis);
+	ast_manager_register("PolygatorShowGSMNetInfo", 0, pg_man_show_gsm_netinfo, pg_man_show_gsm_netinfo_synopsis);
+	ast_manager_register("PolygatorShowGSMDevInfo", 0, pg_man_show_gsm_devinfo, pg_man_show_gsm_devinfo_synopsis);
 	ast_manager_register("PolygatorChannelGSMEnable", 0, pg_man_channel_gsm_enable, pg_man_channel_gsm_enable_synopsis);
 	ast_manager_register("PolygatorChannelGSMDisable", 0, pg_man_channel_gsm_disable, pg_man_channel_gsm_disable_synopsis);
 	ast_verbose("%s: Manager commands registered\n", AST_MODULE);

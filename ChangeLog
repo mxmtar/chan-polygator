@@ -94,3 +94,5 @@ Reset Vinetics Timestamp on new call create.
 Added "done." string at the end of USSD communication.
 For complete indication in case USSD has non-ASCII characters that
 not displayed by ast_cli().
+05.02.13
+Fix polygator show vinetic CLI command.
