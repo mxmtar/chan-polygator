@@ -19,9 +19,15 @@ if test -f "$lt_sysroot/usr/include/sqlite3.h" ; then
 		exit 1
 	fi
 	REQ_SQLITE_VERSION_PARTS=`LANG=C printf "$REQ_SQLITE_VERSION_TRIM" | ${SED} -e 'y:\.: :'`
+	COUNT="0"
 	REQ_SQLITE_VERSION_BIN=`
 	for PARTS in $REQ_SQLITE_VERSION_PARTS ; do
-	printf "%03d" $PARTS
+		if ((COUNT)) ; then
+			printf "%02d" $PARTS
+		else
+			printf "%d" $PARTS
+		fi
+		let COUNT++;
 	done`
 
 	[TST_SQLITE_VERSION=`cat $lt_sysroot/usr/include/sqlite3.h | ${GREP} -e '[[:space:]]*#define[[:space:]]*SQLITE_VERSION[[:space:]]*\"\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\".*' | ${SED} -e '{s:[[:space:]]*#define[[:space:]]*SQLITE_VERSION[[:space:]]*\"\(\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\)\".*:\1:}'`]
@@ -39,9 +45,15 @@ if test -f "$lt_sysroot/usr/include/sqlite3.h" ; then
 		exit 1
 	fi
 	TST_SQLITE_VERSION_PARTS=`LANG=C printf "$TST_SQLITE_VERSION_TRIM" | ${SED} -e 'y:\.: :'`
+	COUNT="0"
 	TST_SQLITE_VERSION_BIN=`
 	for PARTS in $TST_SQLITE_VERSION_PARTS ; do
-	printf "%03d" $PARTS
+		if ((COUNT)) ; then
+			printf "%02d" $PARTS
+		else
+			printf "%d" $PARTS
+		fi
+		let COUNT++;
 	done`
 
 	if test $TST_SQLITE_VERSION_BIN -ge $REQ_SQLITE_VERSION_BIN ; then
