@@ -4,7 +4,7 @@
 AC_PREREQ([2.60])
 
 # set project attribute
-AC_INIT([chan-polygator], [1.3.4])
+AC_INIT([chan-polygator], [1.3.5])
 
 # init automake
 AM_INIT_AUTOMAKE([-Wall -Werror])
@@ -27,7 +27,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([chan_polygator.c])
 
 AC_COPYRIGHT("Polygator")
-AC_REVISION(1.3.4)
+AC_REVISION(1.3.5)
 
 # prepare autoconfig header data
 AC_CONFIG_HEADER([autoconfig.h])
@@ -81,6 +81,17 @@ fi
 # Get asterisk source path
 AC_ARG_WITH([asterisk], AC_HELP_STRING([--with-asterisk=PATH],[use asterisk files in PATH]), [ASTERISK_SRC_PATH=${withval}; echo "used asterisk files in ${withval}"])
 
+# Checks for packages.
+# Checks for required polygator-linux version.
+PG_POLYGATOR_LINUX_VERSION_PREREQ([1.0.0])
+
+# Checks for required asterisk version.
+PG_ASTERISK_VERSION_PREREQ([1.6.0], [${ASTERISK_SRC_PATH}])
+AC_DEFINE_UNQUOTED([ASTERISK_VERSION_NUMBER], [${ASTERISK_VERSION_NUMBER}], [Define recognized asterisk version number.])
+
+# Checks for required sqlite3 version
+PG_SQLITE3_VERSION_PREREQ([3.0.0])
+
 # Checks for header files.
 AC_CHECK_HEADER([polygator/version.h], [], [echo "Polygator kernel module not installed" ; exit 1])
 AC_CHECK_HEADER([polygator/polygator-base.h], [], [echo "Polygator kernel module not installed" ; exit 1])
@@ -89,14 +100,6 @@ AC_CHECK_HEADER([polygator/vinetic-ioctl.h], [], [echo "Polygator kernel module 
 AC_CHECK_HEADER([libvinetic.h], [], [echo "libvinetic not installed - please install libvinetic or libvinetic development package" ; exit 1])
 AC_CHECK_HEADER([asterisk.h], [], [echo "asterisk not installed - please install asterisk or asterisk development package" ; exit 1])
 AC_CHECK_HEADER([sqlite3.h], [], [echo "sqlite3 not installed - please install sqlite3 or sqlite3 development package" ; exit 1])
-
-# Checks for packages.
-# Checks for required polygator-linux version.
-PG_POLYGATOR_LINUX_VERSION_PREREQ([1.0.4])
-
-# Checks for required asterisk version.
-PG_ASTERISK_VERSION_PREREQ([1.6.0], [${ASTERISK_SRC_PATH}])
-AC_DEFINE_UNQUOTED([ASTERISK_VERSION_NUMBER], [${ASTERISK_VERSION_NUMBER}], [Define recognized asterisk version number.])
 
 AC_MSG_CHECKING(asterisk/select.h presence)
 AC_LANG_C
@@ -167,9 +170,6 @@ PG_ASTERISK_GET_DIRECTORY([astmoddir])
 PG_ASTERISK_GET_DIRECTORY([astdatadir])
 
 AC_DEFINE_UNQUOTED([ASTERISK_DATA_DEFAULT_PATH], ["${astdatadir}"], [Define default path to asterisk data directory.])
-
-# Checks for required sqlite3 version
-PG_SQLITE3_VERSION_PREREQ([3.0.0])
 
 AC_CONFIG_FILES([Makefile])
 

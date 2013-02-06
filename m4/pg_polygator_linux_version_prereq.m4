@@ -19,10 +19,17 @@ if test -f "$lt_sysroot/usr/include/polygator/version.h" ; then
 		exit 1
 	fi
 	REQ_POLYGATOR_LINUX_VERSION_PARTS=`LANG=C printf "$REQ_POLYGATOR_LINUX_VERSION_TRIM" | ${SED} -e 'y:\.: :'`
+	COUNT="0"
 	REQ_POLYGATOR_LINUX_VERSION_BIN=`
 	for PARTS in $REQ_POLYGATOR_LINUX_VERSION_PARTS ; do
-	printf "%03d" $PARTS
+		if ((COUNT)) ; then
+			printf "%02d" $PARTS
+		else
+			printf "%d" $PARTS
+		fi
+		let COUNT++;
 	done`
+
 
 	[TST_POLYGATOR_LINUX_VERSION=`cat $lt_sysroot/usr/include/polygator/version.h | ${GREP} -e '[[:space:]]*#define[[:space:]]*POLYGATOR_LINUX_VERSION[[:space:]]*\"\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\".*' | ${SED} -e '{s:[[:space:]]*#define[[:space:]]*POLYGATOR_LINUX_VERSION[[:space:]]*\"\(\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\)\".*:\1:}'`]
 	if test "$TST_POLYGATOR_LINUX_VERSION" = ""; then
@@ -39,9 +46,15 @@ if test -f "$lt_sysroot/usr/include/polygator/version.h" ; then
 		exit 1
 	fi
 	TST_POLYGATOR_LINUX_VERSION_PARTS=`LANG=C printf "$TST_POLYGATOR_LINUX_VERSION_TRIM" | ${SED} -e 'y:\.: :'`
+	COUNT="0"
 	TST_POLYGATOR_LINUX_VERSION_BIN=`
 	for PARTS in $TST_POLYGATOR_LINUX_VERSION_PARTS ; do
-	printf "%03d" $PARTS
+		if ((COUNT)) ; then
+			printf "%02d" $PARTS
+		else
+			printf "%d" $PARTS
+		fi
+		let COUNT++;
 	done`
 
 	if test $TST_POLYGATOR_LINUX_VERSION_BIN -ge $REQ_POLYGATOR_LINUX_VERSION_BIN ; then

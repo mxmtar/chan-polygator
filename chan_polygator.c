@@ -16583,6 +16583,7 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 
 	char buf[20];
 	char rssi[32];
+	char subscriber[128];
 	int number_fl;
 	int alias_fl;
 	int status_fl;
@@ -16591,11 +16592,11 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 	int oper_fl;
 	int code_fl;
 	int imsi_fl;
+	int subscriber_fl;
 	int rssi_fl;
 	int ber_fl;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator show gsm netinfo";
@@ -16626,10 +16627,10 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 	oper_fl = strlen("Operator");
 	code_fl = strlen("Code");
 	imsi_fl = strlen("IMSI");
+	subscriber_fl = strlen("Subscriber");
 	rssi_fl = strlen("RSSI");
 	ber_fl = strlen("BER");
-	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
 		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
 		alias_fl = mmax(alias_fl, strlen(ch_gsm->alias));
@@ -16639,6 +16640,7 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 		oper_fl = mmax(oper_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->operator_name?ch_gsm->operator_name:"unknown"):""));
 		code_fl = mmax(code_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->operator_code?ch_gsm->operator_code:"unknown"):""));
 		imsi_fl = mmax(imsi_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->imsi?ch_gsm->imsi:"unknown"):""));
+		subscriber_fl = mmax(subscriber_fl, strlen(ch_gsm->flags.sim_inserted?address_show(subscriber, &ch_gsm->subscriber_number, 0):""));
 		rssi_fl = mmax(rssi_fl, strlen(ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):""));
 		ber_fl = mmax(ber_fl, strlen(ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):""));
 		count++;
@@ -16646,7 +16648,7 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 	}
 	if (count) {
 		ast_cli(a->fd, "  GSM channel%s:\n", ESS(count));
-		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
 				number_fl, "#",
 				alias_fl, "Alias",
 				status_fl, "Status",
@@ -16655,13 +16657,13 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 				oper_fl, "Operator",
 				code_fl, "Code",
 				imsi_fl, "IMSI",
+				subscriber_fl, "Subscriber",
 				rssi_fl, "RSSI",
 				ber_fl, "BER");
 		count = 0;
-		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-		{
+		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 			ast_mutex_lock(&ch_gsm->lock);
-			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %*s | %*s |\n",
+			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %*s | %*s | %*s |\n",
 					number_fl, (unsigned long int)count++,
 					alias_fl, ch_gsm->alias,
 					status_fl, ch_gsm->flags.enable?"enabled":"disabled",
@@ -16670,6 +16672,7 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 					oper_fl, ch_gsm->flags.sim_inserted?(ch_gsm->operator_name?ch_gsm->operator_name:"unknown"):"",
 					code_fl, ch_gsm->flags.sim_inserted?(ch_gsm->operator_code?ch_gsm->operator_code:"unknown"):"",
 					imsi_fl, ch_gsm->flags.sim_inserted?(ch_gsm->imsi?ch_gsm->imsi:"unknown"):"",
+					subscriber_fl, ch_gsm->flags.sim_inserted?address_show(subscriber, &ch_gsm->subscriber_number, 0):"",
 					rssi_fl, ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):"",
 					ber_fl, ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):"");
 			ast_mutex_unlock(&ch_gsm->lock);
@@ -16695,6 +16698,7 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 {
 	struct pg_channel_gsm *ch_gsm;
 	char rssi[32];
+	char subscriber[128];
 	const char *id = astman_get_header(m, "ActionID");
 	const char *alias = astman_get_header(m, "Channel");
 	char idText[256] = "";
@@ -16719,6 +16723,7 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 				"Operator: %s\r\n"
 				"Code: %s\r\n"
 				"IMSI: %s\r\n"
+				"Subscriber: %s\r\n"
 				"RSSI: %s\r\n"
 				"BER: %s\r\n"
 				"\r\n",
@@ -16730,6 +16735,7 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 				ch_gsm->operator_name?ch_gsm->operator_name:"unknown",
 				ch_gsm->operator_code?ch_gsm->operator_code:"unknown",
 				ch_gsm->imsi?ch_gsm->imsi:"unknown",
+				ch_gsm->flags.sim_inserted?address_show(subscriber, &ch_gsm->subscriber_number, 0):"unknown",
 				ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):"unknown",
 				ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):"unknown");
 
