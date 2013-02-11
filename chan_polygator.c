@@ -632,6 +632,12 @@ struct pg_trunk_gsm {
 	AST_LIST_ENTRY(pg_trunk_gsm) pg_general_trunk_gsm_list_entry;
 };
 
+enum {
+	PG_CHANNEL_FXS_HOOK_STATE_UNKNOWN = -1,
+	PG_CHANNEL_FXS_HOOK_STATE_ON,
+	PG_CHANNEL_FXS_HOOK_STATE_OFF,
+};
+
 struct pg_channel_fxs {
 	// FXS channel private lock
 	ast_mutex_t lock;
@@ -666,12 +672,37 @@ struct pg_channel_fxs {
 		int ali_nelec_as;
 		int ali_nelec_nlp;
 		int ali_nelec_nlpm;
+		int off_hook_min;
+		int on_hook_min;
+		int digit_pulse_min;
+		int digit_pulse_max;
+		int digit_pause_min;
+		int digit_pause_max;
+		int digit_inter_min;
 	} config;
 
 	// runtime flags
 	struct pg_channel_fxs_flags {
 		unsigned int enable:1;
+		unsigned int shutdown:1;
+		unsigned int shutdown_now:1;
+		unsigned int hook_event:1;
 	} flags;
+
+	// timers
+	struct pg_channel_fxs_timers {
+		struct x_timer off_hook;
+		struct x_timer on_hook;
+		struct x_timer digit_pulse;
+		struct x_timer digit_pause;
+		struct x_timer digit_inter;
+	} timers;
+
+	// Runtime data
+	int power_delay;
+	int hook_state;
+	int off_hook;
+	int digit;
 
 // 	AST_LIST_HEAD_NOLOCK(call_list, pg_call_fxs) call_list;
 	struct pg_channel_rtp *channel_rtp;
@@ -789,8 +820,10 @@ static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cl
 static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_config_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_channel_fxs_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_trunk_gsm_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char pg_cli_channel_gsm_actions_usage[256];
+static char pg_cli_channel_fxs_actions_usage[256];
 static char pg_cli_config_actions_usage[256];
 static char pg_cli_trunk_gsm_actions_usage[256];
 static struct ast_cli_entry pg_cli[] = {
@@ -807,6 +840,7 @@ static struct ast_cli_entry pg_cli[] = {
 	AST_CLI_DEFINE(pg_cli_show_channel_gsm, "Show PG GSM channel information"),
 	AST_CLI_DEFINE(pg_cli_config_actions, "Save Polygator configuration"),
 	AST_CLI_DEFINE(pg_cli_channel_gsm_actions, "Perform actions on GSM channels"),
+	AST_CLI_DEFINE(pg_cli_channel_fxs_actions, "Perform actions on FXS channels"),
 	AST_CLI_DEFINE(pg_cli_trunk_gsm_actions, "Perform actions on GSM trunks"),
 };
 
@@ -833,6 +867,13 @@ static struct pg_cli_action pg_cli_channel_gsm_action_handlers[] = {
 	PG_CLI_ACTION("at", pg_cli_channel_gsm_action_at),
 	PG_CLI_ACTION("dcr", pg_cli_channel_gsm_action_dcr),
 	PG_CLI_ACTION("sms", pg_cli_channel_gsm_action_sms),
+};
+
+// polygator CLI FXS channel actions
+static char *pg_cli_channel_fxs_action_enable_disable(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static struct pg_cli_action pg_cli_channel_fxs_action_handlers[] = {
+	PG_CLI_ACTION("enable", pg_cli_channel_fxs_action_enable_disable),
+	PG_CLI_ACTION("disable", pg_cli_channel_fxs_action_enable_disable),
 };
 
 enum {
@@ -5913,7 +5954,7 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 	if (ch_gsm->channel_rtp) {
 		rtp = ch_gsm->channel_rtp;
 		vin = rtp->vinetic;
-	} else if ((!(vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) ||
+	} else if ((!(vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) ||
 			(!pg_is_vinetic_run(vin)) ||
 			(!(rtp = pg_get_channel_rtp(vin)))) {
 		ast_log(LOG_WARNING, "pg_get_channel_rtp() failed\n");
@@ -6783,7 +6824,7 @@ static void *pg_channel_gsm_workthread(void *data)
 
 	ast_debug(4, "GSM channel=\"%s\": thread start\n", ch_gsm->alias);
 	ast_verbose("%s: GSM channel=\"%s\" enabled\n", AST_MODULE, ch_gsm->alias);
-	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelGSMPwrstatus", "Channel: %s\r\nStatus: enabled\r\n", ch_gsm->alias);
+	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelGSMPowerStatus", "Channel: %s\r\nStatus: enabled\r\n", ch_gsm->alias);
 
 	ast_mutex_lock(&ch_gsm->lock);
 	res = ch_gsm->power_sequence_number;
@@ -11984,8 +12025,7 @@ static void *pg_channel_gsm_workthread(void *data)
 			x_timer_set(ch_gsm->timers.waitviodown, waitviodown_timeout);
 		} // end of restart
 
-		switch (ch_gsm->state)
-		{
+		switch (ch_gsm->state) {
 			//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 			case PG_CHANNEL_GSM_STATE_DISABLED:
 				// reset registaration status
@@ -12003,8 +12043,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					ch_gsm->flags.restart_now = 0;
 				// set hardware baudrate
 				if (!tcgetattr(ch_gsm->tty_fd, &termios)) {
-					switch (ch_gsm->baudrate)
-					{
+					switch (ch_gsm->baudrate) {
 						case 9600:
 							baudrate = B9600;
 							break;
@@ -12031,8 +12070,9 @@ static void *pg_channel_gsm_workthread(void *data)
 				}
 				pg_atcommand_queue_flush(ch_gsm);
 				ch_gsm->cmd_done = 1;
-				if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0)
+				if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0) {
 					ast_log(LOG_ERROR, "GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
+				}
 				// check VIO status
 				if ((ch_gsm->vio = pg_channel_gsm_vio_get(ch_gsm)) < 0) {
 					ast_log(LOG_ERROR, "GSM channel=\"%s\": can't get channel power VIO status\n", ch_gsm->alias);
@@ -12099,8 +12139,7 @@ static void *pg_channel_gsm_workthread(void *data)
 
 				ch_gsm->baudrate = ch_gsm->baudrate_test;
 				ast_verb(4, "GSM channel=\"%s\": serial port work at speed = %d baud\n", ch_gsm->alias, ch_gsm->baudrate);
-// 				pg_atcommand_queue_append(ch_gsm, AT_UNKNOWN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "AT+IPR=%d;&W", ch_gsm->baudrate);
-
+				pg_atcommand_queue_append(ch_gsm, AT_UNKNOWN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "AT+IPR=%d;&W", ch_gsm->baudrate);
 				// get imei
 				pg_atcommand_queue_append(ch_gsm, AT_GSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				// get model
@@ -12119,24 +12158,24 @@ static void *pg_channel_gsm_workthread(void *data)
 				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
 #else
 				// check SIM status
-				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
+				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
 					pg_atcommand_queue_append(ch_gsm, AT_SIM300_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
+				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 					pg_atcommand_queue_append(ch_gsm, AT_SIM900_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
+				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 					pg_atcommand_queue_append(ch_gsm, AT_M10_QSIMSTAT, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
-
+				}
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-
 				// start pinwait timer
 				x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
 #endif
 				break;
 			//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 			case PG_CHANNEL_GSM_STATE_INIT:
-				if (!ch_gsm->cmd_done)
+				if (!ch_gsm->cmd_done) {
 					break;
+				}
 				if (ch_gsm->init.echo) {
 					pg_atcommand_queue_append(ch_gsm, AT_E, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "%d", 0);
 					ch_gsm->init.echo = 0;
@@ -12153,12 +12192,13 @@ static void *pg_channel_gsm_workthread(void *data)
 					break;
 				}
 				if (ch_gsm->init.chfa) {
-					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
+					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
-					else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
-					else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
+					}
 					ch_gsm->init.chfa = 0;
 					break;
 				}
@@ -12168,12 +12208,13 @@ static void *pg_channel_gsm_workthread(void *data)
 					break;
 				}
 				if (ch_gsm->init.cmic) {
-					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
+					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
-					else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
-					else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1,%d", ch_gsm->config.gainout);
+					}
 					ch_gsm->init.cmic = 0;
 					break;
 				}
@@ -12199,7 +12240,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					break;
 				}
 				if (ch_gsm->init.cclk) {
-					if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
+					if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL))) {
 						pg_atcommand_queue_append(ch_gsm, AT_CCLK, AT_OPER_WRITE, 0, pg_at_response_timeout, 0,
 							"\"%02d/%02d/%02d,%02d:%02d:%02d%c%02d\"",
 								tm_ptr->tm_year%100,
@@ -12210,8 +12251,9 @@ static void *pg_channel_gsm_workthread(void *data)
 								tm_ptr->tm_sec,
 								(curr_tz.tz_minuteswest > 0)?('-'):('+'),
 								abs(curr_tz.tz_minuteswest)/15);
-					else
+					} else {
 						ast_log(LOG_WARNING, "GSM channel=\"%s\": can't set module clock\n", ch_gsm->alias);
+					}
 					ch_gsm->init.cclk = 0;
 					break;
 				}
@@ -12239,8 +12281,7 @@ static void *pg_channel_gsm_workthread(void *data)
 			//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 			case PG_CHANNEL_GSM_STATE_RUN:
 				// manage call wait status option
-				if (((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING))
-					 	&& (!pg_is_channel_gsm_has_calls(ch_gsm))) {
+				if (((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) && (!pg_is_channel_gsm_has_calls(ch_gsm))) {
 					// check callwait status
 					if (ch_gsm->callwait == PG_CALLWAIT_STATE_UNKNOWN) {
 						// request actual call wait status if not known
@@ -12274,9 +12315,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						break;
 					}
 					// get balance
-					if ((ch_gsm->flags.balance_req) &&
-					 		(ch_gsm->config.balance_request) &&
-					 			(strlen(ch_gsm->config.balance_request))) {
+					if ((ch_gsm->flags.balance_req) && (ch_gsm->config.balance_request) && (strlen(ch_gsm->config.balance_request))) {
 						memset(tmpbuf, 0, 256);
 						ip = ch_gsm->config.balance_request;
 						ilen = strlen(ch_gsm->config.balance_request);
@@ -12287,8 +12326,9 @@ static void *pg_channel_gsm_workthread(void *data)
 							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 							ch_gsm->ussd_sub_cmd = PG_AT_SUBCMD_CUSD_GET_BALANCE;
 							pg_atcommand_queue_append(ch_gsm, AT_CUSD, AT_OPER_WRITE, PG_AT_SUBCMD_CUSD_GET_BALANCE, 30, 0, "%d,\"%s\"", 1, tmpbuf);
-						} else
+						} else {
 							ast_log(LOG_ERROR, "GSM channel=\"%s\": fail convert USSD \"%s\" to hex\n", ch_gsm->alias, ch_gsm->config.balance_request);
+						}
 						ch_gsm->flags.balance_req = 0;
 						break;
 					}
@@ -12300,12 +12340,13 @@ static void *pg_channel_gsm_workthread(void *data)
 				}
 				// adjust gainout
 				if ((ch_gsm->gainout >= 0) && (ch_gsm->gainout != ch_gsm->config.gainout)) {
-					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
+					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
-					else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900)
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
-					else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1,%d", ch_gsm->config.gainout);
+					}
 					ch_gsm->gainout = -1;
 				}
 				break;
@@ -12411,7 +12452,7 @@ pg_channel_gsm_workthread_end:
 	ch_gsm->thread = AST_PTHREADT_NULL;
 	ast_debug(4, "GSM channel=\"%s\": thread stop\n", ch_gsm->alias);
 	ast_verbose("%s: GSM channel=\"%s\" disabled\n", AST_MODULE, ch_gsm->alias);
-	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelGSMPwrstatus", "Channel: %s\r\nStatus: disabled\r\n", ch_gsm->alias);
+	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelGSMPowerStatus", "Channel: %s\r\nStatus: disabled\r\n", ch_gsm->alias);
 	ast_mutex_unlock(&ch_gsm->lock);
 	return NULL;
 }
@@ -12896,22 +12937,6 @@ static void *pg_vinetic_workthread(void *data)
 					}
 				}
 				// set status mask
-#if 1
-				if (vin_set_opmode(&vin->context, 0, VIN_OP_MODE_SPDR) < 0) {
-					while (vin_message_stack_check_line(&vin->context)) {
-						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-					}
-					vin->state = PG_VINETIC_STATE_IDLE;
-					break;
-				}
-				if (vin_set_opmode(&vin->context, 2, VIN_OP_MODE_SPDR) < 0) {
-					while (vin_message_stack_check_line(&vin->context)) {
-						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-					}
-					vin->state = PG_VINETIC_STATE_IDLE;
-					break;
-				}
-#endif
 				if (vin_set_status_mask(&vin->context) < 0) {
 					while (vin_message_stack_check_line(&vin->context)) {
 						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
@@ -12923,8 +12948,10 @@ static void *pg_vinetic_workthread(void *data)
 			case PG_VINETIC_STATE_RUN:
 				ast_mutex_unlock(&vin->lock);
 				if (vin_get_status(&vin->context) < 0) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": vin_get_status()\n", vin->name);
 					ast_mutex_lock(&vin->lock);
+					while (vin_message_stack_check_line(&vin->context)) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+					}
 					vin->state = PG_VINETIC_STATE_IDLE;
 				} else {
 					ast_mutex_lock(&vin->lock);
@@ -12935,7 +12962,6 @@ static void *pg_vinetic_workthread(void *data)
 						ast_log(LOG_ERROR, "vinetic=\"%s\": ready timeout\n", vin->name);
 						vin->state = PG_VINETIC_STATE_IDLE;
 					}
-					ast_verbose("vinetic=\"%s\": status changed\n", vin->name);
 				}
 				break;
 			default:
@@ -12957,6 +12983,203 @@ pg_vinetic_workthread_end:
 }
 //------------------------------------------------------------------------------
 // end of pg_vinetic_workthread()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_channel_fxs_hook_handler()
+//------------------------------------------------------------------------------
+static void pg_channel_fxs_hook_handler(void *data, int off_hook)
+{
+	struct pg_channel_fxs *ch_fxs = (struct pg_channel_fxs *)data;
+
+	ast_mutex_lock(&ch_fxs->lock);
+	ch_fxs->off_hook = off_hook;
+	ch_fxs->flags.hook_event = 1;
+	ast_mutex_unlock(&ch_fxs->lock);
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_fxs_hook_handler()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_channel_fxs_workthread()
+//------------------------------------------------------------------------------
+static void *pg_channel_fxs_workthread(void *data)
+{
+	int res;
+	struct timeval timeout;
+	struct pg_vinetic *vin;
+	struct pg_channel_fxs *ch_fxs = (struct pg_channel_fxs *)data;
+
+	ast_mutex_lock(&ch_fxs->lock);
+	res = ch_fxs->power_delay;
+	ast_mutex_unlock(&ch_fxs->lock);
+	if (res > 0)
+		sleep(res);
+	ast_mutex_lock(&ch_fxs->lock);
+	ch_fxs->power_delay = -1;
+
+	ast_debug(4, "FXS channel=\"%s\": thread start\n", ch_fxs->alias);
+	ast_verbose("%s: FXS channel=\"%s\" enabled\n", AST_MODULE, ch_fxs->alias);
+	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelFXSPowerStatus", "Channel: %s\r\nStatus: enabled\r\n", ch_fxs->alias);
+
+	if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+		ast_mutex_lock(&vin->lock);
+		if (vin_reset_status(&vin->context) < 0) {
+			while (vin_message_stack_check_line(&vin->context)) {
+				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+			}
+		} else {
+			// set channel to sleep power down resistive
+			if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_SPDR) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+			// set hook event handler
+			vin_set_hook_handler(vin->context, ch_fxs->vinetic_alm_slot, pg_channel_fxs_hook_handler, ch_fxs);
+			// set status mask
+			if (vin_set_status_mask(&vin->context) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+		}
+		ast_mutex_unlock(&vin->lock);
+	} else {
+		ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+		goto pg_channel_fxs_workthread_end;
+	}
+
+	while (ch_fxs->flags.enable) {
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		ast_mutex_unlock(&ch_fxs->lock);
+		res = ast_select(0, NULL, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_fxs->lock);
+
+		// handle timers
+		// off_hook
+		if (is_x_timer_enable(ch_fxs->timers.off_hook) && is_x_timer_fired(ch_fxs->timers.off_hook)) {
+			x_timer_stop(ch_fxs->timers.off_hook);
+			ast_verb(4, "FXS channel=\"%s\" OFF-HOOK\n", ch_fxs->alias);
+			ch_fxs->hook_state = PG_CHANNEL_FXS_HOOK_STATE_OFF;
+			ch_fxs->digit = 0;
+		}
+		// on_hook
+		if (is_x_timer_enable(ch_fxs->timers.on_hook) && is_x_timer_fired(ch_fxs->timers.on_hook)) {
+			x_timer_stop(ch_fxs->timers.on_hook);
+			ast_verb(4, "FXS channel=\"%s\" ON-HOOK\n", ch_fxs->alias);
+			ch_fxs->hook_state = PG_CHANNEL_FXS_HOOK_STATE_ON;
+		}
+		// digit_inter
+		if (is_x_timer_enable(ch_fxs->timers.digit_inter) && is_x_timer_fired(ch_fxs->timers.digit_inter)) {
+			x_timer_stop(ch_fxs->timers.digit_inter);
+			ast_verb(4, "FXS channel=\"%s\" digit=%d\n", ch_fxs->alias, ch_fxs->digit);
+			ch_fxs->digit = 0;
+			x_timer_stop(ch_fxs->timers.digit_pulse);
+			x_timer_stop(ch_fxs->timers.digit_pause);
+		}
+
+		// handle signals
+		// shutdown
+		if (ch_fxs->flags.shutdown) {
+			ch_fxs->flags.shutdown = 0;
+			ast_verb(4, "FXS channel=\"%s\" received shutdown signal\n", ch_fxs->alias);
+#if 0
+			// hangup active calls
+			while (pg_channel_fxs_get_calls_count(ch_fxs)) {
+				AST_LIST_TRAVERSE(&ch_fxs->call_list, call, entry) {
+					pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+					break;
+				}
+				ast_mutex_unlock(&ch_fxs->lock);
+				usleep(1000);
+				ast_mutex_lock(&ch_fxs->lock);
+			}
+			// stop all timers
+			memset(&ch_fxs->timers, 0, sizeof(struct pg_channel_fxs_timers));
+#endif
+			// reset enable flags
+			ch_fxs->flags.enable = 0;
+		}
+		if (ch_fxs->flags.hook_event) {
+			ch_fxs->flags.hook_event = 0;
+			ast_verb(4, "FXS channel=\"%s\" %s-HOOK\n", ch_fxs->alias, ch_fxs->off_hook?"OFF":"ON");
+			if (ch_fxs->off_hook) {
+				if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_ON) {
+					x_timer_set_ms(ch_fxs->timers.off_hook, ch_fxs->config.off_hook_min);
+				} else if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_OFF) {
+					x_timer_start(ch_fxs->timers.digit_pause);
+					if (is_x_timer_enable(ch_fxs->timers.digit_pulse)) {
+						res = get_x_timer_value_ms(ch_fxs->timers.digit_pulse);
+						ast_verb(4, "FXS channel=\"%s\" pulse=%d\n", ch_fxs->alias, res);
+						if ((res <= ch_fxs->config.digit_pulse_max) && (res >= ch_fxs->config.digit_pulse_min)) {
+							x_timer_stop(ch_fxs->timers.digit_pulse);
+							x_timer_stop(ch_fxs->timers.on_hook);
+							ch_fxs->digit++;
+						}
+					}
+				}
+			} else {
+				if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_OFF) {
+					x_timer_set_ms(ch_fxs->timers.on_hook, ch_fxs->config.on_hook_min);
+					x_timer_start(ch_fxs->timers.digit_pulse);
+					if (is_x_timer_enable(ch_fxs->timers.digit_pause)) {
+						res = get_x_timer_value_ms(ch_fxs->timers.digit_pause);
+						ast_verb(4, "FXS channel=\"%s\" pause=%d\n", ch_fxs->alias, res);
+						if ((res <= ch_fxs->config.digit_pause_max) && (res >= ch_fxs->config.digit_pause_min)) {
+							x_timer_stop(ch_fxs->timers.digit_pause);
+							x_timer_set_ms(ch_fxs->timers.digit_inter, ch_fxs->config.digit_inter_min);
+						}
+					}
+				}
+			}
+		}
+	}
+
+pg_channel_fxs_workthread_end:
+
+	if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+		ast_mutex_lock(&vin->lock);
+		if (vin_reset_status(&vin->context) < 0) {
+			while (vin_message_stack_check_line(&vin->context)) {
+				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+			}
+		} else {
+			// set channel to power down high impedance
+			if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_PDHI) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+			// reset hook event handler
+			vin_reset_hook_handler(vin->context, ch_fxs->vinetic_alm_slot);
+			// set status mask
+			if (vin_set_status_mask(&vin->context) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+		}
+		ast_mutex_unlock(&vin->lock);
+	} else {
+		ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+		goto pg_channel_fxs_workthread_end;
+	}
+
+	ch_fxs->thread = AST_PTHREADT_NULL;
+	ast_debug(4, "FXS channel=\"%s\": thread stop\n", ch_fxs->alias);
+	ast_verbose("%s: FXS channel=\"%s\" disabled\n", AST_MODULE, ch_fxs->alias);
+	// reset FXS channel flags
+	memset(&ch_fxs->flags, 0, sizeof(struct pg_channel_fxs_flags));
+	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelFXSPowerStatus", "Channel: %s\r\nStatus: disabled\r\n", ch_fxs->alias);
+
+	ast_mutex_unlock(&ch_fxs->lock);
+	return NULL;
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_fxs_workthread()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -13296,8 +13519,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				ch_gsm_fold_start = tr_gsm->channel_gsm_list.first;
 			ch_gsm_fold = ch_gsm_fold_start;
 			// traverse trunk channel list
-			while (ch_gsm_fold)
-			{
+			while (ch_gsm_fold) {
 				ch_gsm = ch_gsm_fold->channel_gsm;
 				if (ch_gsm) {
 					ast_mutex_lock(&ch_gsm->lock);
@@ -13306,7 +13528,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 						((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) &&
 						(ch_gsm->config.outgoing_perm == PG_CALL_PERMISSION_ALLOW) &&
 						(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
-						((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+						((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 						(pg_is_vinetic_run(vin)) &&
 #if ASTERISK_VERSION_NUMBER >= 100000
 						((joint = ast_format_cap_joint(format, vin->capabilities))) &&
@@ -13356,8 +13578,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				ch_gsm_fold_start = tr_gsm->channel_gsm_list.first;
 			ch_gsm_fold = ch_gsm_fold_start;
 			// traverse trunk channel list
-			while (ch_gsm_fold)
-			{
+			while (ch_gsm_fold) {
 				ch_gsm = ch_gsm_fold->channel_gsm;
 				if (ch_gsm) {
 					ast_mutex_lock(&ch_gsm->lock);
@@ -13366,7 +13587,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 						((ch_gsm->reg_stat == REG_STAT_REG_HOME_NET) || (ch_gsm->reg_stat == REG_STAT_REG_ROAMING)) &&
 						(ch_gsm->config.outgoing_perm == PG_CALL_PERMISSION_ALLOW) &&
 						(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
-						((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+						((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 						(pg_is_vinetic_run(vin)) &&
 #if ASTERISK_VERSION_NUMBER >= 100000
 						((joint = ast_format_cap_joint(format, vin->capabilities))) &&
@@ -13415,7 +13636,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(ch_gsm->config.outgoing_perm == PG_CALL_PERMISSION_ALLOW) &&
 				(!ch_gsm->config.trunkonly) &&
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
-				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 				(pg_is_vinetic_run(vin)) &&
 #if ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
@@ -13448,7 +13669,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(ch_gsm->config.outgoing_perm == PG_CALL_PERMISSION_ALLOW) &&
 				(!ch_gsm->config.trunkonly) &&
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
-				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 				(pg_is_vinetic_run(vin)) &&
 #if ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
@@ -13481,7 +13702,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(ch_gsm->config.outgoing_perm == PG_CALL_PERMISSION_ALLOW) &&
 				(!ch_gsm->config.trunkonly) &&
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
-				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 				(pg_is_vinetic_run(vin)) &&
 #if ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
@@ -13525,7 +13746,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				if (ch_gsm->channel_rtp) {
 					rtp = ch_gsm->channel_rtp;
 					vin = rtp->vinetic;
-				} else if ((!(vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) ||
+				} else if ((!(vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) ||
 						(!pg_is_vinetic_run(vin)) ||
 #if ASTERISK_VERSION_NUMBER >= 100000
 						(!(joint = ast_format_cap_joint(format, vin->capabilities))) ||
@@ -13577,7 +13798,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(ch_gsm->config.outgoing_perm == PG_CALL_PERMISSION_ALLOW) &&
 				(!ch_gsm->config.trunkonly) &&
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
-				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->position_on_board/4))) &&
+				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 				(pg_is_vinetic_run(vin)) &&
 #if ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
@@ -13654,11 +13875,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #endif
 
 #if ASTERISK_VERSION_NUMBER >= 100000
-		switch (rtp->format.id)
+		switch (rtp->format.id) {
 #else
-		switch (rtp->format)
+		switch (rtp->format) {
 #endif
-		{
 			case AST_FORMAT_G723_1:
 				/*! G.723.1 compression */
 				rtp->payload_type = RTP_PT_G723;
@@ -15142,12 +15362,10 @@ static char *pg_cli_generate_complete_channel_gsm_name(const char *begin, int co
 	which = 0;
 	beginlen = strlen(begin);
 
-	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
 		// compare begin of GSM channel alias
-		if ((!strncmp(begin, ch_gsm->alias, beginlen)) && (++which > count))
-		{
+		if ((!strncmp(begin, ch_gsm->alias, beginlen)) && (++which > count)) {
 			res = ast_strdup(ch_gsm->alias);
 			ast_mutex_unlock(&ch_gsm->lock);
 			break;
@@ -15156,8 +15374,9 @@ static char *pg_cli_generate_complete_channel_gsm_name(const char *begin, int co
 	}
 	// compare with special case "all"
 	if ((!res) && (pg_general_channel_gsm_list.first) && (all)) {
-		if ((!strncmp(begin, "all", beginlen)) && (++which > count))
+		if ((!strncmp(begin, "all", beginlen)) && (++which > count)) {
 			res = ast_strdup("all");
+		}
 	}
 
 	return res;
@@ -15180,11 +15399,9 @@ static char *pg_cli_generate_complete_channel_gsm_action(const char *begin, int 
 	which = 0;
 	beginlen = strlen(begin);
 
-	for (i=0; i<PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); i++)
-	{
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); i++) {
 		// get actions name
-		if ((!strncmp(begin, pg_cli_channel_gsm_action_handlers[i].name, beginlen))
-				&& (++which > count)){
+		if ((!strncmp(begin, pg_cli_channel_gsm_action_handlers[i].name, beginlen)) && (++which > count)) {
 			res = ast_strdup(pg_cli_channel_gsm_action_handlers[i].name);
 			break;
 		}
@@ -15830,6 +16047,72 @@ static char *pg_cli_generate_complete_sms_operation(const char *begin, int count
 }
 //------------------------------------------------------------------------------
 // end of pg_cli_generate_complete_sms_operation()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_fxs_name()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_fxs_name(const char *begin, int count, int all)
+{  
+	struct pg_channel_fxs *ch_fxs;
+	char *res;
+	int beginlen;
+	int which;
+
+	res = NULL;
+	ch_fxs = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	AST_LIST_TRAVERSE(&pg_general_channel_fxs_list, ch_fxs, pg_general_channel_fxs_list_entry) {
+		ast_mutex_lock(&ch_fxs->lock);
+		// compare begin of FXS channel alias
+		if ((!strncmp(begin, ch_fxs->alias, beginlen)) && (++which > count)) {
+			res = ast_strdup(ch_fxs->alias);
+			ast_mutex_unlock(&ch_fxs->lock);
+			break;
+		}
+		ast_mutex_unlock(&ch_fxs->lock);
+	}
+	// compare with special case "all"
+	if ((!res) && (pg_general_channel_fxs_list.first) && (all)) {
+		if ((!strncmp(begin, "all", beginlen)) && (++which > count)) {
+			res = ast_strdup("all");
+		}
+	}
+
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_fxs_name()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_fxs_action()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_fxs_action(const char *begin, int count)
+{
+	char *res;
+	int beginlen;
+	int which;
+	size_t i;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxs_action_handlers); i++) {
+		// get actions name
+		if ((!strncmp(begin, pg_cli_channel_fxs_action_handlers[i].name, beginlen)) && (++which > count)) {
+			res = ast_strdup(pg_cli_channel_fxs_action_handlers[i].name);
+			break;
+		}
+	}
+
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_fxs_action()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -17508,8 +17791,7 @@ static char *pg_cli_channel_gsm_actions(struct ast_cli_entry *e, int cmd, struct
 	char *gargv[AST_MAX_ARGS];
 	int gargc;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator channel gsm";
@@ -17533,9 +17815,7 @@ static char *pg_cli_channel_gsm_actions(struct ast_cli_entry *e, int cmd, struct
 				// search action CLI entry
 				gline = ast_strdupa(a->line);
 				if (!(pg_cli_generating_prepare(gline, &gargc, gargv))) {
-
-					for (i=0; i<PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); i++)
-					{
+					for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); i++) {
 						// get actions by name
 						if (!strcmp(gargv[4], pg_cli_channel_gsm_action_handlers[i].name)) {
 							subhandler = pg_cli_channel_gsm_action_handlers[i].handler;
@@ -17565,8 +17845,7 @@ static char *pg_cli_channel_gsm_actions(struct ast_cli_entry *e, int cmd, struct
 
 	subhandler = NULL;
 	// search action CLI entry
-	for (i=0; i<PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); i++)
-	{
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); i++) {
 		// get actions by name
 		if (!strcmp(a->argv[4], pg_cli_channel_gsm_action_handlers[i].name)) {
 			subhandler = pg_cli_channel_gsm_action_handlers[i].handler;
@@ -20933,6 +21212,175 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_channel_fxs_actions()
+//------------------------------------------------------------------------------
+static char *pg_cli_channel_fxs_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	size_t i;
+	cli_fn_type subhandler;
+
+	char *gline;
+	char *gargv[AST_MAX_ARGS];
+	int gargc;
+
+	switch (cmd) {
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_INIT:
+			e->command = "polygator channel fxs";
+			snprintf(pg_cli_channel_fxs_actions_usage, sizeof(pg_cli_channel_fxs_actions_usage),
+					 "Usage: polygator channel fxs <channel> <action> [...]\n");
+			e->usage = pg_cli_channel_fxs_actions_usage;
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_GENERATE:
+			// try to generate complete FXS channel name
+			if (a->pos == 3)
+				return pg_cli_generate_complete_channel_fxs_name(a->word, a->n, 1);
+			// try to generate complete FXS channel action
+			else if (a->pos == 4)
+				return pg_cli_generate_complete_channel_fxs_action(a->word, a->n);
+			// generation channel action parameters ...
+			else if (a->pos >= 5) {
+				// from this point delegate generation function to
+				// action depended CLI entries
+				subhandler = NULL;
+				// search action CLI entry
+				gline = ast_strdupa(a->line);
+				if (!(pg_cli_generating_prepare(gline, &gargc, gargv))) {
+					for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxs_action_handlers); i++) {
+						// get actions by name
+						if (!strcmp(gargv[4], pg_cli_channel_fxs_action_handlers[i].name)) {
+							subhandler = pg_cli_channel_fxs_action_handlers[i].handler;
+							break;
+						}
+					}
+				}
+
+				if (subhandler)
+					return subhandler(e, cmd, a);
+			}
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_HANDLER:
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		default:
+			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
+			return CLI_FAILURE;
+	}
+
+	if (a->argc <= 4) {
+		snprintf(pg_cli_channel_fxs_actions_usage, sizeof(pg_cli_channel_fxs_actions_usage),
+				 "Usage: polygator channel fxs <channel> <action> [...]\n");
+		return CLI_SHOWUSAGE;
+	}
+
+	subhandler = NULL;
+	// search action CLI entry
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxs_action_handlers); i++) {
+		// get actions by name
+		if (!strcmp(a->argv[4], pg_cli_channel_fxs_action_handlers[i].name)) {
+			subhandler = pg_cli_channel_fxs_action_handlers[i].handler;
+			break;
+		}
+	}
+	if (subhandler)
+		return subhandler(e, cmd, a);
+
+	// if command not handled
+	return CLI_FAILURE;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_channel_fxs_actions()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_channel_fxs_action_enable_disable()
+//------------------------------------------------------------------------------
+static char *pg_cli_channel_fxs_action_enable_disable(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	struct pg_channel_fxs *ch_fxs;
+	size_t total;
+
+	switch (cmd) {
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_INIT:
+			ast_cli(a->fd, "is ch_act_pwr subhandler -- CLI_INIT unsupported in this context\n");
+			return CLI_FAILURE;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_GENERATE:
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_HANDLER:
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		default:
+			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
+			return CLI_FAILURE;
+	}
+
+	if (a->argc < 5) {
+		snprintf(pg_cli_channel_fxs_actions_usage, sizeof(pg_cli_channel_fxs_actions_usage),
+				"Usage: polygator channel fxs <channel> enable|disable\n");
+		return CLI_SHOWUSAGE;
+	}
+
+	total = 0;
+	AST_LIST_TRAVERSE(&pg_general_channel_fxs_list, ch_fxs, pg_general_channel_fxs_list_entry) {
+		ast_mutex_lock(&ch_fxs->lock);
+		if ((!strcmp(a->argv[3], "all")) || !strcmp(a->argv[3], ch_fxs->alias)) {
+			total++;
+			ast_cli(a->fd, "  FXS channel=\"%s\": ", ch_fxs->alias);
+			if (!strcmp(a->argv[4], "enable")) {
+				// enable
+				if (!ch_fxs->flags.enable) {
+					// start FXS channel workthread
+					ch_fxs->flags.enable = 1;
+					ch_fxs->power_delay = -1;
+					if (ast_pthread_create_detached(&ch_fxs->thread, NULL, pg_channel_fxs_workthread, ch_fxs) < 0) {
+						ast_cli(a->fd, "can't start workthread\n");
+						ch_fxs->flags.enable = 0;
+						ch_fxs->thread = AST_PTHREADT_NULL;
+					} else {
+						ast_cli(a->fd, "enabled\n");
+					}
+				} else {
+					ast_cli(a->fd, "already enabled\n");
+				}
+			} else {
+				// disable
+				if (ch_fxs->flags.enable) {
+					// check shutdown flag
+					if (!ch_fxs->flags.shutdown_now) {
+						ch_fxs->flags.shutdown = 1;
+						ch_fxs->flags.shutdown_now = 1;
+						ast_cli(a->fd, "send shutdown signal\n");
+					} else {
+						ast_cli(a->fd, "shutdown signal already sent\n");
+					}
+				} else {
+					ast_cli(a->fd, "already disabled\n");
+				}
+			}
+		}
+		ast_mutex_unlock(&ch_fxs->lock);
+	}
+
+	if (!total) {
+		if (strcmp(a->argv[3], "all")) {
+			ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
+		} else {
+			ast_cli(a->fd, "  Channel wildcard \"%s\" not supported to pass additional parameters\n", a->argv[3]);
+		}
+	}
+
+	return CLI_SUCCESS;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_channel_fxs_action_enable_disable()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_trunk_gsm_actions()
 //------------------------------------------------------------------------------
 static char *pg_cli_trunk_gsm_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
@@ -21064,10 +21512,10 @@ static const char *pg_get_config_variable(struct ast_config *ast_cfg, const char
 	char *cat = NULL;
 	
 	if (ast_cfg) {
-		while ((cat = ast_category_browse(ast_cfg, cat)))
-		{
-			if (!strcasecmp(cat, category))
+		while ((cat = ast_category_browse(ast_cfg, cat))) {
+			if (!strcasecmp(cat, category)) {
 				res = ast_variable_retrieve(ast_cfg, cat, variable);
+			}
 		}
 	}
 	return res;
@@ -21131,6 +21579,52 @@ static void pg_cleanup(void)
 		ast_free(tr_gsm);
 	}
 
+	// wait for all GSM channel shutdown
+	do {
+		is_wait = 0;
+		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
+			ast_mutex_lock(&ch_gsm->lock);
+			// emit shutdown signal
+			if (!ch_gsm->flags.shutdown_now) {
+				ch_gsm->flags.shutdown = 1;
+				ch_gsm->flags.shutdown_now = 1;
+			}
+			// wait for reset enable flag
+			if (ch_gsm->flags.enable) {
+				ast_mutex_unlock(&ch_gsm->lock);
+				ast_mutex_unlock(&pg_lock);
+				usleep(1000);
+				is_wait = 1;
+				ast_mutex_lock(&pg_lock);
+				ast_mutex_lock(&ch_gsm->lock);
+			}
+			ast_mutex_unlock(&ch_gsm->lock);
+		}
+	} while(is_wait);
+
+	// wait for all FXS channel shutdown
+	do {
+		is_wait = 0;
+		AST_LIST_TRAVERSE(&pg_general_channel_fxs_list, ch_fxs, pg_general_channel_fxs_list_entry) {
+			ast_mutex_lock(&ch_fxs->lock);
+			// emit shutdown signal
+			if (!ch_fxs->flags.shutdown_now) {
+				ch_fxs->flags.shutdown = 1;
+				ch_fxs->flags.shutdown_now = 1;
+			}
+			// wait for reset enable flag
+			if (ch_fxs->flags.enable) {
+				ast_mutex_unlock(&ch_fxs->lock);
+				ast_mutex_unlock(&pg_lock);
+				usleep(1000);
+				is_wait = 1;
+				ast_mutex_lock(&pg_lock);
+				ast_mutex_lock(&ch_fxs->lock);
+			}
+			ast_mutex_unlock(&ch_fxs->lock);
+		}
+	} while(is_wait);
+
 	// wait for all vinetics shutdown
 	do {
 		is_wait = 0;
@@ -21157,31 +21651,6 @@ static void pg_cleanup(void)
 				ast_mutex_unlock(&vin->lock);
 			}
 			ast_mutex_unlock(&brd->lock);
-		}
-	} while(is_wait);
-
-	// wait for all channel shutdown
-	do {
-		is_wait = 0;
-		//
-		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-		{
-			ast_mutex_lock(&ch_gsm->lock);
-			// emit shutdown signal
-			if (!ch_gsm->flags.shutdown_now) {
-				ch_gsm->flags.shutdown = 1;
-				ch_gsm->flags.shutdown_now = 1;
-			}
-			// wait for reset enable flag
-			if (ch_gsm->flags.enable) {
-				ast_mutex_unlock(&ch_gsm->lock);
-				ast_mutex_unlock(&pg_lock);
-				usleep(1000);
-				is_wait = 1;
-				ast_mutex_lock(&pg_lock);
-				ast_mutex_lock(&ch_gsm->lock);
-			}
-			ast_mutex_unlock(&ch_gsm->lock);
 		}
 	} while(is_wait);
 
@@ -21251,6 +21720,7 @@ static void pg_cleanup(void)
 		ast_free(brd->type);
 		ast_free(brd);
 	}
+
 	// close General Database
 	if (pg_gen_db)
 		sqlite3_close(pg_gen_db);
@@ -21734,7 +22204,6 @@ static int pg_load(void)
 				}
 				ch_fxs->alias = ast_strdup(buf);
 				ch_fxs->vinetic_number = vin_num;
-				ch_fxs->vinetic_alm_slot = -1;
 				ch_fxs->vinetic_alm_slot = vc_slot;
 				// get config variables
 				// alias
@@ -21830,11 +22299,53 @@ static int pg_load(void)
 					if (ch_fxs->config.ali_nelec_nlpm < 0)
 						ch_fxs->config.ali_nelec_nlpm = VIN_NLPM_SIGN_NOISE;
 				}
-#if 0
+				// off_hook.min
+				ch_fxs->config.off_hook_min = 50;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "off_hook.min")) && (is_str_digit(cvar)))
+					ch_fxs->config.off_hook_min = atoi(cvar);
+				if (ch_fxs->config.off_hook_min < 1)
+					ch_fxs->config.off_hook_min = 50;
+				// on_hook.min
+				ch_fxs->config.on_hook_min = 150;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "on_hook.min")) && (is_str_digit(cvar)))
+					ch_fxs->config.on_hook_min = atoi(cvar);
+				if (ch_fxs->config.on_hook_min < 1)
+					ch_fxs->config.on_hook_min = 150;
+				// digit_pulse.min
+				ch_fxs->config.digit_pulse_min = 20;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_pulse.min")) && (is_str_digit(cvar)))
+					ch_fxs->config.digit_pulse_min = atoi(cvar);
+				if (ch_fxs->config.digit_pulse_min < 1)
+					ch_fxs->config.digit_pulse_min = 20;
+				// digit_pulse.max
+				ch_fxs->config.digit_pulse_max = 75;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_pulse.max")) && (is_str_digit(cvar)))
+					ch_fxs->config.digit_pulse_max = atoi(cvar);
+				if (ch_fxs->config.digit_pulse_max < 1)
+					ch_fxs->config.digit_pulse_max = 75;
+				// digit_pause.min
+				ch_fxs->config.digit_pause_min = 20;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_pause.min")) && (is_str_digit(cvar)))
+					ch_fxs->config.digit_pause_min = atoi(cvar);
+				if (ch_fxs->config.digit_pause_min < 1)
+					ch_fxs->config.digit_pause_min = 20;
+				// digit_pause.max
+				ch_fxs->config.digit_pause_max = 50;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_pause.max")) && (is_str_digit(cvar)))
+					ch_fxs->config.digit_pause_max = atoi(cvar);
+				if (ch_fxs->config.digit_pause_max < 1)
+					ch_fxs->config.digit_pause_max = 50;
+				// digit_inter.min
+				ch_fxs->config.digit_inter_min = 200;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_inter.min")) && (is_str_digit(cvar)))
+					ch_fxs->config.digit_inter_min = atoi(cvar);
+				if (ch_fxs->config.digit_inter_min < 1)
+					ch_fxs->config.digit_inter_min = 200;
 				// start channel
 				if (ch_fxs->config.enable) {
 					// start FXS channel workthread
 					ch_fxs->flags.enable = 1;
+					ch_fxs->power_delay = 5;
 					if (ast_pthread_create_detached(&ch_fxs->thread, NULL, pg_channel_fxs_workthread, ch_fxs) < 0) {
 						ast_log(LOG_ERROR, "can't start workthread for FXS channel=\"%s\"\n", ch_fxs->alias);
 						ch_fxs->flags.enable = 0;
@@ -21842,7 +22353,6 @@ static int pg_load(void)
 						goto pg_load_error;
 					}
 				}
-#endif
 				ch_fxs = NULL;
 			} else if (sscanf(buf, "VIN%uRTP%u %[0-9A-Za-z/!-]", &index, &pos, name) == 3) {
 				str_xchg(name, '!', '/');

@@ -72,6 +72,14 @@ do { \
 	__res; \
 })
 
+#define x_timer_start(_timer) \
+do { \
+	struct timespec __curr_time; \
+	clock_gettime(CLOCK_MONOTONIC, &__curr_time); \
+	_timer.enable = 1; \
+	tv_cpy(_timer.start, __curr_time); \
+} while(0)
+
 #define x_timer_set(_timer, _timeout) \
 do { \
 	struct timespec __curr_time; \
@@ -88,6 +96,19 @@ do { \
 	struct timespec __curr_time; \
 	struct timespec __timeout; \
 	tv_set(__timeout, _timeout, 0); \
+	clock_gettime(CLOCK_MONOTONIC, &__curr_time); \
+	_timer.enable = 1; \
+	tv_cpy(_timer.start, __curr_time); \
+	tv_cpy(_timer.timeout, __timeout); \
+	tv_cpy(_timer.expires, _timer.start); \
+	tv_add(_timer.expires, _timer.timeout); \
+} while(0)
+
+#define x_timer_set_ms(_timer, _timeout) \
+do { \
+	struct timespec __curr_time; \
+	struct timespec __timeout; \
+	tv_set(__timeout, _timeout / 1000, (_timeout % 1000) * 1000000); \
 	clock_gettime(CLOCK_MONOTONIC, &__curr_time); \
 	_timer.enable = 1; \
 	tv_cpy(_timer.start, __curr_time); \
@@ -129,6 +150,30 @@ do { \
 		__res = 0; \
 	else \
 		__res = 1; \
+	__res; \
+})
+
+#define get_x_timer_value_ms(_timer) \
+({ \
+	int __res = -1; \
+	struct timespec __curr_time, __sub; \
+	clock_gettime(CLOCK_MONOTONIC, &__curr_time); \
+	if (_timer.enable) { \
+		__sub = tv_sub(__curr_time, _timer.start); \
+		__res = __sub.tv_sec * 1000 + __sub.tv_nsec / 1000000; \
+	} \
+	__res; \
+})
+
+#define get_x_timer_value_us(_timer) \
+({ \
+	int __res = -1; \
+	struct timespec __curr_time, __sub; \
+	clock_gettime(CLOCK_MONOTONIC, &__curr_time); \
+	if (_timer.enable) { \
+		__sub = tv_sub(__curr_time, _timer.start); \
+		__res = __sub.tv_sec * 1000 + __sub.tv_nsec / 1000; \
+	} \
 	__res; \
 })
 
