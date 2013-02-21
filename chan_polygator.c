@@ -717,6 +717,7 @@ struct pg_channel_fxs {
 		int outgoing_perm;
 		char context[AST_MAX_CONTEXT];
 		char extension[AST_MAX_EXTENSION];
+		int callwait;
 		char language[MAX_LANGUAGE];
 		char tonezone[16];
 		char mohinterpret[MAX_MUSICCLASS];
@@ -732,8 +733,8 @@ struct pg_channel_fxs {
 		int ali_nelec_as;
 		int ali_nelec_nlp;
 		int ali_nelec_nlpm;
-		int off_hook_min;
-		int on_hook_min;
+		int offhook_min;
+		int onhook_min;
 		int digit_pulse_min;
 		int digit_pulse_max;
 		int digit_pause_min;
@@ -978,17 +979,32 @@ static struct pg_cli_action pg_cli_channel_gsm_action_handlers[] = {
 
 // polygator CLI FXS channel actions
 static char *pg_cli_channel_fxs_action_enable_disable(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static struct pg_cli_action pg_cli_channel_fxs_action_handlers[] = {
 	PG_CLI_ACTION("enable", pg_cli_channel_fxs_action_enable_disable),
 	PG_CLI_ACTION("disable", pg_cli_channel_fxs_action_enable_disable),
+	PG_CLI_ACTION("get", pg_cli_channel_fxs_action_param),
+	PG_CLI_ACTION("set", pg_cli_channel_fxs_action_param),
 };
 
+struct pg_channel_param {
+	int id;
+	char name[AST_MAX_CMD_LEN];
+	u_int32_t single;
+	u_int32_t all;
+};
+#define PG_CHANNEL_PARAM(_prm, _prmid, _single, _all) \
+	{.id = _prmid, .name = _prm, .single = _single, .all = _all}
+
+#define PG_CHANNEL_PARAMS_COUNT(_prms) \
+	sizeof(_prms) / sizeof(_prms[0])
+
 enum {
-	PG_CHANNEL_GSM_PARAM_OP_UNKNOWN = 0,
-	PG_CHANNEL_GSM_PARAM_OP_SET		= (1 << 0),
-	PG_CHANNEL_GSM_PARAM_OP_GET		= (1 << 1),
-	PG_CHANNEL_GSM_PARAM_OP_QUERY	= (1 << 2),
-	PG_CHANNEL_GSM_PARAM_OP_DELETE	= (1 << 3),
+	PG_CHANNEL_PARAM_OP_UNKNOWN = 0,
+	PG_CHANNEL_PARAM_OP_SET		= (1 << 0),
+	PG_CHANNEL_PARAM_OP_GET		= (1 << 1),
+	PG_CHANNEL_PARAM_OP_QUERY	= (1 << 2),
+	PG_CHANNEL_PARAM_OP_DELETE	= (1 << 3),
 };
 
 enum {
@@ -1033,58 +1049,98 @@ enum {
 	PG_CHANNEL_GSM_PARAM_NELEC_NLP,
 	PG_CHANNEL_GSM_PARAM_NELEC_NLPM,
 };
-struct pg_cgannel_gsm_param {
-	int id;
-	char name[AST_MAX_CMD_LEN];
-	unsigned int ops;
-};
-#define PG_CHANNEL_GSM_PARAM(_prm, _prmid, _ops) \
-	{.id = _prmid, .name = _prm, .ops = _ops}
 
-#define PG_CHANNEL_GSM_PARAMS_COUNT(_prms) \
-	sizeof(_prms) / sizeof(_prms[0])
-
-static struct pg_cgannel_gsm_param pg_channel_gsm_params[] = {
-	PG_CHANNEL_GSM_PARAM("alias", PG_CHANNEL_GSM_PARAM_ALIAS, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("pin", PG_CHANNEL_GSM_PARAM_PIN, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("puk", PG_CHANNEL_GSM_PARAM_PUK, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("imei", PG_CHANNEL_GSM_PARAM_IMEI, PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("number", PG_CHANNEL_GSM_PARAM_NUMBER, PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("progress", PG_CHANNEL_GSM_PARAM_PROGRESS, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("incoming", PG_CHANNEL_GSM_PARAM_INCOMING, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("incomingto", PG_CHANNEL_GSM_PARAM_INCOMINGTO, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("outgoing", PG_CHANNEL_GSM_PARAM_OUTGOING, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("context", PG_CHANNEL_GSM_PARAM_CONTEXT, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("regattempt", PG_CHANNEL_GSM_PARAM_REGATTEMPT, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("callwait", PG_CHANNEL_GSM_PARAM_CALLWAIT, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("clir", PG_CHANNEL_GSM_PARAM_CLIR, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("dcrttl", PG_CHANNEL_GSM_PARAM_DCRTTL, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("language", PG_CHANNEL_GSM_PARAM_LANGUAGE, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("mohinterpret", PG_CHANNEL_GSM_PARAM_MOHINTERPRET, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("baudrate", PG_CHANNEL_GSM_PARAM_BAUDRATE, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("gainin", PG_CHANNEL_GSM_PARAM_GAININ, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("gainout", PG_CHANNEL_GSM_PARAM_GAINOUT, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("gain1", PG_CHANNEL_GSM_PARAM_GAIN1, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("gain2", PG_CHANNEL_GSM_PARAM_GAIN2, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("gainx", PG_CHANNEL_GSM_PARAM_GAINX, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("gainr", PG_CHANNEL_GSM_PARAM_GAINR, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("module", PG_CHANNEL_GSM_PARAM_MODULETYPE, PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_QUERY),
-	PG_CHANNEL_GSM_PARAM("sms.snd.intrv", PG_CHANNEL_GSM_PARAM_SMSSENDINTERVAL, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("sms.snd.atmpt", PG_CHANNEL_GSM_PARAM_SMSSENDATTEMPT, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("sms.max.part", PG_CHANNEL_GSM_PARAM_SMSMAXPARTCOUNT, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("sms.ntf.en", PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_ENABLE, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("sms.ntf.ctx", PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_CONTEXT, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("sms.ntf.exten", PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_EXTENSION, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("trunk", PG_CHANNEL_GSM_PARAM_TRUNK, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET|PG_CHANNEL_GSM_PARAM_OP_DELETE),
-	PG_CHANNEL_GSM_PARAM("trunkonly", PG_CHANNEL_GSM_PARAM_TRUNKONLY, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("confallow", PG_CHANNEL_GSM_PARAM_CONFALLOW, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("ali.nelec", PG_CHANNEL_GSM_PARAM_NELEC, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("ali.nelec.tm", PG_CHANNEL_GSM_PARAM_NELEC_TM, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("ali.nelec.oldc", PG_CHANNEL_GSM_PARAM_NELEC_OLDC, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("ali.nelec.as", PG_CHANNEL_GSM_PARAM_NELEC_AS, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("ali.nelec.nlp", PG_CHANNEL_GSM_PARAM_NELEC_NLP, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
-	PG_CHANNEL_GSM_PARAM("ali.nelec.nlpm", PG_CHANNEL_GSM_PARAM_NELEC_NLPM, PG_CHANNEL_GSM_PARAM_OP_SET|PG_CHANNEL_GSM_PARAM_OP_GET),
+static struct pg_channel_param pg_channel_gsm_params[] = {
+	PG_CHANNEL_PARAM("alias", PG_CHANNEL_GSM_PARAM_ALIAS, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("pin", PG_CHANNEL_GSM_PARAM_PIN, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("puk", PG_CHANNEL_GSM_PARAM_PUK, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("imei", PG_CHANNEL_GSM_PARAM_IMEI, PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("number", PG_CHANNEL_GSM_PARAM_NUMBER, PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("progress", PG_CHANNEL_GSM_PARAM_PROGRESS, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("incoming", PG_CHANNEL_GSM_PARAM_INCOMING, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("incomingto", PG_CHANNEL_GSM_PARAM_INCOMINGTO, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("outgoing", PG_CHANNEL_GSM_PARAM_OUTGOING, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("context", PG_CHANNEL_GSM_PARAM_CONTEXT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("regattempt", PG_CHANNEL_GSM_PARAM_REGATTEMPT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("callwait", PG_CHANNEL_GSM_PARAM_CALLWAIT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("clir", PG_CHANNEL_GSM_PARAM_CLIR, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("dcrttl", PG_CHANNEL_GSM_PARAM_DCRTTL, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("language", PG_CHANNEL_GSM_PARAM_LANGUAGE, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("mohinterpret", PG_CHANNEL_GSM_PARAM_MOHINTERPRET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("baudrate", PG_CHANNEL_GSM_PARAM_BAUDRATE, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gainin", PG_CHANNEL_GSM_PARAM_GAININ, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gainout", PG_CHANNEL_GSM_PARAM_GAINOUT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gain1", PG_CHANNEL_GSM_PARAM_GAIN1, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gain2", PG_CHANNEL_GSM_PARAM_GAIN2, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gainx", PG_CHANNEL_GSM_PARAM_GAINX, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gainr", PG_CHANNEL_GSM_PARAM_GAINR, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("module", PG_CHANNEL_GSM_PARAM_MODULETYPE, PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("sms.snd.intrv", PG_CHANNEL_GSM_PARAM_SMSSENDINTERVAL, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("sms.snd.atmpt", PG_CHANNEL_GSM_PARAM_SMSSENDATTEMPT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("sms.max.part", PG_CHANNEL_GSM_PARAM_SMSMAXPARTCOUNT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("sms.ntf.en", PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_ENABLE, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("sms.ntf.ctx", PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_CONTEXT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("sms.ntf.exten", PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_EXTENSION, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("trunk", PG_CHANNEL_GSM_PARAM_TRUNK, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_DELETE, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_DELETE),
+	PG_CHANNEL_PARAM("trunkonly", PG_CHANNEL_GSM_PARAM_TRUNKONLY, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("confallow", PG_CHANNEL_GSM_PARAM_CONFALLOW, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec", PG_CHANNEL_GSM_PARAM_NELEC, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.tm", PG_CHANNEL_GSM_PARAM_NELEC_TM, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.oldc", PG_CHANNEL_GSM_PARAM_NELEC_OLDC, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.as", PG_CHANNEL_GSM_PARAM_NELEC_AS, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.nlp", PG_CHANNEL_GSM_PARAM_NELEC_NLP, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.nlpm", PG_CHANNEL_GSM_PARAM_NELEC_NLPM, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 };
+
+enum {
+	PG_CHANNEL_FXS_PARAM_UNKNOWN = 0,
+	PG_CHANNEL_FXS_PARAM_ALIAS,
+	PG_CHANNEL_FXS_PARAM_CIDNUM,
+	PG_CHANNEL_FXS_PARAM_CIDNAME,
+	PG_CHANNEL_FXS_PARAM_INCOMING,
+	PG_CHANNEL_FXS_PARAM_OUTGOING,
+	PG_CHANNEL_FXS_PARAM_CONTEXT,
+	PG_CHANNEL_FXS_PARAM_EXTENSION,
+	PG_CHANNEL_FXS_PARAM_CALLWAIT,
+	PG_CHANNEL_FXS_PARAM_LANGUAGE,
+	PG_CHANNEL_FXS_PARAM_MOHINTERPRET,
+	PG_CHANNEL_FXS_PARAM_TONEZONE,
+	PG_CHANNEL_FXS_PARAM_GAIN1,
+	PG_CHANNEL_FXS_PARAM_GAIN2,
+	PG_CHANNEL_FXS_PARAM_GAINX,
+	PG_CHANNEL_FXS_PARAM_GAINR,
+	PG_CHANNEL_FXS_PARAM_NELEC,
+	PG_CHANNEL_FXS_PARAM_NELEC_TM,
+	PG_CHANNEL_FXS_PARAM_NELEC_OLDC,
+	PG_CHANNEL_FXS_PARAM_NELEC_AS,
+	PG_CHANNEL_FXS_PARAM_NELEC_NLP,
+	PG_CHANNEL_FXS_PARAM_NELEC_NLPM,
+};
+
+static struct pg_channel_param pg_channel_fxs_params[] = {
+	PG_CHANNEL_PARAM("alias", PG_CHANNEL_FXS_PARAM_ALIAS, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("cid.num", PG_CHANNEL_FXS_PARAM_CIDNUM, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("cid.name", PG_CHANNEL_FXS_PARAM_CIDNAME, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("incoming", PG_CHANNEL_FXS_PARAM_INCOMING, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("outgoing", PG_CHANNEL_FXS_PARAM_OUTGOING, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("context", PG_CHANNEL_FXS_PARAM_CONTEXT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("extension", PG_CHANNEL_FXS_PARAM_EXTENSION, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("callwait", PG_CHANNEL_FXS_PARAM_CALLWAIT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("language", PG_CHANNEL_FXS_PARAM_LANGUAGE, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("mohinterpret", PG_CHANNEL_FXS_PARAM_MOHINTERPRET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("tonezone", PG_CHANNEL_FXS_PARAM_TONEZONE, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gain1", PG_CHANNEL_FXS_PARAM_GAIN1, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gain2", PG_CHANNEL_FXS_PARAM_GAIN2, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gainx", PG_CHANNEL_FXS_PARAM_GAINX, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("gainr", PG_CHANNEL_FXS_PARAM_GAINR, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec", PG_CHANNEL_FXS_PARAM_NELEC, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.tm", PG_CHANNEL_FXS_PARAM_NELEC_TM, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.oldc", PG_CHANNEL_FXS_PARAM_NELEC_OLDC, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.as", PG_CHANNEL_FXS_PARAM_NELEC_AS, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.nlp", PG_CHANNEL_FXS_PARAM_NELEC_NLP, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("ali.nelec.nlpm", PG_CHANNEL_FXS_PARAM_NELEC_NLPM, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+};
+
 enum {
 	PG_CHANNEL_GSM_DEBUG_UNKNOWN = 0,
 	PG_CHANNEL_GSM_DEBUG_AT,
@@ -1103,8 +1159,8 @@ static struct pg_generic_param pg_call_gsm_incoming_types[] = {
 	PG_GENERIC_PARAM("spec", PG_CALL_GSM_INCOMING_TYPE_SPEC),
 	PG_GENERIC_PARAM("dyn", PG_CALL_GSM_INCOMING_TYPE_DYN),
 };
-// polygator outgoing call permissions
-static struct pg_generic_param pg_call_gsm_outgoing_perms[] = {
+// polygator call permissions
+static struct pg_generic_param pg_call_permissions[] = {
 	PG_GENERIC_PARAM("deny", PG_CALL_PERMISSION_DENY),
 	PG_GENERIC_PARAM("allow", PG_CALL_PERMISSION_ALLOW),
 };
@@ -3368,6 +3424,29 @@ static char *pg_clir_status_to_string(int status)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_get_channel_param_operation()
+//------------------------------------------------------------------------------
+static inline u_int32_t pg_get_channel_param_operation(const char *operation)
+{
+	u_int32_t opid = PG_CHANNEL_PARAM_OP_UNKNOWN;
+	if (operation) {
+		if (!strcmp(operation, "get")) {
+			opid = PG_CHANNEL_PARAM_OP_GET;
+		} else if (!strcmp(operation, "set")) {
+			opid = PG_CHANNEL_PARAM_OP_SET;
+		} else if (!strcmp(operation, "query")) {
+			opid = PG_CHANNEL_PARAM_OP_QUERY;
+		} else if (!strcmp(operation, "delete")) {
+			opid = PG_CHANNEL_PARAM_OP_DELETE;
+		}
+	}
+	return opid;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_channel_param_operation()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_get_channel_gsm_param()
 //------------------------------------------------------------------------------
 static int pg_get_channel_gsm_param(const char *param)
@@ -3375,7 +3454,7 @@ static int pg_get_channel_gsm_param(const char *param)
 	size_t i;
 	int prm = PG_CHANNEL_GSM_PARAM_UNKNOWN;
 	if (param) {
-		for (i = 0; i < PG_CHANNEL_GSM_PARAMS_COUNT(pg_channel_gsm_params); i++) {
+		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_gsm_params); i++) {
 			if (!strcmp(param, pg_channel_gsm_params[i].name)) {
 				prm = pg_channel_gsm_params[i].id;
 				break;
@@ -3389,25 +3468,86 @@ static int pg_get_channel_gsm_param(const char *param)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_get_channel_gsm_param()
+// pg_channel_gsm_is_operation_param_valid()
 //------------------------------------------------------------------------------
-static inline int pg_get_channel_gsm_param_operation(const char *operation)
+static int pg_channel_gsm_is_operation_param_valid(const char *channel, const char *operation, const char *param)
 {
-	int opid = PG_CHANNEL_GSM_PARAM_OP_UNKNOWN;
-	if (operation) {
-		if (!strcmp(operation, "get"))
-			opid = PG_CHANNEL_GSM_PARAM_OP_GET;
-		else if (!strcmp(operation, "set"))
-			opid = PG_CHANNEL_GSM_PARAM_OP_SET;
-		else if (!strcmp(operation, "query"))
-			opid = PG_CHANNEL_GSM_PARAM_OP_QUERY;
-		else if (!strcmp(operation, "delete"))
-			opid = PG_CHANNEL_GSM_PARAM_OP_DELETE;
+	size_t i;
+	int res = 0;
+	u_int32_t single = 0;
+	u_int32_t all = 0;
+
+	if (channel && operation && param) {
+		if (strcmp(channel, "all")) {
+			single = pg_get_channel_param_operation(operation);
+		} else {
+			all = pg_get_channel_param_operation(operation);
+		}
+		if (single || all) {
+			for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_gsm_params); i++) {
+				if ((!strcmp(param, pg_channel_gsm_params[i].name)) && ((single & pg_channel_gsm_params[i].single) || (all & pg_channel_gsm_params[i].all))) {
+					res = 1;
+					break;
+				}
+			}
+		}
 	}
-	return opid;
+	return res;
 }
 //------------------------------------------------------------------------------
-// end of pg_get_channel_gsm_param_operation()
+// end of pg_channel_gsm_is_operation_param_valid()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_get_channel_fxs_param()
+//------------------------------------------------------------------------------
+static int pg_get_channel_fxs_param(const char *param)
+{
+	size_t i;
+	int prm = PG_CHANNEL_FXS_PARAM_UNKNOWN;
+	if (param) {
+		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxs_params); i++) {
+			if (!strcmp(param, pg_channel_fxs_params[i].name)) {
+				prm = pg_channel_fxs_params[i].id;
+				break;
+			}
+		}
+	}
+	return prm;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_channel_fxs_param()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_channel_fxs_is_operation_param_valid()
+//------------------------------------------------------------------------------
+static int pg_channel_fxs_is_operation_param_valid(const char *channel, const char *operation, const char *param)
+{
+	size_t i;
+	int res = 0;
+	u_int32_t single = 0;
+	u_int32_t all = 0;
+
+	if (channel && operation && param) {
+		if (strcmp(channel, "all")) {
+			single = pg_get_channel_param_operation(operation);
+		} else {
+			all = pg_get_channel_param_operation(operation);
+		}
+		if (single || all) {
+			for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxs_params); i++) {
+				if ((!strcmp(param, pg_channel_fxs_params[i].name)) && ((single & pg_channel_fxs_params[i].single) || (all & pg_channel_fxs_params[i].all))) {
+					res = 1;
+					break;
+				}
+			}
+		}
+	}
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_fxs_is_operation_param_valid()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -3513,9 +3653,9 @@ static int pg_get_call_permission(const char *outgoing)
 	size_t i;
 	int out = PG_CALL_PERMISSION_UNKNOWN;
 	if (outgoing) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_outgoing_perms); i++) {
-			if (!strcmp(outgoing, pg_call_gsm_outgoing_perms[i].name)) {
-				out = pg_call_gsm_outgoing_perms[i].id;
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+			if (!strcmp(outgoing, pg_call_permissions[i].name)) {
+				out = pg_call_permissions[i].id;
 				break;
 			}
 		}
@@ -3527,19 +3667,19 @@ static int pg_get_call_permission(const char *outgoing)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_call_gsm_outgoing_to_string()
+// pg_call_permission_to_string()
 //------------------------------------------------------------------------------
-static char *pg_call_gsm_outgoing_to_string(int outgoing)
+static char *pg_call_permission_to_string(int outgoing)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_outgoing_perms); i++) {
-		if (outgoing == pg_call_gsm_outgoing_perms[i].id)
-			return pg_call_gsm_outgoing_perms[i].name;
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+		if (outgoing == pg_call_permissions[i].id)
+			return pg_call_permissions[i].name;
 	}
 	return "unknown";
 }
 //------------------------------------------------------------------------------
-// end of pg_call_gsm_outgoing_to_string()
+// end of pg_call_permission_to_string()
 //------------------------------------------------------------------------------
 
 
@@ -7353,7 +7493,7 @@ static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
 			if ((tone_zone = ast_get_indication_zone(ch_fxs->config.tonezone))) {
 				// get ring tone
 				if ((tone_zone_sound = ast_get_indication_tone(tone_zone, "ring"))) {
-					ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "ring", ch_fxs->config.tonezone, tone_zone_sound->data);
+// 					ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "ring", ch_fxs->config.tonezone, tone_zone_sound->data);
 					if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
 						ast_mutex_lock(&vin->lock);
 						if (vin_reset_status(&vin->context) < 0) {
@@ -7439,7 +7579,7 @@ static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
 				if ((tone_zone = ast_get_indication_zone(ch_fxs->config.tonezone))) {
 					// get ring tone
 					if ((tone_zone_sound = ast_get_indication_tone(tone_zone, "dial"))) {
-						ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "dial", ch_fxs->config.tonezone, tone_zone_sound->data);
+// 						ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "dial", ch_fxs->config.tonezone, tone_zone_sound->data);
 						if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
 							ast_mutex_lock(&vin->lock);
 							if (vin_reset_status(&vin->context) < 0) {
@@ -14360,15 +14500,15 @@ static void *pg_channel_fxs_workthread(void *data)
 					}
 				} else {
 					// check outgoing permission
-					if (/*ch_fxs->config.outgoing_perm == PG_CALL_PERMISSION_ALLOW*/1) {
-						ast_verb(4, "FXS channel=\"%s\" outgoing calls allowed\n", ch_fxs->alias);
+					if (ch_fxs->config.outgoing_perm == PG_CALL_PERMISSION_ALLOW) {
+// 						ast_verb(4, "FXS channel=\"%s\" outgoing calls allowed\n", ch_fxs->alias);
 						if ((call = pg_channel_fxs_get_new_call(ch_fxs))) {
 							call->direction = PG_CALL_DIRECTION_INCOMING;
 							if (pg_call_fxs_sm(call, PG_CALL_FXS_MSG_SETUP_IND, 0) < 0) {
 								if ((tone_zone = ast_get_indication_zone(ch_fxs->config.tonezone))) {
 									// get busy tone
 									if ((tone_zone_sound = ast_get_indication_tone(tone_zone, "busy"))) {
-										ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "busy", ch_fxs->config.tonezone, tone_zone_sound->data);
+// 										ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "busy", ch_fxs->config.tonezone, tone_zone_sound->data);
 										if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
 											ast_mutex_lock(&vin->lock);
 											if (vin_reset_status(&vin->context) < 0) {
@@ -14418,7 +14558,7 @@ static void *pg_channel_fxs_workthread(void *data)
 						if ((tone_zone = ast_get_indication_zone(ch_fxs->config.tonezone))) {
 							// get busy tone
 							if ((tone_zone_sound = ast_get_indication_tone(tone_zone, "busy"))) {
-								ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "busy", ch_fxs->config.tonezone, tone_zone_sound->data);
+// 								ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "busy", ch_fxs->config.tonezone, tone_zone_sound->data);
 								if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
 									ast_mutex_lock(&vin->lock);
 									if (vin_reset_status(&vin->context) < 0) {
@@ -14557,7 +14697,7 @@ static void *pg_channel_fxs_workthread(void *data)
 // 			ast_verb(4, "FXS channel=\"%s\" %s-HOOK\n", ch_fxs->alias, ch_fxs->off_hook?"OFF":"ON");
 			if (ch_fxs->off_hook) {
 				if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_ON) {
-					x_timer_set_ms(ch_fxs->timers.off_hook, ch_fxs->config.off_hook_min);
+					x_timer_set_ms(ch_fxs->timers.off_hook, ch_fxs->config.offhook_min);
 				} else if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_OFF) {
 					if (is_x_timer_enable(ch_fxs->timers.digit_pulse)) {
 						x_timer_start(ch_fxs->timers.digit_pause);
@@ -14576,7 +14716,7 @@ static void *pg_channel_fxs_workthread(void *data)
 				}
 			} else {
 				if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_OFF) {
-					x_timer_set_ms(ch_fxs->timers.on_hook, ch_fxs->config.on_hook_min);
+					x_timer_set_ms(ch_fxs->timers.on_hook, ch_fxs->config.onhook_min);
 					x_timer_start(ch_fxs->timers.digit_pulse);
 					if (is_x_timer_enable(ch_fxs->timers.digit_pause)) {
 						res = get_x_timer_value_ms(ch_fxs->timers.digit_pause);
@@ -14649,6 +14789,7 @@ static int pg_config_file_build(char *filename)
 	struct pg_board *brd;
 	struct pg_channel_gsm *ch_gsm;
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold;
+	struct pg_channel_fxs *ch_fxs;
 	struct pg_vinetic *vin;
 
 	sprintf(path, "%s/%s", ast_config_AST_CONFIG_DIR, filename);
@@ -14706,9 +14847,13 @@ static int pg_config_file_build(char *filename)
 
 	// build GSM channels categories
 	AST_LIST_TRAVERSE(&pg_general_board_list, brd, pg_general_board_list_entry) {
+
 		ast_mutex_lock(&brd->lock);
+
 		AST_LIST_TRAVERSE(&brd->channel_gsm_list, ch_gsm, pg_board_channel_gsm_list_entry) {
+
 			ast_mutex_lock(&ch_gsm->lock);
+
 			// GSM channel category
 			len += fprintf(fp, "[%s-gsm%u]\n", ch_gsm->board->name, ch_gsm->position_on_board);
 			// alias
@@ -14716,60 +14861,70 @@ static int pg_config_file_build(char *filename)
 			// enable
 			len += fprintf(fp, "enable=%s\n", ch_gsm->flags.enable ? "yes" : "no");
 			// pin
-			if (ch_gsm->pin)
+			if (ch_gsm->pin) {
 				len += fprintf(fp, "pin=%s\n", ch_gsm->pin);
+			}
 			// baudrate
 			len += fprintf(fp, "baudrate=%u\n", ch_gsm->config.baudrate);
 			// regattempt
-			if (ch_gsm->config.reg_try_count < 0)
+			if (ch_gsm->config.reg_try_count < 0) {
 				len += fprintf(fp, "regattempt=forever\n");
-			else
+			} else {
 				len += fprintf(fp, "regattempt=%d\n", ch_gsm->config.reg_try_count);
+			}
 			// callwait
 			len += fprintf(fp, "callwait=%s\n", ch_gsm->config.callwait ? "yes" : "no");
 			// clir
 			len += fprintf(fp, "clir=%s\n", pg_clir_state_to_string(ch_gsm->config.clir));
 			// outgoing
-			len += fprintf(fp, "outgoing=%s\n", pg_call_gsm_outgoing_to_string(ch_gsm->config.outgoing_perm));
+			len += fprintf(fp, "outgoing=%s\n", pg_call_permission_to_string(ch_gsm->config.outgoing_perm));
 			// incoming
 			len += fprintf(fp, "incoming=%s\n", pg_call_gsm_incoming_type_to_string(ch_gsm->config.incoming_type));
-			// incomingto
-			if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_SPEC)
+			if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_SPEC) {
+				// incomingto
 				len += fprintf(fp, "incomingto=%s\n", ch_gsm->config.call_extension);
-			// dcrttl
-			else if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_DYN)
+			} else if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_DYN) {
+				// dcrttl
 				len += fprintf(fp, "dcrttl=%ld\n", (long int)ch_gsm->config.dcrttl);
+			}
 			// context
-			if (strlen(ch_gsm->config.call_context))
+			if (!ast_strlen_zero(ch_gsm->config.call_context)) {
 				len += fprintf(fp, "context=%s\n", ch_gsm->config.call_context);
+			}
 			// progress
 			len += fprintf(fp, "progress=%s\n", pg_call_gsm_progress_to_string(ch_gsm->config.progress));
 			// language
-			if (strlen(ch_gsm->config.language))
+			if (!ast_strlen_zero(ch_gsm->config.language)) {
 				len += fprintf(fp, "language=%s\n", ch_gsm->config.language);
+			}
 			// mohinterpret
-			if (strlen(ch_gsm->config.mohinterpret))
+			if (!ast_strlen_zero(ch_gsm->config.mohinterpret)) {
 				len += fprintf(fp, "mohinterpret=%s\n", ch_gsm->config.mohinterpret);
+			}
 			// trunk
-			AST_LIST_TRAVERSE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry)
+			AST_LIST_TRAVERSE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry) {
 				len += fprintf(fp, "trunk=%s\n", ch_gsm_fold->name);
+			}
 			// trunkonly
-			if (ch_gsm->trunk_list.first)
+			if (ch_gsm->trunk_list.first) {
 				len += fprintf(fp, "trunkonly=%s\n", ch_gsm->config.trunkonly?"yes":"no");
+			}
 			// confallow
 			len += fprintf(fp, "confallow=%s\n", ch_gsm->config.conference_allowed?"yes":"no");
+
 			// gainin
 			len += fprintf(fp, "gainin=%d\n", ch_gsm->config.gainin);
 			// gainout
 			len += fprintf(fp, "gainout=%d\n", ch_gsm->config.gainout);
+
 			// gain1
-			len += fprintf(fp, "gain1=%02x\n", ch_gsm->config.gain1);
+			len += fprintf(fp, "gain1=%f\n", vin_gainem_to_gaindb(ch_gsm->config.gain1));
 			// gain2
-			len += fprintf(fp, "gain2=%02x\n", ch_gsm->config.gain2);
+			len += fprintf(fp, "gain2=%f\n", vin_gainem_to_gaindb(ch_gsm->config.gain2));
 			// gainX
-			len += fprintf(fp, "gainx=%02x\n", ch_gsm->config.gainx);
+			len += fprintf(fp, "gainx=%f\n", vin_gainem_to_gaindb(ch_gsm->config.gainx));
 			// gainR
-			len += fprintf(fp, "gainr=%02x\n", ch_gsm->config.gainr);
+			len += fprintf(fp, "gainr=%f\n", vin_gainem_to_gaindb(ch_gsm->config.gainr));
 
 			// sms.send.interval
 			len += fprintf(fp, "sms.send.interval=%ld\n", ch_gsm->config.sms_send_interval);
@@ -14800,10 +14955,101 @@ static int pg_config_file_build(char *filename)
 
 			// place separator
 			len += fprintf(fp, FORMAT_SEPARATOR_LINE);
-			
+
 			ast_mutex_unlock(&ch_gsm->lock);
 		}
+		ch_gsm = NULL;
+
+		AST_LIST_TRAVERSE(&brd->channel_fxs_list, ch_fxs, pg_board_channel_fxs_list_entry) {
+
+			ast_mutex_lock(&ch_fxs->lock);
+
+			// FXS channel category
+			len += fprintf(fp, "[%s-fxs%u]\n", ch_fxs->board->name, ch_fxs->position_on_board);
+			// alias
+			len += fprintf(fp, "alias=%s\n", ch_fxs->alias);
+			// enable
+			len += fprintf(fp, "enable=%s\n", ch_fxs->flags.enable ? "yes" : "no");
+			// callerid
+			if (!ast_strlen_zero(ch_fxs->config.cid_name) && !ast_strlen_zero(ch_fxs->config.cid_num)) {
+				len += fprintf(fp, "callerid=%s <%s>\n", ch_fxs->config.cid_name, ch_fxs->config.cid_num);
+			} else if (!ast_strlen_zero(ch_fxs->config.cid_num)) {
+				len += fprintf(fp, "callerid=%s\n", ch_fxs->config.cid_num);
+			}
+			// incoming
+			len += fprintf(fp, "incoming=%s\n", pg_call_permission_to_string(ch_fxs->config.incoming_perm));
+			// outgoing
+			len += fprintf(fp, "outgoing=%s\n", pg_call_permission_to_string(ch_fxs->config.outgoing_perm));
+			// context
+			if (!ast_strlen_zero(ch_fxs->config.context)) {
+				len += fprintf(fp, "context=%s\n", ch_fxs->config.context);
+			}
+			// extension
+			if (!ast_strlen_zero(ch_fxs->config.extension)) {
+				len += fprintf(fp, "extension=%s\n", ch_fxs->config.extension
+				);
+			}
+			// callwait
+			len += fprintf(fp, "callwait=%s\n", ch_fxs->config.callwait ? "yes" : "no");
+			// language
+			if (!ast_strlen_zero(ch_fxs->config.language)) {
+				len += fprintf(fp, "language=%s\n", ch_fxs->config.language);
+			}
+			// mohinterpret
+			if (!ast_strlen_zero(ch_fxs->config.mohinterpret)) {
+				len += fprintf(fp, "mohinterpret=%s\n", ch_fxs->config.mohinterpret);
+			}
+			// tonezone
+			if (!ast_strlen_zero(ch_fxs->config.tonezone)) {
+				len += fprintf(fp, "mohinterpret=%s\n", ch_fxs->config.tonezone);
+			}
+
+			// gain1
+			len += fprintf(fp, "gain1=%f\n", vin_gainem_to_gaindb(ch_fxs->config.gain1));
+			// gain2
+			len += fprintf(fp, "gain2=%f\n", vin_gainem_to_gaindb(ch_fxs->config.gain2));
+			// gainX
+			len += fprintf(fp, "gainx=%f\n", vin_gainem_to_gaindb(ch_fxs->config.gainx));
+			// gainR
+			len += fprintf(fp, "gainr=%f\n", vin_gainem_to_gaindb(ch_fxs->config.gainr));
+
+			// ali.nelec
+			len += fprintf(fp, "ali.nelec=%s\n", (ch_fxs->config.ali_nelec == VIN_DIS)?"inactive":"active");
+			// ali.nelec.tm
+			len += fprintf(fp, "ali.nelec.tm=%s\n", (ch_fxs->config.ali_nelec_tm == VIN_DTM_ON)?"on":"off");
+			// ali.nelec.oldc
+			len += fprintf(fp, "ali.nelec.oldc=%s\n", (ch_fxs->config.ali_nelec_oldc == VIN_OLDC_ZERO)?"zero":"old");
+			// ali.nelec.as
+			len += fprintf(fp, "ali.nelec.as=%s\n", (ch_fxs->config.ali_nelec_as == VIN_AS_RUN)?"run":"stop");
+			// ali.nelec.nlp
+			len += fprintf(fp, "ali.nelec.nlp=%s\n", (ch_fxs->config.ali_nelec_nlp == VIN_OFF)?"off":"on");
+			// ali.nelec.nlpm
+			len += fprintf(fp, "ali.nelec.nlpm=%s\n", pg_vinetic_ali_nelec_nlpm_to_string(ch_fxs->config.ali_nelec_nlpm));
+
+			// offhook.min
+			len += fprintf(fp, "offhook.min=%d\n", ch_fxs->config.offhook_min);
+			// onhook.min
+			len += fprintf(fp, "onhook.min=%d\n", ch_fxs->config.onhook_min);
+			// digit.pulse.min
+			len += fprintf(fp, "digit.pulse.min=%d\n", ch_fxs->config.digit_pulse_min);
+			// digit.pulse.max
+			len += fprintf(fp, "digit.pulse.max=%d\n", ch_fxs->config.digit_pulse_max);
+			// digit.pause.min
+			len += fprintf(fp, "digit.pause.min=%d\n", ch_fxs->config.digit_pause_min);
+			// digit.pause.max
+			len += fprintf(fp, "digit.pause.max=%d\n", ch_fxs->config.digit_pause_max);
+			// digit.inter.min
+			len += fprintf(fp, "digit.inter.min=%d\n", ch_fxs->config.digit_inter_min);
+
+			// place separator
+			len += fprintf(fp, FORMAT_SEPARATOR_LINE);
+
+			ast_mutex_unlock(&ch_fxs->lock);
+		}
+		ch_fxs = NULL;
+
 		ast_mutex_unlock(&brd->lock);
+
 	}
 
 	ast_mutex_unlock(&pg_lock);
@@ -17675,7 +17921,7 @@ static int pg_fxs_hangup(struct ast_channel *ast_ch)
 			if ((tone_zone = ast_get_indication_zone(ch_fxs->config.tonezone))) {
 				// get busy tone
 				if ((tone_zone_sound = ast_get_indication_tone(tone_zone, "busy"))) {
-					ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "busy", ch_fxs->config.tonezone, tone_zone_sound->data);
+// 					ast_verb(4, "FXS channel=\"%s\" \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, "busy", ch_fxs->config.tonezone, tone_zone_sound->data);
 					// disable UTG
 					if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
@@ -18790,27 +19036,36 @@ static char *pg_cli_generate_complete_channel_gsm_action_power_on_off(const char
 //------------------------------------------------------------------------------
 // pg_cli_generate_complete_channel_gsm_action_params()
 //------------------------------------------------------------------------------
-static char *pg_cli_generate_complete_channel_gsm_action_params(const char *begin, int count, const char *operation)
+static char *pg_cli_generate_complete_channel_gsm_action_params(const char *begin, int count, const char *channel, const char *operation)
 {
 	char *res;
 	int beginlen;
 	int which;
 	size_t i;
+	u_int32_t single;
+	u_int32_t all;
 
 	res = NULL;
 	which = 0;
 	beginlen = strlen(begin);
+	single = 0;
+	all = 0;
 
-	int opid = pg_get_channel_gsm_param_operation(operation);
+	if (channel) {
+		if (strcmp(channel, "all")) {
+			single = pg_get_channel_param_operation(operation);
+		} else {
+			all = pg_get_channel_param_operation(operation);
+		}
+	}
 
-	for (i=0; i<PG_CHANNEL_GSM_PARAMS_COUNT(pg_channel_gsm_params); i++)
-	{
-		// get actions name
-		if ((opid & pg_channel_gsm_params[i].ops) &&
-				(!strncmp(begin, pg_channel_gsm_params[i].name, beginlen)) &&
-					(++which > count)) {
-			res = ast_strdup(pg_channel_gsm_params[i].name);
-			break;
+	if (single || all) {
+		for (i=0; i<PG_CHANNEL_PARAMS_COUNT(pg_channel_gsm_params); i++) {
+			// get actions name
+			if (((single & pg_channel_gsm_params[i].single) || (all & pg_channel_gsm_params[i].all)) && (!strncmp(begin, pg_channel_gsm_params[i].name, beginlen)) && (++which > count)) {
+				res = ast_strdup(pg_channel_gsm_params[i].name);
+				break;
+			}
 		}
 	}
 
@@ -18988,13 +19243,11 @@ static char *pg_cli_generate_complete_channel_gsm_outgoing(const char *begin, in
 
 	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
 		ast_mutex_lock(&ch_gsm->lock);
-
-		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_call_gsm_outgoing_perms); i++)
-		{
-			if ((pg_call_gsm_outgoing_perms[i].id != ch_gsm->config.outgoing_perm) &&
-				(!strncmp(begin, pg_call_gsm_outgoing_perms[i].name, beginlen)) &&
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+			if ((pg_call_permissions[i].id != ch_gsm->config.outgoing_perm) &&
+				(!strncmp(begin, pg_call_permissions[i].name, beginlen)) &&
 					(++which > count)) {
-				res = ast_strdup(pg_call_gsm_outgoing_perms[i].name);
+				res = ast_strdup(pg_call_permissions[i].name);
 				break;
 			}
 		}
@@ -19451,6 +19704,48 @@ static char *pg_cli_generate_complete_channel_fxs_action(const char *begin, int 
 }
 //------------------------------------------------------------------------------
 // end of pg_cli_generate_complete_channel_fxs_action()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_fxs_action_params()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_fxs_action_params(const char *begin, int count, const char *channel, const char *operation)
+{
+	char *res;
+	int beginlen;
+	int which;
+	size_t i;
+	u_int32_t single;
+	u_int32_t all;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+	single = 0;
+	all = 0;
+
+	if (channel) {
+		if (strcmp(channel, "all")) {
+			single = pg_get_channel_param_operation(operation);
+		} else {
+			all = pg_get_channel_param_operation(operation);
+		}
+	}
+
+	if (single || all) {
+		for (i=0; i<PG_CHANNEL_PARAMS_COUNT(pg_channel_fxs_params); i++) {
+			// get actions name
+			if (((single & pg_channel_fxs_params[i].single) || (all & pg_channel_fxs_params[i].all)) && (!strncmp(begin, pg_channel_fxs_params[i].name, beginlen)) && (++which > count)) {
+				res = ast_strdup(pg_channel_fxs_params[i].name);
+				break;
+			}
+		}
+	}
+
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_fxs_action_params()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -20909,7 +21204,7 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 			ast_cli(a->fd, "  -- CLIR status = %s\n", ch_gsm->flags.sim_inserted?pg_clir_status_to_string(ch_gsm->clir_status):"unknown");
 // 			ast_cli(a->fd, "  -- balance request string = %s\n", ch_gsm->config.balance_request?ch_gsm->config.balance_request:"unknown");
 // 			ast_cli(a->fd, "  -- balance = [%s]\n", ch_gsm->balance?ch_gsm->balance:"unknown");
-			ast_cli(a->fd, "  -- outgoing = %s\n", pg_call_gsm_outgoing_to_string(ch_gsm->config.outgoing_perm));
+			ast_cli(a->fd, "  -- outgoing = %s\n", pg_call_permission_to_string(ch_gsm->config.outgoing_perm));
 			ast_cli(a->fd, "  -- incoming = %s\n", pg_call_gsm_incoming_type_to_string(ch_gsm->config.incoming_type));
 			if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_SPEC)
 			  ast_cli(a->fd, "  -- incomingto = %s\n", ch_gsm->config.call_extension);
@@ -21512,8 +21807,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 	char *cp;
 	char tmpbuf[256];
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			ast_cli(a->fd, "is ch_act_prm subhandler -- CLI_INIT unsupported in this context\n");
@@ -21523,7 +21817,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 		  	gline = ast_strdupa(a->line);
 			if (!(pg_cli_generating_prepare(gline, &gargc, gargv))) {
 				if (a->pos == 5) {
-					return pg_cli_generate_complete_channel_gsm_action_params(a->word, a->n, gargv[4]);
+					return pg_cli_generate_complete_channel_gsm_action_params(a->word, a->n, gargv[3], gargv[4]);
 				} else if ((a->pos == 6) && (!strcmp(gargv[4], "set"))) {
 					if (!strcmp(gargv[5], "alias"))
 						return pg_cli_generate_complete_channel_gsm_name(a->word, a->n, 0);
@@ -21571,78 +21865,80 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
 			return CLI_FAILURE;
 	}
-
+	// check for minimum args count
 	if (a->argc < 5) {
 		snprintf(pg_cli_channel_gsm_actions_usage, sizeof(pg_cli_channel_gsm_actions_usage),
-			"Usage: polygator channel gsm <channel> <oper>\n");
+			"Usage: polygator channel gsm <channel> <operation>\n");
 		return CLI_SHOWUSAGE;
 	}
-
 	// get params operation
-	operation = pg_get_channel_gsm_param_operation(a->argv[4]);
-	if (operation == PG_CHANNEL_GSM_PARAM_OP_UNKNOWN) {
+	operation = pg_get_channel_param_operation(a->argv[4]);
+	if (operation == PG_CHANNEL_PARAM_OP_UNKNOWN) {
 		ast_cli(a->fd, "  Unknown operation \"%s\"\n", a->argv[4]);
 		return CLI_SUCCESS;
 	}
-
-	if (((operation == PG_CHANNEL_GSM_PARAM_OP_GET) || (operation == PG_CHANNEL_GSM_PARAM_OP_QUERY)) && (a->argc < 6)) {
+	// check for valid read args count
+	if (((operation == PG_CHANNEL_PARAM_OP_GET) || (operation == PG_CHANNEL_PARAM_OP_QUERY)) && (a->argc < 6)) {
 		snprintf(pg_cli_channel_gsm_actions_usage, sizeof(pg_cli_channel_gsm_actions_usage),
 			"Usage: polygator channel gsm <channel> %s <param>\n", a->argv[4]);
 		return CLI_SHOWUSAGE;
 	}
-
-	if (((operation == PG_CHANNEL_GSM_PARAM_OP_SET) || (operation == PG_CHANNEL_GSM_PARAM_OP_DELETE)) && (a->argc < 7)) {
+	// check for valid write args count
+	if (((operation == PG_CHANNEL_PARAM_OP_SET) || (operation == PG_CHANNEL_PARAM_OP_DELETE)) && (a->argc < 7)) {
 		snprintf(pg_cli_channel_gsm_actions_usage, sizeof(pg_cli_channel_gsm_actions_usage),
 			"Usage: polygator channel gsm <channel> %s <param> <value>\n", a->argv[4]);
 		return CLI_SHOWUSAGE;
 	}
-
 	// get param id
 	param = pg_get_channel_gsm_param(a->argv[5]);
-	if (param == PG_CHANNEL_GSM_PARAM_UNKNOWN) {
+	if (param == PG_CHANNEL_FXS_PARAM_UNKNOWN) {
 		ast_cli(a->fd, "  unknown parameter \"%s\"\n", a->argv[5]);
+		return CLI_SUCCESS;
+	}
+	// check for operation on parameter is valid
+	if (!pg_channel_gsm_is_operation_param_valid(a->argv[3], a->argv[4], a->argv[5])) {
+		ast_cli(a->fd, "  invalid operation \"%s\" on parameter \"%s\"\n", a->argv[4], a->argv[5]);
 		return CLI_SUCCESS;
 	}
 
 	total = 0;
-	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
 		if (!strcmp(a->argv[3], "all") || !strcmp(a->argv[3], ch_gsm->alias)) {
 			total++;
 			ast_cli(a->fd, "  GSM channel=\"%s\": ", ch_gsm->alias);
-			switch (operation)
-			{
+			switch (operation) {
 				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-				case PG_CHANNEL_GSM_PARAM_OP_GET:
+				case PG_CHANNEL_PARAM_OP_GET:
 					ast_cli(a->fd, "get(%s)", a->argv[5]);
-					switch (param)
-					{
+					switch (param) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_ALIAS:
-							ast_cli(a->fd, " -> %s\n", ch_gsm->alias?ch_gsm->alias:"unknown");
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->alias)?"unknown":ch_gsm->alias);
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_PIN:
-							ast_cli(a->fd, " -> %s\n", ch_gsm->pin?ch_gsm->pin:"unknown");
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->pin)?"unknown":ch_gsm->pin);
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_PUK:
-							ast_cli(a->fd, " -> %s\n", ch_gsm->puk?ch_gsm->puk:"unknown");
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->puk)?"unknown":ch_gsm->puk);
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NUMBER:
-							if (ch_gsm->subscriber_number.length)
+							if (ch_gsm->subscriber_number.length) {
 								ast_cli(a->fd, " -> %s\n", address_show(tmpbuf, &ch_gsm->subscriber_number, 1));
-							else
+							} else {
 								ast_cli(a->fd, " -> unknown\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_IMEI:
-							if (strlen(ch_gsm->imei))
+							if (strlen(ch_gsm->imei)) {
 								ast_cli(a->fd, " -> %s\n", ch_gsm->imei);
-							else
+							} else {
 								ast_cli(a->fd, " -> unknown\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_PROGRESS:
@@ -21658,7 +21954,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_OUTGOING:
-							ast_cli(a->fd, " -> %s\n", pg_call_gsm_outgoing_to_string(ch_gsm->config.outgoing_perm));
+							ast_cli(a->fd, " -> %s\n", pg_call_permission_to_string(ch_gsm->config.outgoing_perm));
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CONTEXT:
@@ -21666,10 +21962,11 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_REGATTEMPT:
-							if (ch_gsm->config.reg_try_count < 0)
+							if (ch_gsm->config.reg_try_count < 0) {
 								ast_cli(a->fd, " -> forever\n");
-							else
+							} else {
 								ast_cli(a->fd, " -> %d\n", ch_gsm->config.reg_try_count);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CALLWAIT:
@@ -21685,11 +21982,11 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_LANGUAGE:
-							ast_cli(a->fd, " -> %s\n", strlen(ch_gsm->config.language)?ch_gsm->config.language:"unknown");
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->config.language)?"unknown":ch_gsm->config.language);
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_MOHINTERPRET:
-							ast_cli(a->fd, " -> %s\n", strlen(ch_gsm->config.mohinterpret)?ch_gsm->config.mohinterpret:"unknown");
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->config.mohinterpret)?"unknown":ch_gsm->config.mohinterpret);
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_BAUDRATE:
@@ -21705,19 +22002,19 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAIN1:
-							ast_cli(a->fd, " -> %2.2f dB (0x%02x)\n", vin_gainem_to_gaindb(ch_gsm->config.gain1), ch_gsm->config.gain1);
+							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_gsm->config.gain1));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++sms.ntf.exten
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAIN2:
-							ast_cli(a->fd, " -> %2.2f dB (0x%02x)\n", vin_gainem_to_gaindb(ch_gsm->config.gain2), ch_gsm->config.gain2);
+							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_gsm->config.gain2));
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAINX:
-							ast_cli(a->fd, " -> %2.2f dB (0x%02x)\n", vin_gainem_to_gaindb(ch_gsm->config.gainx), ch_gsm->config.gainx);
+							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_gsm->config.gainx));
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAINR:
-							ast_cli(a->fd, " -> %2.2f dB (0x%02x)\n", vin_gainem_to_gaindb(ch_gsm->config.gainr), ch_gsm->config.gainr);
+							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_gsm->config.gainr));
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_MODULETYPE:
@@ -21741,19 +22038,23 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_CONTEXT:
-							ast_cli(a->fd, " -> %s\n", strlen(ch_gsm->config.sms_notify_context)?ch_gsm->config.sms_notify_context:"unknown");
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->config.sms_notify_context)?"unknown":ch_gsm->config.sms_notify_context);
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_EXTENSION:
-							ast_cli(a->fd, " -> %s\n", strlen(ch_gsm->config.sms_notify_extension)?ch_gsm->config.sms_notify_extension:"unknown");
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->config.sms_notify_extension)?"unknown":ch_gsm->config.sms_notify_extension);
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNK:
 							total = 0;
-							AST_LIST_TRAVERSE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry)
+							AST_LIST_TRAVERSE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry) {
 								ast_cli(a->fd, "\n\t%lu: %s", (unsigned long int)total++, ch_gsm_fold->name);
-							if (total) ast_cli(a->fd, "\n");
-							else ast_cli(a->fd, " -> <empty list>\n");
+							}
+							if (total) {
+								ast_cli(a->fd, "\n");
+							} else {
+								ast_cli(a->fd, " -> <empty list>\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNKONLY:
@@ -21794,15 +22095,14 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 					}
 					break;
 				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-				case PG_CHANNEL_GSM_PARAM_OP_SET:
+				case PG_CHANNEL_PARAM_OP_SET:
 					ast_cli(a->fd, "set(%s) <- %s", a->argv[5], a->argv[6]);
-					switch (param)
-					{
+					switch (param) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_ALIAS:
-							if (pg_get_channel_gsm_by_name(a->argv[6]))
+							if (pg_get_channel_gsm_by_name(a->argv[6])) {
 								ast_cli(a->fd, " - already used on other channel\n");
-							else {
+							} else {
 								ast_free(ch_gsm->alias);
 								ch_gsm->alias = ast_strdup(a->argv[6]);
 								ast_cli(a->fd, " - ok\n");
@@ -21811,30 +22111,44 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_PIN:
 							if ((strlen(a->argv[6]) >= 4) && (strlen(a->argv[6]) <= 8) && (is_str_digit(a->argv[6]))) {
-								if (ch_gsm->iccid && strlen(ch_gsm->iccid))
+								if (ch_gsm->iccid && strlen(ch_gsm->iccid)) {
 									pg_set_pin_by_iccid(ch_gsm->iccid, a->argv[6], &ch_gsm->lock);
-								if (ch_gsm->pin) ast_free(ch_gsm->pin);
+								}
+								if (ch_gsm->pin) {
+									ast_free(ch_gsm->pin);
+								}
 								ch_gsm->pin = ast_strdup(a->argv[6]);
-								if (ch_gsm->flags.pin_required)
+								if (ch_gsm->flags.pin_required) {
 									pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\"", ch_gsm->pin);
+								}
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - PIN must be set of 4-8 digit\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_PUK:
 							if ((strlen(a->argv[6]) >= 4) && (strlen(a->argv[6]) <= 8) && (is_str_digit(a->argv[6]))) {
-								if (ch_gsm->iccid && strlen(ch_gsm->iccid))
+								if (ch_gsm->iccid && strlen(ch_gsm->iccid)) {
 									pg_set_puk_by_iccid(ch_gsm->iccid, a->argv[6], &ch_gsm->lock);
-								if (ch_gsm->puk) ast_free(ch_gsm->puk);
+								}
+								if (ch_gsm->puk) {
+									ast_free(ch_gsm->puk);
+								}
 								ch_gsm->puk = ast_strdup(a->argv[6]);
-								if (!ch_gsm->pin) ch_gsm->pin = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock);
-								if (!ch_gsm->pin) ch_gsm->pin = ast_strdup("0000");
-								if (ch_gsm->flags.puk_required)
+								if (!ch_gsm->pin) {
+									ch_gsm->pin = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock);
+								}
+								if (!ch_gsm->pin) {
+									ch_gsm->pin = ast_strdup("0000");
+								}
+								if (ch_gsm->flags.puk_required) {
 									pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\",\"%s\"", ch_gsm->puk, ch_gsm->pin);
+								}
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - PUK must be set of 4-8 digit\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_IMEI:
@@ -21850,8 +22164,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							if (tmpi != PG_GSM_CALL_PROGRESS_TYPE_UNKNOWN) {
 								ch_gsm->config.progress = tmpi;
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - unknown call progress type\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_INCOMING:
@@ -21859,8 +22174,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							if (tmpi != PG_CALL_GSM_INCOMING_TYPE_UNKNOWN) {
 								ch_gsm->config.incoming_type = tmpi;
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - unknown call incoming type\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_INCOMINGTO:
@@ -21873,8 +22189,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							if (tmpi != PG_CALL_PERMISSION_UNKNOWN) {
 								ch_gsm->config.outgoing_perm = tmpi;
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - unknown call outgoing permission\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CONTEXT:
@@ -21891,8 +22208,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								ch_gsm->reg_try_count = ch_gsm->config.reg_try_count = -1;
 								ch_gsm->flags.sim_change = 0;
 								ast_cli(a->fd, " -> ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " -> %s unknown\n", a->argv[6]);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CALLWAIT:
@@ -21904,8 +22222,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									ch_gsm->config.callwait = tmpi;
 									ast_cli(a->fd, " - ok\n");
 								}
-							} else
+							} else {
 								ast_cli(a->fd, " - unknown callwait state\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CLIR:
@@ -21913,8 +22232,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							if ((tmpi != PG_CLIR_STATE_UNKNOWN) && (tmpi != PG_CLIR_STATE_QUERY)) {
 								ch_gsm->config.clir = tmpi;
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - unknown clir state\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_DCRTTL:
@@ -21926,24 +22246,28 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								}
 								ch_gsm->config.dcrttl = tmpi;
 								ast_cli(a->fd, " - ok\n");
-							} else 
+							} else  {
 								ast_cli(a->fd, " - bad param - must be digit\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_LANGUAGE:
 							ast_copy_string(ch_gsm->config.language, a->argv[6], sizeof(ch_gsm->config.language));
+							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_MOHINTERPRET:
 							ast_copy_string(ch_gsm->config.mohinterpret, a->argv[6], sizeof(ch_gsm->config.mohinterpret));
+							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_BAUDRATE:
 							if (is_str_digit(a->argv[6])) {
 								ch_gsm->config.baudrate = atoi(a->argv[6]);
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - bad param - must be digit\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAININ:
@@ -21960,8 +22284,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								ch_gsm->config.gainin = tmpi;
 								ch_gsm->gainin = 0;
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - bad param - must be digit in range 0-100\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAINOUT:
@@ -21978,8 +22303,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								ch_gsm->config.gainout = tmpi;
 								ch_gsm->gainout = 0;
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - bad param - must be digit in range 0-15\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAIN1:
@@ -22016,9 +22342,10 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									}
 									ast_mutex_unlock(&vin->lock);
 								}
-								ast_cli(a->fd, " - 0x%02x - ok\n", ch_gsm->config.gain1);
-							} else
+								ast_cli(a->fd, " - ok\n");
+							} else {
 								ast_cli(a->fd, " - can't get gain value from \"%s\"\n", a->argv[6]);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAIN2:
@@ -22055,9 +22382,10 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									}
 									ast_mutex_unlock(&vin->lock);
 								}
-								ast_cli(a->fd, " - 0x%02x - ok\n", ch_gsm->config.gain2);
-							} else
+								ast_cli(a->fd, " - ok\n");
+							} else {
 								ast_cli(a->fd, " - can't get gain value from \"%s\"\n", a->argv[6]);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAINX:
@@ -22107,9 +22435,10 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									}
 									ast_mutex_unlock(&vin->lock);
 								}
-								ast_cli(a->fd, " - 0x%02x - ok\n", ch_gsm->config.gainx);
-							} else
+								ast_cli(a->fd, " - ok\n");
+							} else {
 								ast_cli(a->fd, " - can't get gain value from \"%s\"\n", a->argv[6]);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAINR:
@@ -22159,9 +22488,10 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									}
 									ast_mutex_unlock(&vin->lock);
 								}
-								ast_cli(a->fd, " - 0x%02x - ok\n", ch_gsm->config.gainr);
-							} else
+								ast_cli(a->fd, " - ok\n");
+							} else {
 								ast_cli(a->fd, " - can't get gain value from \"%s\"\n", a->argv[6]);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_MODULETYPE:
@@ -22177,8 +22507,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								}
 								ch_gsm->config.sms_send_interval = tmpi;
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - bad param - must be digit\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMSSENDATTEMPT:
@@ -22190,8 +22521,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								}
 								ch_gsm->config.sms_send_attempt = tmpi;
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - bad param - must be digit\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMSMAXPARTCOUNT:
@@ -22203,8 +22535,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								}
 								ch_gsm->config.sms_max_part = tmpi;
 								ast_cli(a->fd, " - ok\n");
-							} else
+							} else {
 								ast_cli(a->fd, " - bad param - must be digit\n");
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_ENABLE:
@@ -22248,12 +22581,15 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 										// add entry into channel list
 										AST_LIST_INSERT_TAIL(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
 										ast_cli(a->fd, " - ok\n");
-									} else
+									} else {
 										ast_cli(a->fd, " - can't get memory for GSM trunk=\"%s\" channel entry\n", a->argv[6]);
-								} else
+									}
+								} else {
 									ast_cli(a->fd, " - channel already in GSM trunk=\"%s\"\n", a->argv[6]);
-							} else
+								}
+							} else {
 								ast_cli(a->fd, " - can't get memory for GSM trunk=\"%s\"\n", a->argv[6]);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNKONLY:
@@ -22556,10 +22892,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 					}
 					break;
 				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-				case PG_CHANNEL_GSM_PARAM_OP_DELETE:
+				case PG_CHANNEL_PARAM_OP_DELETE:
 					ast_cli(a->fd, "delete(%s)", a->argv[5]);
-					switch (param)
-					{
+					switch (param) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNK:
 							// check for trunk exist
@@ -22575,10 +22910,12 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									ast_free(ch_gsm_fold->name);
 									ast_free(ch_gsm_fold);
 									ast_cli(a->fd, " - channel removed from GSM trunk=\"%s\"\n", a->argv[6]);
-								} else
+								} else {
 									ast_cli(a->fd, " - channel is not member of GSM trunk=\"%s\"\n", a->argv[6]);
-							} else
+								}
+							} else {
 								ast_cli(a->fd, " - GSM trunk=\"%s\" not exist\n", a->argv[6]);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						default:
@@ -22587,10 +22924,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 					}
 					break;
 				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-				case PG_CHANNEL_GSM_PARAM_OP_QUERY:
+				case PG_CHANNEL_PARAM_OP_QUERY:
 					ast_cli(a->fd, "query(%s)", a->argv[5]);
-					switch (param)
-					{
+					switch (param) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_ALIAS:
 							ast_cli(a->fd, " - unsupported operation\n");
@@ -22599,13 +22935,17 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						case PG_CHANNEL_GSM_PARAM_PIN:
 							cp = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock);
 							ast_cli(a->fd, " -> %s\n", cp?cp:"unknown");
-							if(cp) ast_free(cp);
+							if(cp) {
+								ast_free(cp);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_PUK:
 							cp = pg_get_puk_by_iccid(ch_gsm->iccid, &ch_gsm->lock);
 							ast_cli(a->fd, " -> %s\n", cp?cp:"unknown");
-							if(cp) ast_free(cp);
+							if(cp) {
+								ast_free(cp);
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_IMEI:
@@ -22754,8 +23094,9 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 		ast_mutex_unlock(&ch_gsm->lock);
 	}
 
-	if (!total)
+	if (!total) {
 		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
+	}
 
 	return CLI_SUCCESS;
 }
@@ -24719,6 +25060,885 @@ static char *pg_cli_channel_fxs_action_enable_disable(struct ast_cli_entry *e, i
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_channel_fxs_action_param()
+//------------------------------------------------------------------------------
+static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	int tmpi;
+	float tmpf;
+	struct pg_channel_rtp *rtp;
+	struct pg_vinetic *vin;
+	char *gline;
+	char *gargv[AST_MAX_ARGS];
+	int gargc;
+	int operation;
+	int param;
+	size_t total;
+	struct pg_channel_fxs *ch_fxs;
+
+	switch (cmd) {
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_INIT:
+			ast_cli(a->fd, "is ch_act_prm subhandler -- CLI_INIT unsupported in this context\n");
+			return CLI_FAILURE;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_GENERATE:
+		  	gline = ast_strdupa(a->line);
+			if (!(pg_cli_generating_prepare(gline, &gargc, gargv))) {
+				if (a->pos == 5) {
+					return pg_cli_generate_complete_channel_fxs_action_params(a->word, a->n, gargv[3], gargv[4]);
+#if 0
+				} else if ((a->pos == 6) && (!strcmp(gargv[4], "set"))) {
+					if (!strcmp(gargv[5], "alias")) {
+						return pg_cli_generate_complete_channel_fxs_name(a->word, a->n, 0);
+					} else if (!strcmp(gargv[5], "incoming")) {
+						return pg_cli_generate_complete_channel_fxs_incoming(a->word, a->n, gargv[3]);
+					} else if (!strcmp(gargv[5], "outgoing")) {
+						return pg_cli_generate_complete_channel_fxs_outgoing(a->word, a->n, gargv[3]);
+					} else if (!strcmp(gargv[5], "context")) {
+						return pg_cli_generate_complete_context(a->word, a->n);
+					} else if (!strcmp(gargv[5], "callwait")) {
+						return pg_cli_generate_complete_channelfxs_callwait(a->word, a->n, gargv[3]);
+					} else if (!strcmp(gargv[5], "ali.nelec")) {
+						return pg_cli_generate_complete_channel_fxs_ali_nelec(a->word, a->n, gargv[3]);
+					} else if (!strcmp(gargv[5], "ali.nelec.tm")) {
+						return pg_cli_generate_complete_channel_fxs_ali_nelec_tm(a->word, a->n, gargv[3]);
+					} else if (!strcmp(gargv[5], "ali.nelec.oldc")) {
+						return pg_cli_generate_complete_channel_fxs_ali_nelec_oldc(a->word, a->n, gargv[3]);
+					} else if (!strcmp(gargv[5], "ali.nelec.as")) {
+						return pg_cli_generate_complete_channel_fxs_ali_nelec_as(a->word, a->n, gargv[3]);
+					} else if (!strcmp(gargv[5], "ali.nelec.nlp")) {
+						return pg_cli_generate_complete_channel_fxs_ali_nelec_nlp(a->word, a->n, gargv[3]);
+					} else if (!strcmp(gargv[5], "ali.nelec.nlpm")) {
+						return pg_cli_generate_complete_channel_fxs_ali_nelec_nlpm(a->word, a->n, gargv[3]);
+					}
+#endif
+				}
+			}
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_HANDLER:
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		default:
+			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
+			return CLI_FAILURE;
+	}
+	// check for minimum args count
+	if (a->argc < 5) {
+		snprintf(pg_cli_channel_fxs_actions_usage, sizeof(pg_cli_channel_fxs_actions_usage),
+			"Usage: polygator channel fxs <channel> <operation>\n");
+		return CLI_SHOWUSAGE;
+	}
+	// get params operation
+	operation = pg_get_channel_param_operation(a->argv[4]);
+	if (operation == PG_CHANNEL_PARAM_OP_UNKNOWN) {
+		ast_cli(a->fd, "  Unknown operation \"%s\"\n", a->argv[4]);
+		return CLI_SUCCESS;
+	}
+	// check for valid read args count
+	if (((operation == PG_CHANNEL_PARAM_OP_GET) || (operation == PG_CHANNEL_PARAM_OP_QUERY)) && (a->argc < 6)) {
+		snprintf(pg_cli_channel_fxs_actions_usage, sizeof(pg_cli_channel_fxs_actions_usage),
+			"Usage: polygator channel fxs <channel> %s <param>\n", a->argv[4]);
+		return CLI_SHOWUSAGE;
+	}
+	// check for valid write args count
+	if (((operation == PG_CHANNEL_PARAM_OP_SET) || (operation == PG_CHANNEL_PARAM_OP_DELETE)) && (a->argc < 7)) {
+		snprintf(pg_cli_channel_fxs_actions_usage, sizeof(pg_cli_channel_fxs_actions_usage),
+			"Usage: polygator channel fxs <channel> %s <param> <value>\n", a->argv[4]);
+		return CLI_SHOWUSAGE;
+	}
+	// get param id
+	param = pg_get_channel_fxs_param(a->argv[5]);
+	if (param == PG_CHANNEL_FXS_PARAM_UNKNOWN) {
+		ast_cli(a->fd, "  unknown parameter \"%s\"\n", a->argv[5]);
+		return CLI_SUCCESS;
+	}
+	// check for operation on parameter is valid
+	if (!pg_channel_fxs_is_operation_param_valid(a->argv[3], a->argv[4], a->argv[5])) {
+		ast_cli(a->fd, "  invalid operation \"%s\" on parameter \"%s\"\n", a->argv[4], a->argv[5]);
+		return CLI_SUCCESS;
+	}
+
+	total = 0;
+	AST_LIST_TRAVERSE(&pg_general_channel_fxs_list, ch_fxs, pg_general_channel_fxs_list_entry) {
+		ast_mutex_lock(&ch_fxs->lock);
+		if (!strcmp(a->argv[3], "all") || !strcmp(a->argv[3], ch_fxs->alias)) {
+			total++;
+			ast_cli(a->fd, "  FXS channel=\"%s\": ", ch_fxs->alias);
+			switch (operation) {
+				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+				case PG_CHANNEL_PARAM_OP_GET:
+					ast_cli(a->fd, "get(%s)", a->argv[5]);
+					switch (param) {
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_ALIAS:
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_fxs->alias)?"unknown":ch_fxs->alias);
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CIDNUM:
+							if (ast_strlen_zero(ch_fxs->config.cid_num)) {
+								ast_cli(a->fd, " -> unknown\n");
+							} else {
+								ast_cli(a->fd, " -> %s\n", ch_fxs->config.cid_num);
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CIDNAME:
+							if (ast_strlen_zero(ch_fxs->config.cid_name)) {
+								ast_cli(a->fd, " -> unknown\n");
+							} else {
+								ast_cli(a->fd, " -> %s\n", ch_fxs->config.cid_name);
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_INCOMING:
+							ast_cli(a->fd, " -> %s\n", pg_call_permission_to_string(ch_fxs->config.incoming_perm));
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_OUTGOING:
+							ast_cli(a->fd, " -> %s\n", pg_call_permission_to_string(ch_fxs->config.outgoing_perm));
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CONTEXT:
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_fxs->config.context)?"unknown":ch_fxs->config.context);
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_EXTENSION:
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_fxs->config.extension)?"unknown":ch_fxs->config.extension);
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CALLWAIT:
+							ast_cli(a->fd, " -> %s\n", ch_fxs->config.callwait?"yes":"no");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_LANGUAGE:
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_fxs->config.language)?"unknown":ch_fxs->config.language);
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_MOHINTERPRET:
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_fxs->config.mohinterpret)?"unknown":ch_fxs->config.mohinterpret);
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_TONEZONE:
+							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_fxs->config.tonezone)?"unknown":ch_fxs->config.tonezone);
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAIN1:
+							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_fxs->config.gain1));
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAIN2:
+							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_fxs->config.gain2));
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAINX:
+							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_fxs->config.gainx));
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAINR:
+							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_fxs->config.gainr));
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC:
+							ast_cli(a->fd, " -> %s\n", (ch_fxs->config.ali_nelec == VIN_DIS)?"inactive":"active");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_TM:
+							ast_cli(a->fd, " -> %s\n", (ch_fxs->config.ali_nelec_tm == VIN_DTM_ON)?"on":"off");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_OLDC:
+							ast_cli(a->fd, " -> %s\n", (ch_fxs->config.ali_nelec_oldc == VIN_OLDC_ZERO)?"zero":"old");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_AS:
+							ast_cli(a->fd, " -> %s\n", (ch_fxs->config.ali_nelec_as == VIN_AS_RUN)?"run":"stop");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_NLP:
+							ast_cli(a->fd, " -> %s\n", (ch_fxs->config.ali_nelec_nlp == VIN_OFF)?"off":"on");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_NLPM:
+							ast_cli(a->fd, " -> %s\n", pg_vinetic_ali_nelec_nlpm_to_string(ch_fxs->config.ali_nelec_nlpm));
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						default:
+							ast_cli(a->fd, " - unknown parameter\n");
+							break;
+					}
+					break;
+				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+				case PG_CHANNEL_PARAM_OP_SET:
+					ast_cli(a->fd, "set(%s) <- %s", a->argv[5], a->argv[6]);
+					switch (param) {
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_ALIAS:
+							if (pg_get_channel_fxs_by_name(a->argv[6])) {
+								ast_cli(a->fd, " - already used on other channel\n");
+							} else {
+								ast_free(ch_fxs->alias);
+								ch_fxs->alias = ast_strdup(a->argv[6]);
+								ast_cli(a->fd, " - ok\n");
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CIDNUM:
+							ast_copy_string(ch_fxs->config.cid_num, a->argv[6], sizeof(ch_fxs->config.cid_num));
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CIDNAME:
+							ast_copy_string(ch_fxs->config.cid_name, a->argv[6], sizeof(ch_fxs->config.cid_name));
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_INCOMING:
+							tmpi = pg_get_call_permission(a->argv[6]);
+							if (tmpi != PG_CALL_PERMISSION_UNKNOWN) {
+								ch_fxs->config.incoming_perm = tmpi;
+								ast_cli(a->fd, " - ok\n");
+							} else {
+								ast_cli(a->fd, " - unknown call permission\n");
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_OUTGOING:
+							tmpi = pg_get_call_permission(a->argv[6]);
+							if (tmpi != PG_CALL_PERMISSION_UNKNOWN) {
+								ch_fxs->config.outgoing_perm = tmpi;
+								ast_cli(a->fd, " - ok\n");
+							} else
+								ast_cli(a->fd, " - unknown call permission\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CONTEXT:
+							ast_copy_string(ch_fxs->config.context, a->argv[6], sizeof(ch_fxs->config.context));
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_EXTENSION:
+							ast_copy_string(ch_fxs->config.extension, a->argv[6], sizeof(ch_fxs->config.extension));
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CALLWAIT:
+							ch_fxs->config.callwait = -ast_true(a->argv[6]);
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// 						case PG_CHANNEL_FXS_PARAM_LANGUAGE:
+							ast_copy_string(ch_fxs->config.language, a->argv[6], sizeof(ch_fxs->config.language));
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_MOHINTERPRET:
+							ast_copy_string(ch_fxs->config.mohinterpret, a->argv[6], sizeof(ch_fxs->config.mohinterpret));
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_TONEZONE:
+							ast_copy_string(ch_fxs->config.tonezone, a->argv[6], sizeof(ch_fxs->config.tonezone));
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAIN1:
+							if (sscanf(a->argv[6], "%f", &tmpf) == 1) {
+								if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+								if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+								ch_fxs->config.gain1 = vin_gaindb_to_gainem(tmpf);
+								if ((rtp = ch_fxs->channel_rtp)) {
+									vin = rtp->vinetic;
+									ast_mutex_lock(&vin->lock);
+									// unblock vinetic
+									if (vin_reset_status(&vin->context) < 0) {
+										while (vin_message_stack_check_line(&vin->context)) {
+											ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+										}
+										ast_mutex_unlock(&vin->lock);
+										break;
+									}
+									// diasble coder channel speech compression
+									if (vin_coder_channel_disable(&vin->context, rtp->position_on_vinetic) < 0) {
+										while (vin_message_stack_check_line(&vin->context)) {
+											ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+										}
+										ast_mutex_unlock(&vin->lock);
+										break;
+									}
+									vin_coder_channel_set_gain1(&vin->context, rtp->position_on_vinetic, ch_fxs->config.gain1);
+									if (vin_coder_channel_enable(&vin->context, rtp->position_on_vinetic) < 0) {
+										while (vin_message_stack_check_line(&vin->context)) {
+											ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+										}
+										ast_mutex_unlock(&vin->lock);
+										break;
+									}
+									ast_mutex_unlock(&vin->lock);
+								}
+								ast_cli(a->fd, " - ok\n");
+							} else {
+								ast_cli(a->fd, " - can't get gain value from \"%s\"\n", a->argv[6]);
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAIN2:
+							if (sscanf(a->argv[6], "%f", &tmpf) == 1) {
+								if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+								if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+								ch_fxs->config.gain2 = vin_gaindb_to_gainem(tmpf);
+								if ((rtp = ch_fxs->channel_rtp)) {
+									vin = rtp->vinetic;
+									ast_mutex_lock(&vin->lock);
+									// unblock vinetic
+									if (vin_reset_status(&vin->context) < 0) {
+										while (vin_message_stack_check_line(&vin->context)) {
+											ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+										}
+										ast_mutex_unlock(&vin->lock);
+										break;
+									}
+									// diasble coder channel speech compression
+									if (vin_coder_channel_disable(&vin->context, rtp->position_on_vinetic) < 0) {
+										while (vin_message_stack_check_line(&vin->context)) {
+											ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+										}
+										ast_mutex_unlock(&vin->lock);
+										break;
+									}
+									vin_coder_channel_set_gain2(&vin->context, rtp->position_on_vinetic, ch_fxs->config.gain2);
+									if (vin_coder_channel_enable(&vin->context, rtp->position_on_vinetic) < 0) {
+										while (vin_message_stack_check_line(&vin->context)) {
+											ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+										}
+										ast_mutex_unlock(&vin->lock);
+										break;
+									}
+									ast_mutex_unlock(&vin->lock);
+								}
+								ast_cli(a->fd, " - ok\n");
+							} else {
+								ast_cli(a->fd, " - can't get gain value from \"%s\"\n", a->argv[6]);
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAINX:
+							if (sscanf(a->argv[6], "%f", &tmpf) == 1) {
+								if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+								if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+								ch_fxs->config.gainx = vin_gaindb_to_gainem(tmpf);
+								if ((rtp = ch_fxs->channel_rtp)) {
+									vin = rtp->vinetic;
+									ast_mutex_lock(&vin->lock);
+									// unblock vinetic
+									if (vin_reset_status(&vin->context) < 0) {
+										while (vin_message_stack_check_line(&vin->context)) {
+											ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+										}
+										ast_mutex_unlock(&vin->lock);
+										break;
+									}
+									if ((ch_fxs->vinetic_alm_slot >= 0) &&
+										(is_vin_ali_enabled(&vin->context)) &&
+											(is_vin_ali_channel_enabled(&vin->context, ch_fxs->vinetic_alm_slot))) {
+										// disable ALI channel
+										if (vin_ali_channel_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										// enable ALI channel
+										vin_ali_channel_set_gainx(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.gainx);
+										if (vin_ali_channel_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										// enable ALI Near End LEC
+										if (vin_ali_near_end_lec_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+									}
+									ast_mutex_unlock(&vin->lock);
+								}
+								ast_cli(a->fd, " - ok\n");
+							} else {
+								ast_cli(a->fd, " - can't get gain value from \"%s\"\n", a->argv[6]);
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAINR:
+							if (sscanf(a->argv[6], "%f", &tmpf) == 1) {
+								if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+								if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+								ch_fxs->config.gainr = vin_gaindb_to_gainem(tmpf);
+								if ((rtp = ch_fxs->channel_rtp)) {
+									vin = rtp->vinetic;
+									ast_mutex_lock(&vin->lock);
+									// unblock vinetic
+									if (vin_reset_status(&vin->context) < 0) {
+										while (vin_message_stack_check_line(&vin->context)) {
+											ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+										}
+										ast_mutex_unlock(&vin->lock);
+										break;
+									}
+									if ((ch_fxs->vinetic_alm_slot >= 0) &&
+										(is_vin_ali_enabled(&vin->context)) &&
+											(is_vin_ali_channel_enabled(&vin->context, ch_fxs->vinetic_alm_slot))) {
+										// disable ALI channel
+										if (vin_ali_channel_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										// enable ALI channel
+										vin_ali_channel_set_gainr(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.gainr);
+										if (vin_ali_channel_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										// enable ALI Near End LEC
+										if (vin_ali_near_end_lec_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+									}
+									ast_mutex_unlock(&vin->lock);
+								}
+								ast_cli(a->fd, " - ok\n");
+							} else {
+								ast_cli(a->fd, " - can't get gain value from \"%s\"\n", a->argv[6]);
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC:
+							ch_fxs->config.ali_nelec = str_true(a->argv[6])?VIN_EN:VIN_DIS;
+							// apply to vinetic
+							if ((rtp = ch_fxs->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									while (vin_message_stack_check_line(&vin->context)) {
+										ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+									}
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_fxs->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(&vin->context)) {
+										// disable ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_fxs->config.ali_nelec == VIN_EN) {
+											// enable ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+												while (vin_message_stack_check_line(&vin->context)) {
+													ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+												}
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_TM:
+							ch_fxs->config.ali_nelec_tm = str_true(a->argv[6])?VIN_DTM_ON:VIN_DTM_OFF;
+							// apply to vinetic
+							if ((rtp = ch_fxs->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									while (vin_message_stack_check_line(&vin->context)) {
+										ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+									}
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_fxs->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(&vin->context)) {
+										// disable ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_fxs->config.ali_nelec == VIN_EN) {
+											// enable ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+												while (vin_message_stack_check_line(&vin->context)) {
+													ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+												}
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_OLDC:
+							if (!strcmp(a->argv[6], "oldc")) {
+								ch_fxs->config.ali_nelec_oldc = VIN_OLDC_NO;
+							} else {
+								ch_fxs->config.ali_nelec_oldc = VIN_OLDC_ZERO;
+							}
+							// apply to vinetic
+							if ((rtp = ch_fxs->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									while (vin_message_stack_check_line(&vin->context)) {
+										ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+									}
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_fxs->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(&vin->context)) {
+										// disable ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_fxs->config.ali_nelec == VIN_EN) {
+											// enable ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+												while (vin_message_stack_check_line(&vin->context)) {
+													ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+												}
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_AS:
+							ch_fxs->config.ali_nelec_as = str_true(a->argv[6])?VIN_AS_RUN:VIN_AS_STOP;
+							// apply to vinetic
+							if ((rtp = ch_fxs->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									while (vin_message_stack_check_line(&vin->context)) {
+										ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+									}
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_fxs->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(&vin->context)) {
+										// disable ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_fxs->config.ali_nelec == VIN_EN) {
+											// enable ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+												while (vin_message_stack_check_line(&vin->context)) {
+													ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+												}
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_NLP:
+							ch_fxs->config.ali_nelec_nlp = str_true(a->argv[6])?VIN_ON:VIN_OFF;
+							// apply to vinetic
+							if ((rtp = ch_fxs->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									while (vin_message_stack_check_line(&vin->context)) {
+										ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+									}
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_fxs->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(&vin->context)) {
+										// disable ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_fxs->config.ali_nelec == VIN_EN) {
+											// enable ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+												while (vin_message_stack_check_line(&vin->context)) {
+													ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+												}
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_NLPM:
+							tmpi = pg_vinetic_get_ali_nelec_nlpm(a->argv[6]);
+							if (tmpi < 0) {
+								ast_cli(a->fd, " - unknown nlp mode\n");
+								break;
+							}
+							ch_fxs->config.ali_nelec_nlpm = tmpi;
+							// apply to vinetic
+							if ((rtp = ch_fxs->channel_rtp)) {
+								vin = rtp->vinetic;
+								ast_mutex_lock(&vin->lock);
+								// unblock vinetic
+								if (vin_reset_status(&vin->context) < 0) {
+									while (vin_message_stack_check_line(&vin->context)) {
+										ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+									}
+									ast_mutex_unlock(&vin->lock);
+									break;
+								}
+								if (ch_fxs->vinetic_alm_slot >= 0) {
+									if (is_vin_ali_enabled(&vin->context)) {
+										// disable ALI Near End LEC
+										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+											ast_mutex_unlock(&vin->lock);
+											break;
+										}
+										if (ch_fxs->config.ali_nelec == VIN_EN) {
+											// enable ALI Near End LEC
+											vin_ali_near_end_lec_set_dtm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_tm);
+											vin_ali_near_end_lec_set_oldc(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_oldc);
+											vin_ali_near_end_lec_set_as(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_as);
+											vin_ali_near_end_lec_set_nlp(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlp);
+											vin_ali_near_end_lec_set_nlpm(&vin->context, ch_fxs->vinetic_alm_slot, ch_fxs->config.ali_nelec_nlpm);
+											if (vin_ali_near_end_lec_enable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
+												while (vin_message_stack_check_line(&vin->context)) {
+													ast_cli(a->fd, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+												}
+												ast_mutex_unlock(&vin->lock);
+												break;
+											}
+										}
+									}
+								}
+								ast_mutex_unlock(&vin->lock);
+							}
+							ast_cli(a->fd, " - ok\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						default:
+							ast_cli(a->fd, " - unknown parameter\n");
+							break;
+					}
+					break;
+				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+				case PG_CHANNEL_PARAM_OP_DELETE:
+					ast_cli(a->fd, "delete(%s)", a->argv[5]);
+					switch (param) {
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						default:
+							ast_cli(a->fd, " - unknown parameter\n");
+							break;
+					}
+					break;
+				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+				case PG_CHANNEL_PARAM_OP_QUERY:
+					ast_cli(a->fd, "query(%s)", a->argv[5]);
+					switch (param) {
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_ALIAS:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CIDNUM:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CIDNAME:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_INCOMING:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_OUTGOING:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_CONTEXT:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_EXTENSION:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_LANGUAGE:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_MOHINTERPRET:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_TONEZONE:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAIN1:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAIN2:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAINX:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_GAINR:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_TM:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_OLDC:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_AS:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_NLP:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXS_PARAM_NELEC_NLPM:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						default:
+							ast_cli(a->fd, " - unknown parameter\n");
+							break;
+					}
+					break;
+				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+				default:
+					ast_cli(a->fd, " - unknown operation\n");
+					break;
+			}
+		}
+		ast_mutex_unlock(&ch_fxs->lock);
+	}
+
+	if (!total) {
+		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
+	}
+
+	return CLI_SUCCESS;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_channel_fxs_action_param()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_trunk_gsm_actions()
 //------------------------------------------------------------------------------
 static char *pg_cli_trunk_gsm_actions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
@@ -25110,6 +26330,7 @@ static int pg_load(void)
 	char sim[64];
 	int res;
 	char *cp;
+	float tmpf;
 
 	unsigned int pos;
 	unsigned int index;
@@ -25413,28 +26634,32 @@ static int pg_load(void)
 				}
 				ch_gsm->gainout = ch_gsm->config.gainout;
 				// gain1 - level voice channel CODER: sig -> host
-				if ((!(cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gain1"))) ||
-						(!is_str_xdigit(cvar)) ||
-							(sscanf(cvar, "%02X", &ch_gsm->config.gain1) != 1)) {
-					ch_gsm->config.gain1 = 0x80;
+				ch_gsm->config.gain1 = 0x60;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gain1")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_gsm->config.gain1 = vin_gaindb_to_gainem(tmpf);
 				}
 				// gain2 - level voice channel CODER: host -> sig
-				if ((!(cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gain2"))) ||
-						(!is_str_xdigit(cvar)) ||
-							(sscanf(cvar, "%02X", &ch_gsm->config.gain2) != 1)) {
-					ch_gsm->config.gain2 = 0x80;
+				ch_gsm->config.gain2 = 0x60;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gain2")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_gsm->config.gain2 = vin_gaindb_to_gainem(tmpf);
 				}
 				// gainx - level voice channel ALI: analog -> sig
-				if ((!(cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gainx"))) ||
-						(!is_str_xdigit(cvar)) ||
-							(sscanf(cvar, "%02X", &ch_gsm->config.gainx) != 1)) {
-					ch_gsm->config.gainx = 0x80;
+				ch_gsm->config.gainx = 0x80;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gainx")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_gsm->config.gainx = vin_gaindb_to_gainem(tmpf);
 				}
 				// gainr - level voice channel ALI: sig -> analog
-				if ((!(cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gainr"))) ||
-						(!is_str_xdigit(cvar)) ||
-							(sscanf(cvar, "%02X", &ch_gsm->config.gainr) != 1)) {
-					ch_gsm->config.gainr = 0x80;
+				ch_gsm->config.gainr = 0x80;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gainr")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_gsm->config.gainr = vin_gaindb_to_gainem(tmpf);
 				}
 				// SMS
 				// sms.send.interval
@@ -25575,7 +26800,6 @@ static int pg_load(void)
 						goto pg_load_error;
 					}
 				}
-				ch_gsm = NULL;
 			} else if (sscanf(buf, "FXS%u VIN%uALM%u", &pos, &vin_num, &vc_slot) == 3) {
 				snprintf(buf, sizeof(buf), "%s-fxs%u", brd->name, pos);
 				ast_verbose("%s: found FXS channel=\"%s\"\n", AST_MODULE, buf);
@@ -25608,7 +26832,7 @@ static int pg_load(void)
 				// get config variables
 				// alias
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "alias"))) {
-					if (pg_get_channel_gsm_by_name(cvar)) {
+					if (pg_get_channel_fxs_by_name(cvar)) {
 						ast_free(ch_fxs->alias);
 						ch_fxs->alias = NULL;
 						pos = 0;
@@ -25620,7 +26844,7 @@ static int pg_load(void)
 						}
 						ch_fxs->alias = ast_strdup(buf);
 					} else {
-						ast_free(ch_gsm->alias);
+						ast_free(ch_fxs->alias);
 						ch_fxs->alias = ast_strdup(cvar);
 					}
 				}
@@ -25673,28 +26897,32 @@ static int pg_load(void)
 					ast_copy_string(ch_fxs->config.cid_name, ch_fxs->config.cid_num, sizeof(ch_fxs->config.cid_name));
 				}
 				// gain1 - level voice channel CODER: sig -> host
-				if ((!(cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gain1"))) ||
-						(!is_str_xdigit(cvar)) ||
-							(sscanf(cvar, "%02X", &ch_fxs->config.gain1) != 1)) {
-					ch_fxs->config.gain1 = 0x80;
+				ch_fxs->config.gain1 = 0x60;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gain1")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_fxs->config.gain1 = vin_gaindb_to_gainem(tmpf);
 				}
 				// gain2 - level voice channel CODER: host -> sig
-				if ((!(cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gain2"))) ||
-						(!is_str_xdigit(cvar)) ||
-							(sscanf(cvar, "%02X", &ch_fxs->config.gain2) != 1)) {
-					ch_fxs->config.gain2 = 0x80;
+				ch_fxs->config.gain2 = 0x60;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gain2")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_fxs->config.gain2 = vin_gaindb_to_gainem(tmpf);
 				}
 				// gainx - level voice channel ALI: analog -> sig
-				if ((!(cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gainx"))) ||
-						(!is_str_xdigit(cvar)) ||
-							(sscanf(cvar, "%02X", &ch_fxs->config.gainx) != 1)) {
-					ch_fxs->config.gainx = 0x80;
+				ch_fxs->config.gainx = 0x80;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gainx")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_fxs->config.gainx = vin_gaindb_to_gainem(tmpf);
 				}
 				// gainr - level voice channel ALI: sig -> analog
-				if ((!(cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gainr"))) ||
-						(!is_str_xdigit(cvar)) ||
-							(sscanf(cvar, "%02X", &ch_fxs->config.gainr) != 1)) {
-					ch_fxs->config.gainr = 0x80;
+				ch_fxs->config.gainr = 0x80;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gainr")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_fxs->config.gainr = vin_gaindb_to_gainem(tmpf);
 				}
 				// ali.nelec
 				ch_fxs->config.ali_nelec = VIN_EN;
@@ -25733,57 +26961,57 @@ static int pg_load(void)
 						ch_fxs->config.ali_nelec_nlpm = VIN_NLPM_SIGN_NOISE;
 					}
 				}
-				// off_hook.min
-				ch_fxs->config.off_hook_min = 50;
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "off_hook.min")) && (is_str_digit(cvar))) {
-					ch_fxs->config.off_hook_min = atoi(cvar);
+				// offhook.min
+				ch_fxs->config.offhook_min = 50;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "offhook.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.offhook_min = atoi(cvar);
 				}
-				if (ch_fxs->config.off_hook_min < 1) {
-					ch_fxs->config.off_hook_min = 50;
+				if (ch_fxs->config.offhook_min < 1) {
+					ch_fxs->config.offhook_min = 50;
 				}
-				// on_hook.min
-				ch_fxs->config.on_hook_min = 150;
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "on_hook.min")) && (is_str_digit(cvar))) {
-					ch_fxs->config.on_hook_min = atoi(cvar);
+				// onhook.min
+				ch_fxs->config.onhook_min = 150;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "on.hook.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.onhook_min = atoi(cvar);
 				}
-				if (ch_fxs->config.on_hook_min < 1) {
-					ch_fxs->config.on_hook_min = 150;
+				if (ch_fxs->config.onhook_min < 1) {
+					ch_fxs->config.onhook_min = 150;
 				}
-				// digit_pulse.min
+				// digit.pulse.min
 				ch_fxs->config.digit_pulse_min = 39;
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_pulse.min")) && (is_str_digit(cvar))) {
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.pulse.min")) && (is_str_digit(cvar))) {
 					ch_fxs->config.digit_pulse_min = atoi(cvar);
 				}
 				if (ch_fxs->config.digit_pulse_min < 1) {
 					ch_fxs->config.digit_pulse_min = 39;
 				}
-				// digit_pulse.max
+				// digit.pulse.max
 				ch_fxs->config.digit_pulse_max = 75;
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_pulse.max")) && (is_str_digit(cvar))) {
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.pulse.max")) && (is_str_digit(cvar))) {
 					ch_fxs->config.digit_pulse_max = atoi(cvar);
 				}
 				if (ch_fxs->config.digit_pulse_max < 1) {
 					ch_fxs->config.digit_pulse_max = 75;
 				}
-				// digit_pause.min
+				// digit.pause.min
 				ch_fxs->config.digit_pause_min = 30;
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_pause.min")) && (is_str_digit(cvar))) {
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.pause.min")) && (is_str_digit(cvar))) {
 					ch_fxs->config.digit_pause_min = atoi(cvar);
 				}
 				if (ch_fxs->config.digit_pause_min < 1) {
 					ch_fxs->config.digit_pause_min = 30;
 				}
-				// digit_pause.max
+				// digit.pause.max
 				ch_fxs->config.digit_pause_max = 50;
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_pause.max")) && (is_str_digit(cvar))) {
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.pause.max")) && (is_str_digit(cvar))) {
 					ch_fxs->config.digit_pause_max = atoi(cvar);
 				}
 				if (ch_fxs->config.digit_pause_max < 1) {
 					ch_fxs->config.digit_pause_max = 50;
 				}
-				// digit_inter.min
+				// digit.inter.min
 				ch_fxs->config.digit_inter_min = 200;
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit_inter.min")) && (is_str_digit(cvar))) {
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.inter.min")) && (is_str_digit(cvar))) {
 					ch_fxs->config.digit_inter_min = atoi(cvar);
 				}
 				if (ch_fxs->config.digit_inter_min < 1) {
@@ -25801,7 +27029,6 @@ static int pg_load(void)
 						goto pg_load_error;
 					}
 				}
-				ch_fxs = NULL;
 			} else if (sscanf(buf, "VIN%uRTP%u %[0-9A-Za-z/!-]", &index, &pos, name) == 3) {
 				str_xchg(name, '!', '/');
 				cp =  strrchr(name, '/');
