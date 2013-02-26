@@ -14582,7 +14582,7 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 				*rtp->dtmfptr++ = dtmf_sym;
 				*rtp->dtmfptr = '\0';
 			}
-			// send DTMF FRAME BEGIN
+			// send AST_FRAME_DTMF_BEGIN
 			memset(&rtp->frame, 0, sizeof(struct ast_frame));
 			if (dtmf_sym == 'X') {
 				rtp->frame.frametype = AST_FRAME_CONTROL;
@@ -14592,7 +14592,7 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 				rtp->frame.subclass.integer = AST_CONTROL_FLASH;
 #endif
 			} else {
-				rtp->frame.frametype = AST_FRAME_DTMF;
+				rtp->frame.frametype = AST_FRAME_DTMF_BEGIN;
 #if ASTERISK_VERSION_NUMBER < 10800
 				rtp->frame.subclass = dtmf_sym;
 #else
@@ -14603,7 +14603,7 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 			rtp->frame.samples = 0;
 			rtp->frame.mallocd = 0;
 			rtp->frame.src = "Polygator";
-			rtp->frame.len = ast_tvdiff_ms(ast_samp2tv(200, 1000), ast_tv(0, 0));
+			rtp->frame.len = 0;
 			ast_mutex_unlock(&rtp->lock);
 			return &rtp->frame;
 		}
@@ -14612,8 +14612,23 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 			// now event end
 			rtp->event_is_now_recv = 0;
 			ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] end\n", rtp->name, dtmf_sym);
+			// send AST_FRAME_DTMF_END
+			memset(&rtp->frame, 0, sizeof(struct ast_frame));
+			if (dtmf_sym != 'X') {
+				rtp->frame.frametype = AST_FRAME_DTMF_BEGIN;
+#if ASTERISK_VERSION_NUMBER < 10800
+				rtp->frame.subclass = dtmf_sym;
+#else
+				rtp->frame.subclass.integer = dtmf_sym;
+#endif
+			}
+			rtp->frame.datalen = 0;
+			rtp->frame.samples = 0;
+			rtp->frame.mallocd = 0;
+			rtp->frame.src = "Polygator";
+			rtp->frame.len = 0;
 			ast_mutex_unlock(&rtp->lock);
-			return &ast_null_frame;
+			return &rtp->frame;
 		}
 		ast_mutex_unlock(&rtp->lock);
 		return &ast_null_frame;
@@ -14659,14 +14674,9 @@ static struct ast_frame * pg_gsm_read(struct ast_channel *ast_ch)
 	rtp->recv_ssrc = ssrc;
 	// store sequence number and timestamp
 	rtp->recv_seq_num = seq_num;
-	rtp->recv_timestamp  = timestamp;
-	// if is first packet -- drop because don't calc true samples count
 	samples = timestamp - rtp->recv_timestamp;
-	if ((samples < 64) || (samples > 240)) {
-		samples = 160;
-	}
-// 	ast_log(LOG_DEBUG, "<%s>: read %d bytes - %d samples\n", chnl->name, data_len, samples);
-// 	memset(&chnl->frame, 0x00, sizeof(struct ast_frame));
+	rtp->recv_timestamp  = timestamp;
+	// fill asterisk frame
 	rtp->frame.frametype = AST_FRAME_VOICE;
 #if ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_copy(&rtp->frame.subclass.format, &rtp->format);
@@ -18113,10 +18123,12 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_LANGUAGE:
 							ast_copy_string(ch_gsm->config.language, a->argv[6], sizeof(ch_gsm->config.language));
+							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_MOHINTERPRET:
 							ast_copy_string(ch_gsm->config.mohinterpret, a->argv[6], sizeof(ch_gsm->config.mohinterpret));
+							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_BAUDRATE:
