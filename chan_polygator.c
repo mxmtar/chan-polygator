@@ -771,6 +771,7 @@ struct pg_channel_fxs {
 	u_int32_t ring_pause0;
 	u_int32_t ringing1;
 	u_int32_t ring_pause1;
+	int dtmf_is_started;
 
 	time_t last_call_time_incoming;
 	time_t last_call_time_outgoing;
@@ -3939,7 +3940,7 @@ static inline int pg_is_vinetic_run(struct pg_vinetic *vin)
 // end of pg_is_vinetic_run()
 //------------------------------------------------------------------------------
 
-
+#if 0
 //------------------------------------------------------------------------------
 // pg_get_channel_rtp()
 //------------------------------------------------------------------------------
@@ -3978,6 +3979,46 @@ static inline struct pg_channel_rtp *pg_get_channel_rtp(struct pg_vinetic *vin)
 //------------------------------------------------------------------------------
 // end of pg_get_channel_rtp()
 //------------------------------------------------------------------------------
+#else
+//------------------------------------------------------------------------------
+// pg_get_channel_rtp_by_number()
+//------------------------------------------------------------------------------
+static inline struct pg_channel_rtp *pg_get_channel_rtp_by_number(struct pg_vinetic *vin, unsigned int number)
+{
+	struct pg_channel_rtp *rtp = NULL;
+
+	if (vin) {
+		ast_mutex_lock(&vin->lock);
+		AST_LIST_TRAVERSE(&vin->channel_rtp_list, rtp, pg_vinetic_channel_rtp_list_entry) {
+			ast_mutex_lock(&rtp->lock);
+			if ((rtp->position_on_vinetic == number) && (!rtp->busy)) {
+				if ((rtp->fd = open(rtp->path, O_RDWR | O_NONBLOCK)) < 0) {
+					ast_log(LOG_ERROR, "RTP channel=\"%s\": can't open device \"%s\": %s\n", rtp->name, rtp->path, strerror(errno));
+				} else {
+					// init statistic counter
+					rtp->send_sid_count = 0;
+					rtp->send_drop_count = 0;
+					rtp->send_frame_count = 0;
+					rtp->recv_frame_count = 0;
+					// init DTMF buffer
+					rtp->dtmfptr = rtp->dtmfbuf;
+					rtp->dtmfbuf[0] = '\0';
+					rtp->busy = 1;
+					ast_mutex_unlock(&rtp->lock);
+					break;
+				}
+			}
+			ast_mutex_unlock(&rtp->lock);
+		}
+		ast_mutex_unlock(&vin->lock);
+	}
+
+	return rtp;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_channel_rtp_by_number()
+//------------------------------------------------------------------------------
+#endif
 
 //------------------------------------------------------------------------------
 // pg_put_channel_rtp()
@@ -6394,7 +6435,7 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 		vin = rtp->vinetic;
 	} else if ((!(vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) ||
 			(!pg_is_vinetic_run(vin)) ||
-			(!(rtp = pg_get_channel_rtp(vin)))) {
+			(!(rtp = pg_get_channel_rtp_by_number(vin, ch_gsm->vinetic_alm_slot)))) {
 		ast_log(LOG_WARNING, "pg_get_channel_rtp() failed\n");
 		return -1;
 	}
@@ -6530,14 +6571,14 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 			goto pg_channel_gsm_call_incoming_end;
 		}
 		// get signaling channel
-		if ((res = get_vin_signaling_channel(&vin->context)) < 0) {
+		if ((res = vin_get_signaling_channel_by_number(&vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
 			ast_log(LOG_ERROR, "vinetic=\"%s\": get_vin_signaling_channel() failed\n", vin->name);
 			goto pg_channel_gsm_call_incoming_end;
 		}
 		ch_gsm->vinetic_sig_slot = res;
 		// ALI module
 		if (ch_gsm->vinetic_alm_slot >= 0) {
-			if (!is_vin_ali_enabled(&vin->context)) {
+			if (!vin_is_ali_enabled(&vin->context)) {
 				// enable ALI module
 				if ((res = vin_ali_enable(&vin->context)) < 0) {
 					while (vin_message_stack_check_line(&vin->context)) {
@@ -6578,16 +6619,9 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 					goto pg_channel_gsm_call_incoming_end;
 				}
 			}
-			// set ALI channel operation mode ACTIVE_HIGH_VBATH
-			if ((res = vin_set_opmode(&vin->context, ch_gsm->vinetic_alm_slot, VIN_OP_MODE_ACTIVE_HIGH_VBATH)) < 0) {
-				while (vin_message_stack_check_line(&vin->context)) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-				}
-				goto pg_channel_gsm_call_incoming_end;
-			}
 		}
 		// signaling module
-		if (!is_vin_signaling_enabled(&vin->context)) {
+		if (!vin_is_signaling_enabled(&vin->context)) {
 			// enable signaling module
 			if ((res = vin_signaling_enable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -6616,16 +6650,16 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 			goto pg_channel_gsm_call_incoming_end;
 		}
 		// set signaling channel RTP
-		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, ch_gsm->vinetic_sig_slot, rtp->rem_ssrc);
-		vin_signaling_channel_config_rtp_set_evt_pt(&vin->context, ch_gsm->vinetic_sig_slot, rtp->event_payload_type);
-		if ((res = vin_signaling_channel_config_rtp(&vin->context, ch_gsm->vinetic_sig_slot)) < 0) {
+		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);
+		vin_signaling_channel_config_rtp_set_evt_pt(&vin->context, rtp->position_on_vinetic, rtp->event_payload_type);
+		if ((res = vin_signaling_channel_config_rtp(&vin->context, rtp->position_on_vinetic)) < 0) {
 			while (vin_message_stack_check_line(&vin->context)) {
 				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 			}
 			goto pg_channel_gsm_call_incoming_end;
 		}
 		// coder module
-		if (!is_vin_coder_enabled(&vin->context)) {
+		if (!vin_is_coder_enabled(&vin->context)) {
 			// enable coder module
 			if ((res = vin_coder_enable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -7176,7 +7210,7 @@ static int pg_channel_fxs_call_outgoing(struct pg_channel_fxs *ch_fxs, struct pg
 		vin = rtp->vinetic;
 	} else if ((!(vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number))) ||
 			(!pg_is_vinetic_run(vin)) ||
-			(!(rtp = pg_get_channel_rtp(vin)))) {
+			(!(rtp = pg_get_channel_rtp_by_number(vin, ch_fxs->vinetic_alm_slot)))) {
 		ast_log(LOG_WARNING, "pg_get_channel_rtp() failed\n");
 		return -1;
 	}
@@ -7338,16 +7372,16 @@ static int pg_channel_fxs_call_outgoing(struct pg_channel_fxs *ch_fxs, struct pg
 			goto pg_channel_fxs_call_outgoing_end;
 		}
 		// set signaling channel RTP
-		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, ch_fxs->vinetic_sig_slot, rtp->rem_ssrc);
-		vin_signaling_channel_config_rtp_set_evt_pt(&vin->context, ch_fxs->vinetic_sig_slot, rtp->event_payload_type);
-		if ((res = vin_signaling_channel_config_rtp(&vin->context, ch_fxs->vinetic_sig_slot)) < 0) {
+		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);
+		vin_signaling_channel_config_rtp_set_evt_pt(&vin->context, rtp->position_on_vinetic, rtp->event_payload_type);
+		if ((res = vin_signaling_channel_config_rtp(&vin->context, rtp->position_on_vinetic)) < 0) {
 			while (vin_message_stack_check_line(&vin->context)) {
 				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 			}
 			goto pg_channel_fxs_call_outgoing_end;
 		}
 		// coder module
-		if (!is_vin_coder_enabled(&vin->context)) {
+		if (!vin_is_coder_enabled(&vin->context)) {
 			// enable coder module
 			if ((res = vin_coder_enable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -7704,7 +7738,7 @@ static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
 			ast_channel_unlock(call->owner);
 			gettimeofday(&call->answer_time, NULL);
 			// set new state
-// 			ast_setstate(call->owner, AST_STATE_UP);
+			ast_channel_set_fd(call->owner, 0, ch_fxs->channel_rtp->fd);
 			call->state = PG_CALL_FXS_STATE_ACTIVE;
 			ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
 								ch_fxs->alias, call->line,
@@ -8677,8 +8711,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								// check for conference condition
 								conference = 1;
 								count = 0;
-								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-								{
+								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
 									count++;
 									if ((call->state != PG_CALL_GSM_STATE_ACTIVE) || (call->clcc_mpty)) {
 										conference = 0;
@@ -8688,19 +8721,18 @@ static void *pg_channel_gsm_workthread(void *data)
 								if ((count > 1) && (conference)) {
 									// is conference
 									count = 0;
-									AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-									{
-										if (count++)
+									AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
+										if (count++) {
 											ast_channel_set_fd(call->owner, 0, -1);
-										else
+										} else {
 											ast_channel_set_fd(call->owner, 0, ch_gsm->channel_rtp->fd);
+										}
 									}
 									ast_verb(2, "GSM channel=\"%s\": Conference started\n", ch_gsm->alias);
 									pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "3");
 								} else {
 									// adjust call states
-									AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-									{
+									AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
 										if ((call->state == PG_CALL_GSM_STATE_ACTIVE) && (call->clcc_stat != 0)) {
 											ast_verb(5, "GSM channel=\"%s\": call line id=%d adjust to active\n", ch_gsm->alias, call->line);
 											pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "2");
@@ -8709,8 +8741,7 @@ static void *pg_channel_gsm_workthread(void *data)
 									}
 								}
 								// perform line contest
-								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-								{
+								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
 									if (call->contest > 1) {
 										pg_call_gsm_sm(call, PG_CALL_GSM_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
 										break;
@@ -13762,36 +13793,40 @@ static void *pg_vinetic_workthread(void *data)
 					vin->capabilities = ast_format_cap_alloc();
 					switch (vin->context.edsp_sw_version_register.features) {
 						case 0:
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G729A, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G723_1, 0));
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
 							break;
 						case 4:
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G729A, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G723_1, 0));
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
 							break;
 						case 12:
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G729A, 0));
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G729A, 0));
 							break;
 						case 16:
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G729A, 0));
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G729A, 0));
 							break;
 						case 20:
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G729A, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
 							break;
 						case 24:
-							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G723_1, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
 							break;
 						default:
 							break;
@@ -13803,36 +13838,40 @@ static void *pg_vinetic_workthread(void *data)
 #else
 					switch (vin->context.edsp_sw_version_register.features) {
 						case 0:
+							vin->capabilities |= AST_FORMAT_ULAW;
+							vin->capabilities |= AST_FORMAT_ALAW;
+							vin->capabilities |= AST_FORMAT_G726;
 							vin->capabilities |= AST_FORMAT_G729A;
 							vin->capabilities |= AST_FORMAT_G723_1;
-							vin->capabilities |= AST_FORMAT_ALAW;
-							vin->capabilities |= AST_FORMAT_ULAW;
-							vin->capabilities |= AST_FORMAT_G726;
 							break;
 						case 4:
+							vin->capabilities |= AST_FORMAT_ULAW;
+							vin->capabilities |= AST_FORMAT_ALAW;
+							vin->capabilities |= AST_FORMAT_G726;
 							vin->capabilities |= AST_FORMAT_G729A;
 							vin->capabilities |= AST_FORMAT_G723_1;
-							vin->capabilities |= AST_FORMAT_ALAW;
-							vin->capabilities |= AST_FORMAT_ULAW;
-							vin->capabilities |= AST_FORMAT_G726;
 							break;
 						case 12:
-							vin->capabilities |= AST_FORMAT_G729A;
-							vin->capabilities |= AST_FORMAT_ALAW;
 							vin->capabilities |= AST_FORMAT_ULAW;
+							vin->capabilities |= AST_FORMAT_ALAW;
 							vin->capabilities |= AST_FORMAT_G726;
+							vin->capabilities |= AST_FORMAT_G729A;
 							break;
 						case 16:
-							vin->capabilities |= AST_FORMAT_G729A;
-							vin->capabilities |= AST_FORMAT_ALAW;
 							vin->capabilities |= AST_FORMAT_ULAW;
+							vin->capabilities |= AST_FORMAT_ALAW;
 							vin->capabilities |= AST_FORMAT_G726;
+							vin->capabilities |= AST_FORMAT_G729A;
 							break;
 						case 20:
-							vin->capabilities |= AST_FORMAT_G729A;
+							vin->capabilities |= AST_FORMAT_ULAW;
+							vin->capabilities |= AST_FORMAT_ALAW;
+							vin->capabilities |= AST_FORMAT_G726;
 							break;
 						case 24:
-							vin->capabilities |= AST_FORMAT_G723_1;
+							vin->capabilities |= AST_FORMAT_ULAW;
+							vin->capabilities |= AST_FORMAT_ALAW;
+							vin->capabilities |= AST_FORMAT_G726;
 							break;
 						default:
 							break;
@@ -13940,6 +13979,22 @@ static void *pg_vinetic_workthread(void *data)
 							vin->state = PG_VINETIC_STATE_IDLE;
 							break;
 						}
+						// set SLIC operation mode "Active High" - even
+						if (vin_set_opmode(&vin->context, i & 2, VIN_OP_MODE_AH) < 0) {
+							while (vin_message_stack_check_line(&vin->context)) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+							}
+							vin->state = PG_VINETIC_STATE_IDLE;
+							break;
+						}
+						// set SLIC operation mode "Active High" - odd
+						if (vin_set_opmode(&vin->context, i | 1, VIN_OP_MODE_AH) < 0) {
+							while (vin_message_stack_check_line(&vin->context)) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+							}
+							vin->state = PG_VINETIC_STATE_IDLE;
+							break;
+						}
 					}
 				}
 				// switch to little endian mode
@@ -13954,8 +14009,19 @@ static void *pg_vinetic_workthread(void *data)
 				vin->state = PG_VINETIC_STATE_RUN;
 				ast_debug(3, "vinetic=\"%s\": run\n", vin->name);
 				// set vinetic's module state to previous state - for fallback purpose after reset
+				// set SLIC's operation mode
+				for (i = 0; i < 4; i++) {
+					// restore previous mode
+					if (vin_set_opmode(&vin->context, i, vin->context.ali_opmode[i]) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+						vin->state = PG_VINETIC_STATE_IDLE;
+						break;
+					}
+				}
 				// ALI module
-				if (is_vin_ali_enabled(&vin->context)) {
+				if (vin_is_ali_enabled(&vin->context)) {
 					// enable ALI module
 					if (vin_ali_enable(&vin->context) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
@@ -13965,7 +14031,7 @@ static void *pg_vinetic_workthread(void *data)
 						break;
 					}
 					for (i = 0; i < 4; i++) {
-						if (is_vin_ali_channel_enabled(&vin->context, i)) {
+						if (vin_is_ali_channel_enabled(&vin->context, i)) {
 							// enable ALI channel
 							if (vin_ali_channel_enable(&vin->context, i) < 0) {
 								while (vin_message_stack_check_line(&vin->context)) {
@@ -13982,19 +14048,11 @@ static void *pg_vinetic_workthread(void *data)
 								vin->state = PG_VINETIC_STATE_IDLE;
 								break;
 							}
-							// set ALI channel operation mode
-							if (vin_set_opmode(&vin->context, i, vin->context.ali_opmode[i]) < 0) {
-								while (vin_message_stack_check_line(&vin->context)) {
-									ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-								}
-								vin->state = PG_VINETIC_STATE_IDLE;
-								break;
-							}
 						}
 					}
 				}
 				// signaling module
-				if (is_vin_signaling_enabled(&vin->context)) {
+				if (vin_is_signaling_enabled(&vin->context)) {
 					// enable signaling module
 					if (vin_signaling_enable(&vin->context) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
@@ -14004,7 +14062,7 @@ static void *pg_vinetic_workthread(void *data)
 						break;
 					}
 					for (i = 0; i < 4; i++) {
-						if (is_vin_signaling_channel_enabled(&vin->context, i)) {
+						if (vin_is_signaling_channel_enabled(&vin->context, i)) {
 							// enable signaling channel
 							if (vin_signaling_channel_enable(&vin->context, i) < 0) {
 								while (vin_message_stack_check_line(&vin->context)) {
@@ -14033,7 +14091,7 @@ static void *pg_vinetic_workthread(void *data)
 					}
 				}
 				// coder module
-				if (is_vin_coder_enabled(&vin->context)) {
+				if (vin_is_coder_enabled(&vin->context)) {
 					// enable coder module
 					if ((vin_coder_enable(&vin->context)) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
@@ -14051,7 +14109,7 @@ static void *pg_vinetic_workthread(void *data)
 						break;
 					}
 					for (i = 0; i < 4; i++) {
-						if (is_vin_coder_channel_enabled(&vin->context, i)) {
+						if (vin_is_coder_channel_enabled(&vin->context, i)) {
 							// set coder channel RTP
 							if (vin_coder_channel_config_rtp(&vin->context, i) < 0) {
 								while (vin_message_stack_check_line(&vin->context)) {
@@ -14111,6 +14169,7 @@ pg_vinetic_workthread_end:
 	ast_mutex_lock(&vin->lock);
 	vin_poll_disable(&vin->context);
 	vin_close(&vin->context);
+	vin_destroy(&vin->context);
 	vin->thread = AST_PTHREADT_NULL;
 	ast_mutex_unlock(&vin->lock);
 	ast_debug(4, "vinetic=\"%s\": thread stop\n", vin->name);
@@ -14219,7 +14278,7 @@ static void *pg_channel_fxs_workthread(void *data)
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 						}
 					} else {
-						// set ALI channel operation mode ACTIVE_HIGH
+						// set SLIC operation mode "Active High"
 						if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_AH) < 0) {
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
@@ -14244,13 +14303,13 @@ static void *pg_channel_fxs_workthread(void *data)
 						}
 					} else {
 						// get signaling channel
-						if ((res = get_vin_signaling_channel(&vin->context)) < 0) {
+						if ((res = vin_get_signaling_channel_by_number(&vin->context, ch_fxs->vinetic_alm_slot)) < 0) {
 							ast_log(LOG_WARNING, "get_vin_signaling_channel() failed\n");
 							goto pg_channel_fxs_offhook_action_end;
 						}
 						ch_fxs->vinetic_sig_slot = res;
 						// ALI module
-						if (!is_vin_ali_enabled(&vin->context)) {
+						if (!vin_is_ali_enabled(&vin->context)) {
 							// enable ALI module
 							if ((res = vin_ali_enable(&vin->context)) < 0) {
 								while (vin_message_stack_check_line(&vin->context)) {
@@ -14291,7 +14350,7 @@ static void *pg_channel_fxs_workthread(void *data)
 								goto pg_channel_fxs_offhook_action_end;
 							}
 						}
-						// set ALI channel operation mode ACTIVE_HIGH
+						// set SLIC operation mode "Active High"
 						if ((res = vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_AH)) < 0) {
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
@@ -14299,7 +14358,7 @@ static void *pg_channel_fxs_workthread(void *data)
 							goto pg_channel_fxs_offhook_action_end;
 						}
 						// signaling module
-						if (!is_vin_signaling_enabled(&vin->context)) {
+						if (!vin_is_signaling_enabled(&vin->context)) {
 							// enable signaling module
 							if ((res = vin_signaling_enable(&vin->context)) < 0) {
 								while (vin_message_stack_check_line(&vin->context)) {
@@ -14403,8 +14462,8 @@ pg_channel_fxs_offhook_action_end:
 						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 					}
 				} else {
-					// set ALI channel operation mode SLEEP POWER DOWN RESISTIVE
-					if ((res = vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, /*VIN_OP_MODE_SPDR*/VIN_OP_MODE_AH)) < 0) {
+					// set SLIC operation mode "Active High"
+					if ((res = vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_AH)) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 						}
@@ -14417,7 +14476,7 @@ pg_channel_fxs_offhook_action_end:
 						}
 						goto pg_channel_fxs_onhook_action_end;
 					}
-					if (!is_vin_ali_used(&vin->context)) {
+					if (!vin_is_ali_used(&vin->context)) {
 						// disable ALI module
 						if ((res = vin_ali_disable(&vin->context)) < 0) {
 							while (vin_message_stack_check_line(&vin->context)) {
@@ -14427,6 +14486,13 @@ pg_channel_fxs_offhook_action_end:
 						}
 					}
 					// signaling module
+					// disable DTMF receiver
+					if ((res = vin_dtmf_receiver_disable(&vin->context, ch_fxs->vinetic_sig_slot)) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+						goto pg_channel_fxs_onhook_action_end;
+					}
 					// disable UTG
 					if ((res = vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot)) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
@@ -14441,7 +14507,7 @@ pg_channel_fxs_offhook_action_end:
 						}
 						goto pg_channel_fxs_onhook_action_end;
 					}
-					if (!is_vin_signaling_used(&vin->context)) {
+					if (!vin_is_signaling_used(&vin->context)) {
 						// disable signaling module
 						if ((res = vin_signaling_disable(&vin->context)) < 0) {
 							while (vin_message_stack_check_line(&vin->context)) {
@@ -14471,7 +14537,7 @@ pg_channel_fxs_onhook_action_end:
 						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 					}
 				} else {
-					// set ALI channel operation mode ACTIVE_HIGH
+					// set SLIC operation mode "Active High"
 					if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_AH) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
@@ -14496,7 +14562,7 @@ pg_channel_fxs_onhook_action_end:
 						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 					}
 				} else {
-					// set ALI channel operation mode RINGING
+					// set SLIC operation mode "Ringing"
 					if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_RINGING) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
@@ -14521,7 +14587,7 @@ pg_channel_fxs_onhook_action_end:
 						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 					}
 				} else {
-					// set ALI channel operation mode ACTIVE_HIGH
+					// set SLIC operation mode "Active High"
 					if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_AH) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
@@ -14546,7 +14612,7 @@ pg_channel_fxs_onhook_action_end:
 						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 					}
 				} else {
-					// set ALI channel operation mode RINGING
+					// set SLIC operation mode "Ringing"
 					if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_RINGING) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
@@ -15172,7 +15238,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #else
 						((joint = format & vin->capabilities)) &&
 #endif
-						((rtp = pg_get_channel_rtp(vin)))
+						((rtp = pg_get_channel_rtp_by_number(vin, ch_gsm->vinetic_alm_slot)))
 					) {
 						// set new empty call to prevent missing ownership
 						if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
@@ -15231,7 +15297,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #else
 						((joint = format & vin->capabilities)) &&
 #endif
-						((rtp = pg_get_channel_rtp(vin)))
+						((rtp = pg_get_channel_rtp_by_number(vin, ch_gsm->vinetic_alm_slot)))
 					) {
 						// set new empty call to prevent missing ownership
 						if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
@@ -15280,7 +15346,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #else
 				((joint = format & vin->capabilities)) &&
 #endif
-				((rtp = pg_get_channel_rtp(vin))) &&
+				((rtp = pg_get_channel_rtp_by_number(vin, ch_gsm->vinetic_alm_slot))) &&
 				((call = pg_channel_gsm_get_new_call(ch_gsm)))
 			) {
 				call->direction = PG_CALL_DIRECTION_OUTGOING;
@@ -15313,7 +15379,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #else
 				((joint = format & vin->capabilities)) &&
 #endif
-				((rtp = pg_get_channel_rtp(vin))) &&
+				((rtp = pg_get_channel_rtp_by_number(vin, ch_gsm->vinetic_alm_slot))) &&
 				((call = pg_channel_gsm_get_new_call(ch_gsm)))
 			) {
 				call->direction = PG_CALL_DIRECTION_OUTGOING;
@@ -15346,7 +15412,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #else
 				((joint = format & vin->capabilities)) &&
 #endif
-				((rtp = pg_get_channel_rtp(vin))) &&
+				((rtp = pg_get_channel_rtp_by_number(vin, ch_gsm->vinetic_alm_slot))) &&
 				((call = pg_channel_gsm_get_new_call(ch_gsm)))
 			) {
 				call->direction = PG_CALL_DIRECTION_OUTGOING;
@@ -15390,7 +15456,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #else
 						(!(joint = format & vin->capabilities)) ||
 #endif
-						(!(rtp = pg_get_channel_rtp(vin)))) {
+						(!(rtp = pg_get_channel_rtp_by_number(vin, ch_gsm->vinetic_alm_slot)))) {
 					ast_mutex_unlock(&ch_gsm->lock);
 					ch_gsm = NULL;
 					*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
@@ -15442,7 +15508,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #else
 				((joint = format & vin->capabilities)) &&
 #endif
-				((rtp = pg_get_channel_rtp(vin)))
+				((rtp = pg_get_channel_rtp_by_number(vin, ch_gsm->vinetic_alm_slot)))
 			) {
 				// set new empty call to prevent missing ownership
 				if ((call = pg_channel_gsm_get_new_call(ch_gsm))) {
@@ -15620,14 +15686,14 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 			goto pg_gsm_requester_vinetic_end;
 		}
 		// get signaling channel
-		if ((res = get_vin_signaling_channel(&vin->context)) < 0) {
+		if ((res = vin_get_signaling_channel_by_number(&vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
 			ast_log(LOG_ERROR, "vinetic=\"%s\": get_vin_signaling_channel() failed\n", vin->name);
 			goto pg_gsm_requester_vinetic_end;
 		}
 		ch_gsm->vinetic_sig_slot = res;
 		// ALI module
 		if (ch_gsm->vinetic_alm_slot >= 0) {
-			if (!is_vin_ali_enabled(&vin->context)) {
+			if (!vin_is_ali_enabled(&vin->context)) {
 				// enable vinetic ALI module
 				if ((res = vin_ali_enable(&vin->context)) < 0) {
 					while (vin_message_stack_check_line(&vin->context)) {
@@ -15668,16 +15734,9 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 					goto pg_gsm_requester_vinetic_end;
 				}
 			}
-			// set ALI channel operation mode ACTIVE_HIGH_VBATH
-			if ((res = vin_set_opmode(&vin->context, ch_gsm->vinetic_alm_slot, VIN_OP_MODE_ACTIVE_HIGH_VBATH)) < 0) {
-				while (vin_message_stack_check_line(&vin->context)) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-				}
-				goto pg_gsm_requester_vinetic_end;
-			}
 		}
 		// signaling module
-		if (!is_vin_signaling_enabled(&vin->context)) {
+		if (!vin_is_signaling_enabled(&vin->context)) {
 			// enable signaling module
 			if ((res = vin_signaling_enable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -15706,16 +15765,16 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 			goto pg_gsm_requester_vinetic_end;
 		}
 		// set signaling channel RTP
-		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, ch_gsm->vinetic_sig_slot, rtp->rem_ssrc);
-		vin_signaling_channel_config_rtp_set_evt_pt(&vin->context, ch_gsm->vinetic_sig_slot, rtp->event_payload_type);
-		if ((res = vin_signaling_channel_config_rtp(&vin->context, ch_gsm->vinetic_sig_slot)) < 0) {
+		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);
+		vin_signaling_channel_config_rtp_set_evt_pt(&vin->context, rtp->position_on_vinetic, rtp->event_payload_type);
+		if ((res = vin_signaling_channel_config_rtp(&vin->context, rtp->position_on_vinetic)) < 0) {
 			while (vin_message_stack_check_line(&vin->context)) {
 				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 			}
 			goto pg_gsm_requester_vinetic_end;
 		}
 		// coder module
-		if (!is_vin_coder_enabled(&vin->context)) {
+		if (!vin_is_coder_enabled(&vin->context)) {
 			// enable coder module
 			if ((res = vin_coder_enable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -16013,13 +16072,6 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 		}
 		// ALI module
 		if (ch_gsm->vinetic_alm_slot >= 0) {
-			// set ALI channel to power down high impedance
-			if ((res = vin_set_opmode(&vin->context, ch_gsm->vinetic_alm_slot, /*VIN_OP_MODE_PDHI*/VIN_OP_MODE_AH)) < 0) {
-				while (vin_message_stack_check_line(&vin->context)) {
-					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-				}
-				goto pg_gsm_hangup_vinetic_end;
-			}
 			// disable ALI channel
 			if ((res = vin_ali_channel_disable(&vin->context, ch_gsm->vinetic_alm_slot)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -16027,7 +16079,7 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 				}
 				goto pg_gsm_hangup_vinetic_end;
 			}
-			if (!is_vin_ali_used(&vin->context)) {
+			if (!vin_is_ali_used(&vin->context)) {
 				// disable ALI module
 				if ((res = vin_ali_disable(&vin->context)) < 0) {
 					while (vin_message_stack_check_line(&vin->context)) {
@@ -16052,7 +16104,7 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 			}
 			goto pg_gsm_hangup_vinetic_end;
 		}
-		if (!is_vin_signaling_used(&vin->context)) {
+		if (!vin_is_signaling_used(&vin->context)) {
 			// disable signaling module
 			if ((res = vin_signaling_disable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -16069,7 +16121,7 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 				}
 			goto pg_gsm_hangup_vinetic_end;
 		}
-		if (!is_vin_coder_used(&vin->context)) {
+		if (!vin_is_coder_used(&vin->context)) {
 			// disable coder module
 			if ((res = vin_coder_disable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -16199,8 +16251,9 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 				rtp = ch_gsm->channel_rtp;
 				res = pg_call_gsm_sm(call, PG_CALL_GSM_MSG_HOLD_REQ, 0);
 				ast_channel_set_fd(ast_ch, 0, -1);
-			} else
+			} else {
 				ast_moh_start(ast_ch, data, ch_gsm->config.mohinterpret);
+			}
 			res = 0;
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -16716,20 +16769,16 @@ static struct ast_frame *pg_gsm_read(struct ast_channel *ast_ch)
 		rtp->recv_ssrc = ssrc;
 		
 	}
-	if (rtp->recv_ssrc != ssrc)
+	if (rtp->recv_ssrc != ssrc) {
 		ast_verb(4, "RTP Channel=\"%s\": SSRC 0x%08x changed to 0x%08x \n", rtp->name, rtp->recv_ssrc, ssrc);
+	}
 	// store SSRC
 	rtp->recv_ssrc = ssrc;
 	// store sequence number and timestamp
 	rtp->recv_seq_num = seq_num;
-	rtp->recv_timestamp  = timestamp;
-	// if is first packet -- drop because don't calc true samples count
 	samples = timestamp - rtp->recv_timestamp;
-	if ((samples < 64) || (samples > 240)) {
-		samples = 160;
-	}
-// 	ast_log(LOG_DEBUG, "<%s>: read %d bytes - %d samples\n", chnl->name, data_len, samples);
-// 	memset(&chnl->frame, 0x00, sizeof(struct ast_frame));
+	rtp->recv_timestamp  = timestamp;
+	// fill asterisk frame
 	rtp->frame.frametype = AST_FRAME_VOICE;
 #if ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_copy(&rtp->frame.subclass.format, &rtp->format);
@@ -16929,7 +16978,7 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 #else
 			((joint = format & vin->capabilities)) &&
 #endif
-			((rtp = pg_get_channel_rtp(vin))) &&
+			((rtp = pg_get_channel_rtp_by_number(vin, ch_fxs->vinetic_alm_slot))) &&
 			((call = pg_channel_fxs_get_new_call(ch_fxs, PG_CALL_DIRECTION_INCOMING)))
 		) {
 			call->channel_rtp = rtp;
@@ -17094,13 +17143,13 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 			goto pg_fxs_requester_vinetic_end;
 		}
 		// get signaling channel
-		if ((res = get_vin_signaling_channel(&vin->context)) < 0) {
+		if ((res = vin_get_signaling_channel_by_number(&vin->context, ch_fxs->vinetic_alm_slot)) < 0) {
 			ast_log(LOG_ERROR, "vinetic=\"%s\": get_vin_signaling_channel() failed\n", vin->name);
 			goto pg_fxs_requester_vinetic_end;
 		}
 		ch_fxs->vinetic_sig_slot = res;
 		// ALI module
-		if (!is_vin_ali_enabled(&vin->context)) {
+		if (!vin_is_ali_enabled(&vin->context)) {
 			// enable vinetic ALI module
 			if ((res = vin_ali_enable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -17141,15 +17190,15 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 				goto pg_fxs_requester_vinetic_end;
 			}
 		}
-		// set ALI channel operation mode ACTIVE_HIGH_VBATH
-		if ((res = vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_ACTIVE_HIGH_VBATH)) < 0) {
+		// set SLIC operation mode "Active High"
+		if ((res = vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_AH)) < 0) {
 			while (vin_message_stack_check_line(&vin->context)) {
 				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 			}
 			goto pg_fxs_requester_vinetic_end;
 		}
 		// signaling module
-		if (!is_vin_signaling_enabled(&vin->context)) {
+		if (!vin_is_signaling_enabled(&vin->context)) {
 			// enable signaling module
 			if ((res = vin_signaling_enable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -17178,16 +17227,16 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 			goto pg_fxs_requester_vinetic_end;
 		}
 		// set signaling channel RTP
-		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, ch_fxs->vinetic_sig_slot, rtp->rem_ssrc);
-		vin_signaling_channel_config_rtp_set_evt_pt(&vin->context, ch_fxs->vinetic_sig_slot, rtp->event_payload_type);
-		if ((res = vin_signaling_channel_config_rtp(&vin->context, ch_fxs->vinetic_sig_slot)) < 0) {
+		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);
+		vin_signaling_channel_config_rtp_set_evt_pt(&vin->context, rtp->position_on_vinetic, rtp->event_payload_type);
+		if ((res = vin_signaling_channel_config_rtp(&vin->context, rtp->position_on_vinetic)) < 0) {
 			while (vin_message_stack_check_line(&vin->context)) {
 				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 			}
 			goto pg_fxs_requester_vinetic_end;
 		}
 		// coder module
-		if (!is_vin_coder_enabled(&vin->context)) {
+		if (!vin_is_coder_enabled(&vin->context)) {
 			// enable coder module
 			if ((res = vin_coder_enable(&vin->context)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -17399,8 +17448,6 @@ static int pg_fxs_call(struct ast_channel *ast_ch, char *dest, int timeout)
 	// start proceeding timer
 	x_timer_set(call->timers.proceeding, proceeding_timeout);
 
-	ast_channel_set_fd(ast_ch, 0, ch_fxs->channel_rtp->fd);
-
 	ast_mutex_unlock(&ch_fxs->lock);
 
 	return 0;
@@ -17458,13 +17505,49 @@ static int pg_fxs_hangup(struct ast_channel *ast_ch)
 				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 			}
 		} else {
+			// coder module
+			if (vin_is_coder_channel_enabled(&vin->context, ch_fxs->channel_rtp->position_on_vinetic)) {
+				// disable coder channel
+				if (vin_is_coder_channel_enabled(&vin->context, ch_fxs->channel_rtp->position_on_vinetic)) {
+					if (vin_coder_channel_disable(&vin->context, ch_fxs->channel_rtp->position_on_vinetic) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+				}
+				if (!vin_is_coder_used(&vin->context)) {
+					// disable coder module
+					if (vin_coder_disable(&vin->context) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+				}
+			}
+			vin_coder_channel_reset(&vin->context, ch_fxs->channel_rtp->position_on_vinetic);
+			pg_put_channel_rtp(ch_fxs->channel_rtp);
+			ch_fxs->channel_rtp = NULL;
 			// check hook state
 			if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_OFF) {
 				// perform off hook action
 				// signaling module
-				if (is_vin_signaling_channel_enabled(&vin->context, ch_fxs->vinetic_sig_slot)) {
+				if (vin_is_signaling_channel_enabled(&vin->context, ch_fxs->vinetic_sig_slot)) {
 					// disable DTMF receiver
 					if (vin_dtmf_receiver_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+					// disable signaling channel
+					if (vin_signaling_channel_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+					// enable signaling channel
+					vin_signaling_channel_set_input_null(&vin->context, ch_fxs->vinetic_sig_slot, 1);
+					vin_signaling_channel_set_input_null(&vin->context, ch_fxs->vinetic_sig_slot, 2);
+					if (vin_signaling_channel_enable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 						}
@@ -17508,21 +17591,21 @@ static int pg_fxs_hangup(struct ast_channel *ast_ch)
 				}
 			} else {
 				// perform on hook action
-				// set ALI channel operation mode SLEEP POWER DOWN RESISTIVE
-				if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, /*VIN_OP_MODE_SPDR*/VIN_OP_MODE_AH) < 0) {
+				// set SLIC operation mode "Active High"
+				if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_AH) < 0) {
 					while (vin_message_stack_check_line(&vin->context)) {
 						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 					}
 				}
 				// ALI module
-				if (is_vin_ali_channel_enabled(&vin->context, ch_fxs->vinetic_alm_slot)) {
+				if (vin_is_ali_channel_enabled(&vin->context, ch_fxs->vinetic_alm_slot)) {
 					// disable ALI channel
 					if (vin_ali_channel_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 						}
 					}
-					if (!is_vin_ali_used(&vin->context)) {
+					if (!vin_is_ali_used(&vin->context)) {
 						// disable ALI module
 						if (vin_ali_disable(&vin->context) < 0) {
 							while (vin_message_stack_check_line(&vin->context)) {
@@ -17532,7 +17615,13 @@ static int pg_fxs_hangup(struct ast_channel *ast_ch)
 					}
 				}
 				// signaling module
-				if (is_vin_signaling_channel_enabled(&vin->context, ch_fxs->vinetic_sig_slot)) {
+				if (vin_is_signaling_channel_enabled(&vin->context, ch_fxs->vinetic_sig_slot)) {
+					// disable DTMF receiver
+					if ((res = vin_dtmf_receiver_disable(&vin->context, ch_fxs->vinetic_sig_slot)) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
 					// disable UTG
 					if ((res = vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot)) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
@@ -17545,7 +17634,7 @@ static int pg_fxs_hangup(struct ast_channel *ast_ch)
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 						}
 					}
-					if (!is_vin_signaling_used(&vin->context)) {
+					if (!vin_is_signaling_used(&vin->context)) {
 						// disable signaling module
 						if (vin_signaling_disable(&vin->context) < 0) {
 							while (vin_message_stack_check_line(&vin->context)) {
@@ -17558,29 +17647,6 @@ static int pg_fxs_hangup(struct ast_channel *ast_ch)
 				vin_signaling_channel_reset(&vin->context, ch_fxs->vinetic_sig_slot);
 				ch_fxs->vinetic_sig_slot = -1;
 			}
-			// coder module
-			if (is_vin_coder_channel_enabled(&vin->context, ch_fxs->channel_rtp->position_on_vinetic)) {
-				// disable coder channel
-				if (is_vin_coder_channel_enabled(&vin->context, ch_fxs->channel_rtp->position_on_vinetic)) {
-					if (vin_coder_channel_disable(&vin->context, ch_fxs->channel_rtp->position_on_vinetic) < 0) {
-						while (vin_message_stack_check_line(&vin->context)) {
-							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-						}
-					}
-				}
-				if (!is_vin_coder_used(&vin->context)) {
-					// disable coder module
-					if (vin_coder_disable(&vin->context) < 0) {
-						while (vin_message_stack_check_line(&vin->context)) {
-							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-						}
-					}
-				}
-			}
-
-			vin_coder_channel_reset(&vin->context, ch_fxs->channel_rtp->position_on_vinetic);
-			pg_put_channel_rtp(ch_fxs->channel_rtp);
-			ch_fxs->channel_rtp = NULL;
 		}
 		ast_mutex_unlock(&vin->lock);
 	}
@@ -18158,6 +18224,7 @@ static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch)
 		ast_mutex_unlock(&rtp->lock);
 		return &ast_null_frame;
 	}
+
 	// parsing rtp header
 	rtp_hdr_ptr = (struct rtp_hdr *)read_ptr;
 	hdr_len = sizeof(struct rtp_hdr);
@@ -18322,7 +18389,7 @@ static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch)
 	if (!rtp->recv_timestamp && !rtp->recv_frame_count) {
 		// init start timestamp
 		ast_verb(4, "RTP Channel=\"%s\": starting timestamp=%u\n", rtp->name, timestamp);
-		rtp->recv_timestamp = timestamp - 160;
+// 		rtp->recv_timestamp = timestamp - 160;
 	}
 	// check ssrc value
 	ssrc = ntohl(rtp_hdr_ptr->ssrc);
@@ -18333,20 +18400,17 @@ static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch)
 		rtp->recv_ssrc = ssrc;
 		
 	}
-	if (rtp->recv_ssrc != ssrc)
+	if (rtp->recv_ssrc != ssrc) {
 		ast_verb(4, "RTP Channel=\"%s\": SSRC 0x%08x changed to 0x%08x \n", rtp->name, rtp->recv_ssrc, ssrc);
+	}
 	// store SSRC
 	rtp->recv_ssrc = ssrc;
 	// store sequence number and timestamp
 	rtp->recv_seq_num = seq_num;
-	rtp->recv_timestamp  = timestamp;
-	// if is first packet -- drop because don't calc true samples count
+	// calc smaples count
 	samples = timestamp - rtp->recv_timestamp;
-	if ((samples < 64) || (samples > 240)) {
-		samples = 160;
-	}
-// 	ast_log(LOG_DEBUG, "<%s>: read %d bytes - %d samples\n", chnl->name, data_len, samples);
-// 	memset(&chnl->frame, 0x00, sizeof(struct ast_frame));
+	rtp->recv_timestamp  = timestamp;
+	// fill asterisk frame
 	rtp->frame.frametype = AST_FRAME_VOICE;
 #if ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_copy(&rtp->frame.subclass.format, &rtp->format);
@@ -18426,47 +18490,98 @@ static int pg_fxs_fixup(struct ast_channel *old_ast_ch, struct ast_channel *new_
 //------------------------------------------------------------------------------
 static int pg_fxs_dtmf_start(struct ast_channel *ast_ch, char digit)
 {
-#if 0
+	unsigned int dtc;
+	int res = -1;
+	struct pg_vinetic *vin;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call_fxs *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
+	struct pg_channel_fxs *ch_fxs = call->channel_fxs;
 
-	ast_mutex_lock(&ch_gsm->lock);
+	ast_mutex_lock(&ch_fxs->lock);
 
-	if (ch_gsm->dtmf_is_started) {
-		ast_log(LOG_ERROR, "GSM channel=\"%s\": call line=%d DTMF just started\n", ch_gsm->alias, call->line);
-		ast_mutex_unlock(&ch_gsm->lock);
-		return -1;
+	if (ch_fxs->dtmf_is_started) {
+		ast_log(LOG_ERROR, "FXS channel=\"%s\": call line=%d DTMF just started\n", ch_fxs->alias, call->line);
+		ast_mutex_unlock(&ch_fxs->lock);
+		return res;
 	}
 	// check for valid dtmf symbol
-	switch (digit)
-	{
-		case '0': case '1': case '2': case '3':
-		case '4': case '5': case '6': case '7':
-		case '8': case '9': case '*': case '#':
-		case 'A': case 'B': case 'C': case 'D':
-			break;
+	switch (digit) {
+		case '0': dtc = 0; break;
+		case '1': dtc = 1; break;
+		case '2': dtc = 2; break;
+		case '3': dtc = 3; break;
+		case '4': dtc = 4; break;
+		case '5': dtc = 5; break;
+		case '6': dtc = 6; break;
+		case '7': dtc = 7; break;
+		case '8': dtc = 8; break;
+		case '9': dtc = 9; break;
+		case '*': dtc = 10; break;
+		case '#': dtc = 11; break;
+		case 'A': dtc = 12; break;
+		case 'B': dtc = 13; break;
+		case 'C': dtc = 14; break;
+		case 'D': dtc = 15; break;
 		default:
-			ast_log(LOG_NOTICE, "GSM channel=\"%s\": call line=%d unsupported dtmf symbol=%d\n", ch_gsm->alias, call->line, digit);
-			ast_mutex_unlock(&ch_gsm->lock);
-			return -1;
+			ast_log(LOG_NOTICE, "FXS channel=\"%s\": call line=%d unsupported dtmf symbol=%d\n", ch_fxs->alias, call->line, digit);
+			ast_mutex_unlock(&ch_fxs->lock);
+			return res;
 			break;
-		}
-
-	ast_verb(4, "GSM channel=\"%s\": call line=%d send DTMF [%c] started\n", ch_gsm->alias, call->line, digit);
-
-	if (pg_atcommand_queue_append(ch_gsm, AT_VTS, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%c\"", digit) < 0) {
-		ast_log(LOG_ERROR, "GSM channel=\"%s\": call line=%d DTMF [%c] send failed\n", ch_gsm->alias, call->line, digit);
-		ast_mutex_unlock(&ch_gsm->lock);
-		return -1;
 	}
-	ch_gsm->dtmf_is_started = 1;
-	ast_mutex_unlock(&ch_gsm->lock);
-#endif
-	return 0;
+
+	ast_verb(4, "FXS channel=\"%s\": call line=%d send DTMF [%c] started\n", ch_fxs->alias, call->line, digit);
+
+	if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+		ast_mutex_lock(&vin->lock);
+		if (vin_reset_status(&vin->context) < 0) {
+			while (vin_message_stack_check_line(&vin->context)) {
+				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+			}
+		} else {
+			// disable UTG
+			if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+			// disable DTMF/AT generator
+			if (vin_dtmfat_generator_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+			// set tone code into DTMF/AT generator
+			vin_dtmfat_generator_data_set_dtc(&vin->context, ch_fxs->vinetic_sig_slot, dtc);
+			if (vin_dtmfat_generator_data_write(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+			// enable UTG
+			vin_dtmfat_generator_set_et(&vin->context, ch_fxs->vinetic_sig_slot, VIN_INACTIVE);
+			vin_dtmfat_generator_set_ad(&vin->context, ch_fxs->vinetic_sig_slot, VIN_OFF);
+			vin_dtmfat_generator_set_md(&vin->context, ch_fxs->vinetic_sig_slot, VIN_OFF);
+			vin_dtmfat_generator_set_fg(&vin->context, ch_fxs->vinetic_sig_slot, 1);
+			vin_dtmfat_generator_set_add_1(&vin->context, ch_fxs->vinetic_sig_slot, VIN_ADD_A_NONE);
+			vin_dtmfat_generator_set_add_2(&vin->context, ch_fxs->vinetic_sig_slot, VIN_ADD_B_DTMFAT);
+			if (vin_dtmfat_generator_enable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+		}
+		ast_mutex_unlock(&vin->lock);
+		ch_fxs->dtmf_is_started = 1;
+		res = 0;
+	} else {
+		ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+	}
+
+	ast_mutex_unlock(&ch_fxs->lock);
+	return res;
 }
 //------------------------------------------------------------------------------
 // end of pg_fxs_dtmf_start()
@@ -18477,26 +18592,46 @@ static int pg_fxs_dtmf_start(struct ast_channel *ast_ch, char digit)
 //------------------------------------------------------------------------------
 static int pg_fxs_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int duration)
 {
-#if 0
+	struct pg_vinetic *vin;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call_fxs *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
+	struct pg_channel_fxs *ch_fxs = call->channel_fxs;
 
-	ast_mutex_lock(&ch_gsm->lock);
+	ast_mutex_lock(&ch_fxs->lock);
 
-	if (!ch_gsm->dtmf_is_started) {
-		ast_log(LOG_ERROR, "GSM channel=\"%s\": call line=%d DTMF sending is not started\n", ch_gsm->alias, call->line);
-		ch_gsm->dtmf_is_started = 0;
-		ast_mutex_unlock(&ch_gsm->lock);
+	if (!ch_fxs->dtmf_is_started) {
+		ast_log(LOG_ERROR, "FXS channel=\"%s\": call line=%d DTMF sending is not started\n", ch_fxs->alias, call->line);
+		ch_fxs->dtmf_is_started = 0;
+		ast_mutex_unlock(&ch_fxs->lock);
 		return -1;
 	}
-	ast_verb(4, "GSM channel=\"%s\": call line=%d sending DTMF [%c] end\n", ch_gsm->alias, call->line, digit);
-	ch_gsm->dtmf_is_started = 0;
-	ast_mutex_unlock(&ch_gsm->lock);
-#endif
+	ast_verb(4, "FXS channel=\"%s\": call line=%d sending DTMF [%c] end\n", ch_fxs->alias, call->line, digit);
+
+	if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+		ast_mutex_lock(&vin->lock);
+		if (vin_reset_status(&vin->context) < 0) {
+			while (vin_message_stack_check_line(&vin->context)) {
+				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+			}
+		} else {
+			// disable DTMF/AT generator
+			if (vin_dtmfat_generator_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+		}
+		ast_mutex_unlock(&vin->lock);
+	} else {
+		ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+	}
+
+	ch_fxs->dtmf_is_started = 0;
+	ast_mutex_unlock(&ch_fxs->lock);
+
 	return 0;
 }
 //------------------------------------------------------------------------------
@@ -20891,16 +21026,15 @@ static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cl
 		ast_cli(a->fd, "  VINETIC \"%s\"\n", vin->name);
 		ast_cli(a->fd, "  -- device = %s\n", vin->path);
 		if (pg_is_vinetic_run(vin)) {
-			ast_cli(a->fd, "  -- EDSP firmware version %u.%u.%u\n",
-				(vin->context.edsp_sw_version_register.mv << 13) +
-				(vin->context.edsp_sw_version_register.prt << 12) +
-				(vin->context.edsp_sw_version_register.features << 0),
-				vin->context.edsp_sw_version_register.main_version,
-				vin->context.edsp_sw_version_register.release);
-
-		} else
+			// generate vinetic state dump
+			vin_state_dump(&vin->context);
+			// print state dump
+			while (vin_message_stack_check_line(&vin->context)) {
+				ast_cli(a->fd, "  -- %s\n", vin_message_stack_get_line(&vin->context));
+			}
+		} else {
 			ast_cli(a->fd, "  is not running\n");
-
+		}
 		ast_mutex_unlock(&vin->lock);
 	} else
 		ast_cli(a->fd, "  VINETIC \"%s\" not found\n", a->argv[3]);
@@ -22173,8 +22307,8 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 										break;
 									}
 									if ((ch_gsm->vinetic_alm_slot >= 0) &&
-										(is_vin_ali_enabled(&vin->context)) &&
-											(is_vin_ali_channel_enabled(&vin->context, ch_gsm->vinetic_alm_slot))) {
+										(vin_is_ali_enabled(&vin->context)) &&
+											(vin_is_ali_channel_enabled(&vin->context, ch_gsm->vinetic_alm_slot))) {
 										// disable ALI channel
 										if (vin_ali_channel_disable(&vin->context, ch_gsm->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -22226,8 +22360,8 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 										break;
 									}
 									if ((ch_gsm->vinetic_alm_slot >= 0) &&
-										(is_vin_ali_enabled(&vin->context)) &&
-											(is_vin_ali_channel_enabled(&vin->context, ch_gsm->vinetic_alm_slot))) {
+										(vin_is_ali_enabled(&vin->context)) &&
+											(vin_is_ali_channel_enabled(&vin->context, ch_gsm->vinetic_alm_slot))) {
 										// disable ALI channel
 										if (vin_ali_channel_disable(&vin->context, ch_gsm->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -22385,7 +22519,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_gsm->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_gsm->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -22431,7 +22565,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_gsm->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_gsm->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -22480,7 +22614,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_gsm->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_gsm->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -22526,7 +22660,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_gsm->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_gsm->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -22572,7 +22706,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_gsm->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_gsm->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -22623,7 +22757,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_gsm->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_gsm->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -25213,8 +25347,8 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 										break;
 									}
 									if ((ch_fxs->vinetic_alm_slot >= 0) &&
-										(is_vin_ali_enabled(&vin->context)) &&
-											(is_vin_ali_channel_enabled(&vin->context, ch_fxs->vinetic_alm_slot))) {
+										(vin_is_ali_enabled(&vin->context)) &&
+											(vin_is_ali_channel_enabled(&vin->context, ch_fxs->vinetic_alm_slot))) {
 										// disable ALI channel
 										if (vin_ali_channel_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -25266,8 +25400,8 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 										break;
 									}
 									if ((ch_fxs->vinetic_alm_slot >= 0) &&
-										(is_vin_ali_enabled(&vin->context)) &&
-											(is_vin_ali_channel_enabled(&vin->context, ch_fxs->vinetic_alm_slot))) {
+										(vin_is_ali_enabled(&vin->context)) &&
+											(vin_is_ali_channel_enabled(&vin->context, ch_fxs->vinetic_alm_slot))) {
 										// disable ALI channel
 										if (vin_ali_channel_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -25317,7 +25451,7 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_fxs->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -25363,7 +25497,7 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_fxs->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -25413,7 +25547,7 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_fxs->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -25459,7 +25593,7 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_fxs->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -25505,7 +25639,7 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_fxs->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
@@ -25556,7 +25690,7 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 									break;
 								}
 								if (ch_fxs->vinetic_alm_slot >= 0) {
-									if (is_vin_ali_enabled(&vin->context)) {
+									if (vin_is_ali_enabled(&vin->context)) {
 										// disable ALI Near End LEC
 										if (vin_ali_near_end_lec_disable(&vin->context, ch_fxs->vinetic_alm_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
