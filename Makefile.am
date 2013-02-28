@@ -6,6 +6,7 @@ chan_polygator_la_SOURCES = \
 		chan_polygator.c \
 		address.c \
 		imei.c \
+		rtp.c \
 		sms.c \
 		strutil.c \
 		at.c \

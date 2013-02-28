@@ -50,7 +50,7 @@ struct rtp_hdr {
 	// second octet
 	unsigned int payload_type:7;
 	unsigned int marker:1;
-	// third .........
+
 	unsigned int sequence_number:16;
 
 	unsigned int timestamp;
@@ -64,11 +64,44 @@ struct rfc2833_event_payload {
 	unsigned int volume:6;
 	unsigned int reserved:1;
 	unsigned int end:1;
-	// third ..............
+
 	unsigned int duration:16;
 };
-//------------------------------------------------------------------------------
+
+enum {
+	RTP_EVENT_DTMF_0 = 0,
+	RTP_EVENT_DTMF_1 = 1,
+	RTP_EVENT_DTMF_2 = 2,
+	RTP_EVENT_DTMF_3 = 3,
+	RTP_EVENT_DTMF_4 = 4,
+	RTP_EVENT_DTMF_5 = 5,
+	RTP_EVENT_DTMF_6 = 6,
+	RTP_EVENT_DTMF_7 = 7,
+	RTP_EVENT_DTMF_8 = 8,
+	RTP_EVENT_DTMF_9 = 9,
+	RTP_EVENT_DTMF_ASTERISK = 10,
+	RTP_EVENT_DTMF_HASH = 11,
+	RTP_EVENT_DTMF_A = 12,
+	RTP_EVENT_DTMF_B = 13,
+	RTP_EVENT_DTMF_C = 14,
+	RTP_EVENT_DTMF_D = 15,
+};
+
+extern char rtp_event_dtmf_to_char(u_int8_t event);
+
+#define rtp_is_event_dtmf(_evt) \
+({ \
+	int __res; \
+	if ((_evt >= 0) && (_evt <= 15)) { \
+		__res = 1; \
+	} else { \
+		__res = 0; \
+	} \
+	__res; \
+})
+
 #endif //__RTP_H__
+
 //******************************************************************************
 // end of rtp.h
 //******************************************************************************

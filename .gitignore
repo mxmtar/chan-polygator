@@ -1,5 +1,6 @@
 *.[oa]
 *.l[ao]
+*.tar.gz
 *~
 .deps
 .libs

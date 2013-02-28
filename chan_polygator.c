@@ -728,6 +728,8 @@ struct pg_channel_fxs {
 		int ali_nelec_nlpm;
 		int offhook_min;
 		int onhook_min;
+		int flashhook_min;
+		int flashhook_max;
 		int digit_pulse_min;
 		int digit_pulse_max;
 		int digit_pause_min;
@@ -747,6 +749,7 @@ struct pg_channel_fxs {
 	struct pg_channel_fxs_timers {
 		struct x_timer off_hook;
 		struct x_timer on_hook;
+		struct x_timer flash_hook;
 		struct x_timer ringing0;
 		struct x_timer ring_pause0;
 		struct x_timer ringing1;
@@ -4463,36 +4466,6 @@ static inline struct pg_call_fxs *pg_channel_fxs_get_call_by_hash(struct pg_chan
 }
 //------------------------------------------------------------------------------
 // end of pg_channel_fxs_get_call_by_hash()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_event_to_char()
-//------------------------------------------------------------------------------
-static char pg_event_to_char(int event)
-{
-	switch (event) {
-		case 0: return '0';
-		case 1: return '1';
-		case 2: return '2';
-		case 3: return '3';
-		case 4: return '4';
-		case 5: return '5';
-		case 6: return '6';
-		case 7: return '7';
-		case 8: return '8';
-		case 9: return '9';
-		case 10: return '*';
-		case 11: return '#';
-		case 12: return 'A';
-		case 13: return 'B';
-		case 14: return 'C';
-		case 15: return 'D';
-		case 16: return 'X';	// Hook Flash
-		default: return -1;
-	}
-}
-//------------------------------------------------------------------------------
-// pg_event_to_char()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -14570,9 +14543,9 @@ pg_channel_fxs_onhook_action_end:
 			memset(&frame, 0, sizeof(struct ast_frame));
 			frame.frametype = AST_FRAME_DTMF;
 #if ASTERISK_VERSION_NUMBER < 10800
-			frame.subclass = pg_event_to_char(ch_fxs->digit);
+			frame.subclass = rtp_event_dtmf_to_char(ch_fxs->digit);
 #else
-			frame.subclass.integer = pg_event_to_char(ch_fxs->digit);
+			frame.subclass.integer = rtp_event_dtmf_to_char(ch_fxs->digit);
 #endif
 			frame.datalen = 0;
 			frame.samples = 0;
@@ -14584,7 +14557,6 @@ pg_channel_fxs_onhook_action_end:
 				ast_queue_frame(call->owner, &frame);
 				// disable asterisk tone
 				ast_playtones_stop(call->owner);
-				break;
 			}
 			ch_fxs->digit = 0;
 			x_timer_stop(ch_fxs->timers.digit_pulse);
@@ -14618,7 +14590,6 @@ pg_channel_fxs_onhook_action_end:
 			while (pg_channel_fxs_get_calls_count(ch_fxs)) {
 				AST_LIST_TRAVERSE(&ch_fxs->call_list, call, entry) {
 					pg_call_fxs_sm(call, PG_CALL_FXS_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
-					break;
 				}
 				ast_mutex_unlock(&ch_fxs->lock);
 				usleep(1000);
@@ -14641,9 +14612,10 @@ pg_channel_fxs_onhook_action_end:
 						x_timer_start(ch_fxs->timers.digit_pause);
 						x_timer_set_ms(ch_fxs->timers.digit_inter, ch_fxs->config.digit_inter_min);
 						res = get_x_timer_value_ms(ch_fxs->timers.digit_pulse);
-// 						ast_verb(4, "FXS channel=\"%s\" pulse=%d\n", ch_fxs->alias, res);
+// 						ast_verb(4, "FXS channel=\"%s\" pulse=%d ms\n", ch_fxs->alias, res);
 						if ((res <= ch_fxs->config.digit_pulse_max) && (res >= ch_fxs->config.digit_pulse_min)) {
 							x_timer_stop(ch_fxs->timers.digit_pulse);
+							x_timer_stop(ch_fxs->timers.flash_hook);
 							x_timer_stop(ch_fxs->timers.on_hook);
 							ch_fxs->digit++;
 						} else {
@@ -14651,14 +14623,27 @@ pg_channel_fxs_onhook_action_end:
 							x_timer_stop(ch_fxs->timers.digit_inter);
 						}
 					}
+					if (is_x_timer_enable(ch_fxs->timers.flash_hook)) {
+						res = get_x_timer_value_ms(ch_fxs->timers.flash_hook);
+// 						ast_verb(4, "FXS channel=\"%s\" flash=%d ms\n", ch_fxs->alias, res);
+						if ((res <= ch_fxs->config.flashhook_max) && (res >= ch_fxs->config.flashhook_min)) {
+							x_timer_stop(ch_fxs->timers.flash_hook);
+							x_timer_stop(ch_fxs->timers.on_hook);
+							// send flash signal
+							AST_LIST_TRAVERSE(&ch_fxs->call_list, call, entry) {
+								ast_queue_control(call->owner, AST_CONTROL_FLASH);
+							}
+						}
+					}
 				}
 			} else {
 				if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_OFF) {
 					x_timer_set_ms(ch_fxs->timers.on_hook, ch_fxs->config.onhook_min);
+					x_timer_start(ch_fxs->timers.flash_hook);
 					x_timer_start(ch_fxs->timers.digit_pulse);
 					if (is_x_timer_enable(ch_fxs->timers.digit_pause)) {
 						res = get_x_timer_value_ms(ch_fxs->timers.digit_pause);
-// 						ast_verb(4, "FXS channel=\"%s\" pause=%d\n", ch_fxs->alias, res);
+// 						ast_verb(4, "FXS channel=\"%s\" pause=%d ms\n", ch_fxs->alias, res);
 						if ((res <= ch_fxs->config.digit_pause_max) && (res >= ch_fxs->config.digit_pause_min)) {
 							x_timer_stop(ch_fxs->timers.digit_pause);
 						} else {
@@ -14968,6 +14953,10 @@ static int pg_config_file_build(char *filename)
 			len += fprintf(fp, "offhook.min=%d\n", ch_fxs->config.offhook_min);
 			// onhook.min
 			len += fprintf(fp, "onhook.min=%d\n", ch_fxs->config.onhook_min);
+			// flash.hook.min
+			len += fprintf(fp, "flash.hook.min=%d\n", ch_fxs->config.flashhook_min);
+			// flash.hook.max
+			len += fprintf(fp, "flash.hook.max=%d\n", ch_fxs->config.flashhook_max);
 			// digit.pulse.min
 			len += fprintf(fp, "digit.pulse.min=%d\n", ch_fxs->config.digit_pulse_min);
 			// digit.pulse.max
@@ -16517,7 +16506,6 @@ static struct ast_frame *pg_gsm_read(struct ast_channel *ast_ch)
 	int pad_len;
 
 	struct rfc2833_event_payload *event_ptr;
-	char dtmf_sym;
 
 	unsigned short seq_num;
 	unsigned int timestamp;
@@ -16589,73 +16577,64 @@ static struct ast_frame *pg_gsm_read(struct ast_channel *ast_ch)
 		rtp->recv_seq_num = seq_num;
 		// get RTP event payload
 		event_ptr = (struct rfc2833_event_payload *)data_ptr;
-		// get DTMF symbol from event
-		dtmf_sym = pg_event_to_char(event_ptr->event);
 		// check for start event
 		if ((!rtp->event_is_now_recv) && (rtp_hdr_ptr->marker) && (!event_ptr->end)) {
 			// now event start
 			rtp->event_is_now_recv = 1;
-			// check DTMF symbol
-			if (dtmf_sym < 0) {
-				// unsupported symbol
+			// check event type
+			if (rtp_is_event_dtmf(event_ptr->event)) {
+				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] begin\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
+				// store DTMF symbol into temporary buffer
+				if ((rtp->dtmfptr - rtp->dtmfbuf) < PG_MAX_DTMF_LEN) {
+					*rtp->dtmfptr++ = rtp_event_dtmf_to_char(event_ptr->event);
+					*rtp->dtmfptr = '\0';
+				}
+				// send AST_FRAME_DTMF_BEGIN
+				memset(&rtp->frame, 0, sizeof(struct ast_frame));
+				rtp->frame.frametype = AST_FRAME_DTMF_BEGIN;
+#if ASTERISK_VERSION_NUMBER < 10800
+				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
+#else
+				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
+#endif
+				rtp->frame.datalen = 0;
+				rtp->frame.samples = 0;
+				rtp->frame.mallocd = 0;
+				rtp->frame.src = "Polygator";
+				rtp->frame.len = 0;
+				ast_mutex_unlock(&rtp->lock);
+				return &rtp->frame;
+			} else {
+				// unsupported event
 				ast_log(LOG_ERROR, "RTP Channel=\"%s\": unsupported event code = [%u]\n", rtp->name, event_ptr->event);
 				rtp->event_is_now_recv = 0;
 				ast_mutex_unlock(&rtp->lock);
 				return &ast_null_frame;
 			}
-			ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] begin\n", rtp->name, dtmf_sym);
-				// store DTMF symbol into temporary buffer
-			if ((rtp->dtmfptr - rtp->dtmfbuf) < PG_MAX_DTMF_LEN) {
-				*rtp->dtmfptr++ = dtmf_sym;
-				*rtp->dtmfptr = '\0';
-			}
-			// send AST_FRAME_DTMF_BEGIN
-			memset(&rtp->frame, 0, sizeof(struct ast_frame));
-			if (dtmf_sym == 'X') {
-				rtp->frame.frametype = AST_FRAME_CONTROL;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = AST_CONTROL_FLASH;
-#else
-				rtp->frame.subclass.integer = AST_CONTROL_FLASH;
-#endif
-			} else {
-				rtp->frame.frametype = AST_FRAME_DTMF_BEGIN;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = dtmf_sym;
-#else
-				rtp->frame.subclass.integer = dtmf_sym;
-#endif
-			}
-			rtp->frame.datalen = 0;
-			rtp->frame.samples = 0;
-			rtp->frame.mallocd = 0;
-			rtp->frame.src = "Polygator";
-			rtp->frame.len = 0/*ast_tvdiff_ms(ast_samp2tv(200, 1000), ast_tv(0, 0))*/;
-			ast_mutex_unlock(&rtp->lock);
-			return &rtp->frame;
 		}
 		// check for stop event
 		if ((rtp->event_is_now_recv) && (event_ptr->end)) {
 			// now event end
 			rtp->event_is_now_recv = 0;
-			ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] end\n", rtp->name, dtmf_sym);
-			// send AST_FRAME_DTMF_END
-			memset(&rtp->frame, 0, sizeof(struct ast_frame));
-			if (dtmf_sym != 'X') {
+			// check event type
+			if (rtp_is_event_dtmf(event_ptr->event)) {
+				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] end\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
+				// send AST_FRAME_DTMF_END
+				memset(&rtp->frame, 0, sizeof(struct ast_frame));
 				rtp->frame.frametype = AST_FRAME_DTMF_END;
 #if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = dtmf_sym;
+				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
 #else
-				rtp->frame.subclass.integer = dtmf_sym;
+				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
 #endif
+				rtp->frame.datalen = 0;
+				rtp->frame.samples = 0;
+				rtp->frame.mallocd = 0;
+				rtp->frame.src = "Polygator";
+				rtp->frame.len = 0;
+				ast_mutex_unlock(&rtp->lock);
+				return &rtp->frame;
 			}
-			rtp->frame.datalen = 0;
-			rtp->frame.samples = 0;
-			rtp->frame.mallocd = 0;
-			rtp->frame.src = "Polygator";
-			rtp->frame.len = 0/*ast_tvdiff_ms(ast_samp2tv(200, 1000), ast_tv(0, 0))*/;
-			ast_mutex_unlock(&rtp->lock);
-			return &rtp->frame;
 		}
 		ast_mutex_unlock(&rtp->lock);
 		return &ast_null_frame;
@@ -17649,8 +17628,10 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_RINGING:
 			ast_verb(4, "FXS channel=\"%s\": call line=%d indicate ringing\n", ch_fxs->alias, call->line);
+			// state
+			ast_setstate(ast_ch, AST_STATE_RING);
 			// disable asterisk tone
-			ast_playtones_stop(call->owner);
+			ast_playtones_stop(ast_ch);
 			// set ring tone
 			if ((tone_zone = ast_get_indication_zone(ch_fxs->config.tonezone))) {
 				tone = "ring";
@@ -18229,7 +18210,6 @@ static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch)
 	int pad_len;
 
 	struct rfc2833_event_payload *event_ptr;
-	char dtmf_sym;
 
 	unsigned short seq_num;
 	unsigned int timestamp;
@@ -18308,103 +18288,87 @@ static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch)
 		rtp->recv_seq_num = seq_num;
 		// get RTP event payload
 		event_ptr = (struct rfc2833_event_payload *)data_ptr;
-		// get DTMF symbol from event
-		dtmf_sym = pg_event_to_char(event_ptr->event);
 		// check for start event
 		if ((!rtp->event_is_now_recv) && (rtp_hdr_ptr->marker) && (!event_ptr->end)) {
 			// now event start
 			rtp->event_is_now_recv = 1;
-			// check DTMF symbol
-			if (dtmf_sym < 0) {
-				// unsupported symbol
+			// check event type
+			if (rtp_is_event_dtmf(event_ptr->event)) {
+				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] begin\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
+				// store DTMF symbol into temporary buffer
+				if ((rtp->dtmfptr - rtp->dtmfbuf) < PG_MAX_DTMF_LEN) {
+					*rtp->dtmfptr++ = rtp_event_dtmf_to_char(event_ptr->event);
+					*rtp->dtmfptr = '\0';
+				}
+				if (strlen(rtp->dtmfbuf) == 1) {
+					// disable asterisk tone
+					ast_playtones_stop(ast_ch);
+					// disable tone generator
+					if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+						ast_mutex_lock(&vin->lock);
+						if (vin_reset_status(&vin->context) < 0) {
+							while (vin_message_stack_check_line(&vin->context)) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+							}
+						} else {
+							// disable UTG
+							if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+								while (vin_message_stack_check_line(&vin->context)) {
+									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+								}
+							}
+						}
+						ast_mutex_unlock(&vin->lock);
+					} else {
+						ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+					}
+				}
+				// send AST_FRAME_DTMF_BEGIN
+				memset(&rtp->frame, 0, sizeof(struct ast_frame));
+				rtp->frame.frametype = AST_FRAME_DTMF_BEGIN;
+#if ASTERISK_VERSION_NUMBER < 10800
+				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
+#else
+				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
+#endif
+				rtp->frame.datalen = 0;
+				rtp->frame.samples = 0;
+				rtp->frame.mallocd = 0;
+				rtp->frame.src = "Polygator";
+				rtp->frame.len = 0;
+				ast_mutex_unlock(&rtp->lock);
+				return &rtp->frame;
+			} else {
+				// unsupported event
 				ast_log(LOG_ERROR, "RTP Channel=\"%s\": unsupported event code = [%u]\n", rtp->name, event_ptr->event);
 				rtp->event_is_now_recv = 0;
 				ast_mutex_unlock(&rtp->lock);
 				return &ast_null_frame;
 			}
-			ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] begin\n", rtp->name, dtmf_sym);
-			// store DTMF symbol into temporary buffer
-			if ((rtp->dtmfptr - rtp->dtmfbuf) < PG_MAX_DTMF_LEN) {
-				*rtp->dtmfptr++ = dtmf_sym;
-				*rtp->dtmfptr = '\0';
-			}
-			if (strlen(rtp->dtmfbuf) == 1) {
-				// disable asterisk tone
-				ast_playtones_stop(ast_ch);
-				// disable tone generator
-				if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
-					ast_mutex_lock(&vin->lock);
-					if (vin_reset_status(&vin->context) < 0) {
-						while (vin_message_stack_check_line(&vin->context)) {
-							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-						}
-					} else {
-						// disable UTG
-						if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
-							while (vin_message_stack_check_line(&vin->context)) {
-								ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-							}
-						}
-					}
-					ast_mutex_unlock(&vin->lock);
-				} else {
-					ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
-				}
-			}
-			// send AST_FRAME_DTMF_BEGIN
-			memset(&rtp->frame, 0, sizeof(struct ast_frame));
-			if (dtmf_sym == 'X') {
-				rtp->frame.frametype = AST_FRAME_CONTROL;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = AST_CONTROL_FLASH;
-#else
-				rtp->frame.subclass.integer = AST_CONTROL_FLASH;
-#endif
-			} else {
-				rtp->frame.frametype = AST_FRAME_DTMF_BEGIN;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = dtmf_sym;
-#else
-				rtp->frame.subclass.integer = dtmf_sym;
-#endif
-			}
-			rtp->frame.datalen = 0;
-			rtp->frame.samples = 0;
-			rtp->frame.mallocd = 0;
-			rtp->frame.src = "Polygator";
-			rtp->frame.len = 0/*ast_tvdiff_ms(ast_samp2tv(200, 1000), ast_tv(0, 0))*/;
-			ast_mutex_unlock(&rtp->lock);
-			return &rtp->frame;
 		}
 		// check for stop event
 		if ((rtp->event_is_now_recv) && (event_ptr->end)) {
 			// now event end
 			rtp->event_is_now_recv = 0;
-			ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] end\n", rtp->name, dtmf_sym);
-			// send AST_FRAME_DTMF_END
-			memset(&rtp->frame, 0, sizeof(struct ast_frame));
-			if (dtmf_sym == 'X') {
-				rtp->frame.frametype = AST_FRAME_CONTROL;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = AST_CONTROL_FLASH;
-#else
-				rtp->frame.subclass.integer = AST_CONTROL_FLASH;
-#endif
-			} else {
+			// check event type
+			if (rtp_is_event_dtmf(event_ptr->event)) {
+				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] end\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
+				// send AST_FRAME_DTMF_END
+				memset(&rtp->frame, 0, sizeof(struct ast_frame));
 				rtp->frame.frametype = AST_FRAME_DTMF_END;
 #if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = dtmf_sym;
+				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
 #else
-				rtp->frame.subclass.integer = dtmf_sym;
+				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
 #endif
+				rtp->frame.datalen = 0;
+				rtp->frame.samples = 0;
+				rtp->frame.mallocd = 0;
+				rtp->frame.src = "Polygator";
+				rtp->frame.len = 0;
+				ast_mutex_unlock(&rtp->lock);
+				return &rtp->frame;
 			}
-			rtp->frame.datalen = 0;
-			rtp->frame.samples = 0;
-			rtp->frame.mallocd = 0;
-			rtp->frame.src = "Polygator";
-			rtp->frame.len = 0/*ast_tvdiff_ms(ast_samp2tv(200, 1000), ast_tv(0, 0))*/;
-			ast_mutex_unlock(&rtp->lock);
-			return &rtp->frame;
 		}
 		ast_mutex_unlock(&rtp->lock);
 		return &ast_null_frame;
@@ -26928,12 +26892,28 @@ static int pg_load(void)
 					ch_fxs->config.offhook_min = 50;
 				}
 				// onhook.min
-				ch_fxs->config.onhook_min = 150;
+				ch_fxs->config.onhook_min = 1000;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "on.hook.min")) && (is_str_digit(cvar))) {
 					ch_fxs->config.onhook_min = atoi(cvar);
 				}
 				if (ch_fxs->config.onhook_min < 1) {
-					ch_fxs->config.onhook_min = 150;
+					ch_fxs->config.onhook_min = 1000;
+				}
+				// flashhook.min
+				ch_fxs->config.flashhook_min = 150;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "flash.hook.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.flashhook_min = atoi(cvar);
+				}
+				if (ch_fxs->config.flashhook_min < 1) {
+					ch_fxs->config.flashhook_min = 150;
+				}
+				// flashhook.max
+				ch_fxs->config.flashhook_max = 900;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "flash.hook.max")) && (is_str_digit(cvar))) {
+					ch_fxs->config.flashhook_max = atoi(cvar);
+				}
+				if (ch_fxs->config.flashhook_max < 1) {
+					ch_fxs->config.flashhook_max = 900;
 				}
 				// digit.pulse.min
 				ch_fxs->config.digit_pulse_min = 39;
