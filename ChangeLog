@@ -96,3 +96,6 @@ For complete indication in case USSD has non-ASCII characters that
 not displayed by ast_cli().
 05.02.13
 Fix polygator show vinetic CLI command.
+28.02.13
+FXS support rc1.
+FLASH HOOK detection, and CID Sender still under working.

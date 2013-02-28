@@ -393,21 +393,19 @@ struct pg_call_gsm {
 enum {
 	PG_CALL_FXS_STATE_UNKNOWN = 0,
 	PG_CALL_FXS_STATE_NULL,
+	PG_CALL_FXS_STATE_OUTGOING_CALL_PROCEEDING,
 	PG_CALL_FXS_STATE_CALL_PRESENT,
 	PG_CALL_FXS_STATE_CALL_RECEIVED,
 	PG_CALL_FXS_STATE_CALL_DELIVERED,
 	PG_CALL_FXS_STATE_ACTIVE,
-// 	PG_CALL_GSM_STATE_LOCAL_HOLD,
-// 	PG_CALL_GSM_STATE_REMOTE_HOLD,
 	PG_CALL_FXS_STATE_RELEASE_INDICATION,
-// 	PG_CALL_GSM_STATE_OVERLAP_RECEIVING,
+	PG_CALL_FXS_STATE_OVERLAP_RECEIVING,
 };
 
 enum {
 	PG_CALL_FXS_MSG_UNKNOWN = 0,
 	PG_CALL_FXS_MSG_SETUP_REQ,
-// 	PG_CALL_GSM_MSG_PROCEEDING_IND,
-// 	PG_CALL_FXS_MSG_ALERTING_IND,
+	PG_CALL_FXS_MSG_PROCEEDING_REQ,
 	PG_CALL_FXS_MSG_SETUP_CONFIRM,
 	PG_CALL_FXS_MSG_RELEASE_REQ,
 	PG_CALL_FXS_MSG_RELEASE_IND,
@@ -415,10 +413,6 @@ enum {
 	PG_CALL_FXS_MSG_PROGRESS_REQ,
 	PG_CALL_FXS_MSG_ALERTING_REQ,
 	PG_CALL_FXS_MSG_SETUP_RESPONSE,
-// 	PG_CALL_GSM_MSG_HOLD_REQ,
-// 	PG_CALL_GSM_MSG_UNHOLD_REQ,
-// 	PG_CALL_GSM_MSG_HOLD_IND,
-// 	PG_CALL_GSM_MSG_UNHOLD_IND,
 };
 
 struct pg_call_fxs {
@@ -4093,11 +4087,13 @@ static char *pg_call_fxs_state_to_string(int state)
 {
 	switch (state) {
 		case PG_CALL_FXS_STATE_NULL: return "null";
+		case PG_CALL_FXS_STATE_OUTGOING_CALL_PROCEEDING: return "outgoing call proceeding";
 		case PG_CALL_FXS_STATE_CALL_PRESENT: return "call present";
 		case PG_CALL_FXS_STATE_CALL_RECEIVED: return "call received";
 		case PG_CALL_FXS_STATE_CALL_DELIVERED: return "call delivered";
 		case PG_CALL_FXS_STATE_RELEASE_INDICATION: return "release indication";
 		case PG_CALL_FXS_STATE_ACTIVE: return "active";
+		case PG_CALL_FXS_STATE_OVERLAP_RECEIVING: return "overlap receiving";
 		default: return "unknown";
 	}
 }
@@ -4115,6 +4111,7 @@ static char *pg_call_fxs_message_to_string(int message)
 		case PG_CALL_FXS_MSG_RELEASE_REQ: return "RELEASE_REQ";
 		case PG_CALL_FXS_MSG_SETUP_IND: return "SETUP_IND";
 		case PG_CALL_FXS_MSG_SETUP_REQ: return "SETUP_REQ";
+		case PG_CALL_FXS_MSG_PROCEEDING_REQ: return "PROCEEDING_REQ";
 		case PG_CALL_FXS_MSG_ALERTING_REQ: return "ALERTING_REQ";
 		case PG_CALL_FXS_MSG_PROGRESS_REQ: return "PROGRESS_REQ";
 		case PG_CALL_FXS_MSG_SETUP_CONFIRM: return "SETUP_CONFIRM";
@@ -6766,6 +6763,8 @@ pg_channel_gsm_call_incoming_end:
 	// init asterisk channel tag's
 #if ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
+	ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
+	ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -6773,13 +6772,15 @@ pg_channel_gsm_call_incoming_end:
 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
+	ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
+	ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = vin->capabilities;
+	ast_ch->nativeformats = /*vin->capabilities*/rtp->format;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -6919,6 +6920,7 @@ static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
 			ast_mutex_unlock(&ch_gsm->lock);
 			if (ch_gsm->config.progress == PG_GSM_CALL_PROGRESS_TYPE_PROCEEDING) {
 				ast_queue_control(call->owner, AST_CONTROL_PROGRESS);
+				ast_channel_set_fd(call->owner, 0, ch_gsm->channel_rtp->fd);
 			} else {
 				ast_queue_control(call->owner, AST_CONTROL_PROCEEDING);
 			}
@@ -6934,17 +6936,12 @@ static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
 				ast_mutex_lock(&ch_gsm->lock);
 			}
 			ast_mutex_unlock(&ch_gsm->lock);
-			if (ch_gsm->config.progress == PG_GSM_CALL_PROGRESS_TYPE_ALERTING) {
+			if ((ch_gsm->config.progress == PG_GSM_CALL_PROGRESS_TYPE_PROCEEDING) ||
+					(ch_gsm->config.progress == PG_GSM_CALL_PROGRESS_TYPE_ALERTING)) {
 				ast_queue_control(call->owner, AST_CONTROL_PROGRESS);
+				ast_channel_set_fd(call->owner, 0, ch_gsm->channel_rtp->fd);
 			} else {
 				ast_queue_control(call->owner, AST_CONTROL_RINGING);
-#if ASTERISK_VERSION_NUMBER >= 110000
-				if (ast_channel_state(call->owner) != AST_STATE_UP) {
-#else
-				if (call->owner->_state != AST_STATE_UP) {
-#endif
-					ast_setstate(call->owner, AST_STATE_RINGING);
-				}
 			}
 			ast_mutex_lock(&ch_gsm->lock);
 			ast_channel_unlock(call->owner);
@@ -6963,8 +6960,8 @@ static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
 			}
 			ast_mutex_unlock(&ch_gsm->lock);
 			ast_queue_control(call->owner, AST_CONTROL_ANSWER);
+			ast_channel_set_fd(call->owner, 0, ch_gsm->channel_rtp->fd);
 			ast_mutex_lock(&ch_gsm->lock);
-
 			ast_channel_unlock(call->owner);
 			gettimeofday(&call->answer_time, NULL);
 			call->state = PG_CALL_GSM_STATE_ACTIVE;
@@ -7484,6 +7481,8 @@ pg_channel_fxs_call_outgoing_end:
 	// init asterisk channel tag's
 #if ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
+	ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
+	ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -7491,13 +7490,15 @@ pg_channel_fxs_call_outgoing_end:
 	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
+	ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
+	ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = vin->capabilities;
+	ast_ch->nativeformats = /* vin->capabilities */rtp->format;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -7581,7 +7582,7 @@ static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
 				}
 				ast_mutex_unlock(&ch_fxs->lock);
 				ast_queue_control(call->owner, AST_CONTROL_RINGING);
-				ast_setstate(call->owner, AST_STATE_RING);
+				ast_channel_set_fd(call->owner, 0, ch_fxs->channel_rtp->fd);
 				ast_mutex_lock(&ch_fxs->lock);
 				ast_channel_unlock(call->owner);
 				// set new state
@@ -7626,128 +7627,6 @@ static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
 					ast_hangup(call->owner);
 					break;
 				}
-				// set new state
-				call->state = PG_CALL_FXS_STATE_CALL_PRESENT;
-				ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
-									ch_fxs->alias, call->line,
-									pg_call_fxs_state_to_string(call->state));
-				res = 0;
-			} else {
-				ast_log(LOG_WARNING, "FXS channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
-									ch_fxs->alias, call->line,
-									pg_call_fxs_message_to_string(message),
-									pg_call_fxs_state_to_string(call->state));
-			}
-			break;
-		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		case PG_CALL_FXS_MSG_ALERTING_REQ:
-			// disable asterisk tone
-			ast_playtones_stop(call->owner);
-			// set ring tone
-			if ((tone_zone = ast_get_indication_zone(ch_fxs->config.tonezone))) {
-				tone = "ring";
-				if ((tone_zone_sound = ast_get_indication_tone(tone_zone, tone))) {
-					ast_verb(4, "FXS channel=\"%s\": \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, tone, ch_fxs->config.tonezone, tone_zone_sound->data);
-					if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
-						ast_mutex_lock(&vin->lock);
-						if (vin_reset_status(&vin->context) < 0) {
-							while (vin_message_stack_check_line(&vin->context)) {
-								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-							}
-						} else {
-							// disable UTG
-							if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
-								while (vin_message_stack_check_line(&vin->context)) {
-									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-								}
-							}
-							// set asterisk tone into UTG
-							if (vin_utg_set_asterisk_tone(&vin->context, ch_fxs->vinetic_sig_slot, tone_zone_sound->data) < 0) {
-								while (vin_message_stack_check_line(&vin->context)) {
-									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-								}
-							}
-							// enable UTG
-							vin_utg_set_add_b(&vin->context, ch_fxs->vinetic_sig_slot, VIN_A2_INJECTION);
-							vin_utg_set_add_a(&vin->context, ch_fxs->vinetic_sig_slot, VIN_A1_NO);
-							vin_utg_set_log(&vin->context, ch_fxs->vinetic_sig_slot, VIN_FADE_LINEAR);
-							vin_utg_set_sq(&vin->context, ch_fxs->vinetic_sig_slot, VIN_SQ_SINUS);
-							vin_utg_set_sm(&vin->context, ch_fxs->vinetic_sig_slot, VIN_SM_STOP);
-							if (vin_utg_enable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
-								while (vin_message_stack_check_line(&vin->context)) {
-									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-								}
-							}
-						}
-						ast_mutex_unlock(&vin->lock);
-					} else {
-						ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
-					}
-					ast_tone_zone_sound_unref(tone_zone_sound);
-				} else {
-					ast_log(LOG_ERROR, "FXS channel=\"%s\": \"%s\" sound of tone zone for country \"%s\" not found\n", ch_fxs->alias, tone, ch_fxs->config.tonezone);
-				}
-				ast_tone_zone_unref(tone_zone);
-			} else {
-				ast_log(LOG_ERROR, "FXS channel=\"%s\": tone zone for country \"%s\" not found\n", ch_fxs->alias, ch_fxs->config.tonezone);
-			}
-			// set new state
-			ast_setstate(call->owner, AST_STATE_RING);
-			call->state = PG_CALL_FXS_STATE_CALL_RECEIVED;
-			ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
-								ch_fxs->alias, call->line,
-								pg_call_fxs_state_to_string(call->state));
-			res = 0;
-			break;
-		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		case PG_CALL_FXS_MSG_PROGRESS_REQ:
-			// disable asterisk tone
-			ast_playtones_stop(call->owner);
-			// disable tone generator
-			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
-				ast_mutex_lock(&vin->lock);
-				if (vin_reset_status(&vin->context) < 0) {
-					while (vin_message_stack_check_line(&vin->context)) {
-						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-					}
-				} else {
-					// disable UTG
-					if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
-						while (vin_message_stack_check_line(&vin->context)) {
-							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-						}
-					}
-				}
-				ast_mutex_unlock(&vin->lock);
-			} else {
-				ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
-			}
-			res = 0;
-			break;
-		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		case PG_CALL_FXS_MSG_SETUP_CONFIRM:
-			while (ast_channel_trylock(call->owner)) {
-				ast_mutex_unlock(&ch_fxs->lock);
-				usleep(1000);
-				ast_mutex_lock(&ch_fxs->lock);
-			}
-			ast_mutex_unlock(&ch_fxs->lock);
-			ast_queue_control(call->owner, AST_CONTROL_ANSWER);
-			ast_mutex_lock(&ch_fxs->lock);
-
-			ast_channel_unlock(call->owner);
-			gettimeofday(&call->answer_time, NULL);
-			// set new state
-			ast_channel_set_fd(call->owner, 0, ch_fxs->channel_rtp->fd);
-			call->state = PG_CALL_FXS_STATE_ACTIVE;
-			ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
-								ch_fxs->alias, call->line,
-								pg_call_fxs_state_to_string(call->state));
-			res = 0;
-			break;
-		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		case PG_CALL_FXS_MSG_SETUP_RESPONSE:
-			if (call->state == PG_CALL_FXS_STATE_CALL_PRESENT) {
 				// disable asterisk tone
 				ast_playtones_stop(call->owner);
 				// set dial tone
@@ -7770,6 +7649,12 @@ static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
 								}
 								// set asterisk tone into UTG
 								if (vin_utg_set_asterisk_tone(&vin->context, ch_fxs->vinetic_sig_slot, tone_zone_sound->data) < 0) {
+									while (vin_message_stack_check_line(&vin->context)) {
+										ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+									}
+								}
+								// write UTG coefficients
+								if (vin_utg_coefficients_write(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
 									while (vin_message_stack_check_line(&vin->context)) {
 										ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 									}
@@ -7799,39 +7684,8 @@ static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
 					ast_log(LOG_ERROR, "FXS channel=\"%s\": tone zone for country \"%s\" not found\n", ch_fxs->alias, ch_fxs->config.tonezone);
 				}
 				// set new state
-				ast_setstate(call->owner, AST_STATE_UP);
-				gettimeofday(&call->answer_time, NULL);
-				call->state = PG_CALL_FXS_STATE_ACTIVE;
-				ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
-									ch_fxs->alias, call->line,
-									pg_call_fxs_state_to_string(call->state));
-				res = 0;
-			} else if (call->state == PG_CALL_FXS_STATE_CALL_RECEIVED) {
-				// disable asterisk tone
-				ast_playtones_stop(call->owner);
-				// disable tone generator
-				if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
-					ast_mutex_lock(&vin->lock);
-					if (vin_reset_status(&vin->context) < 0) {
-						while (vin_message_stack_check_line(&vin->context)) {
-							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-						}
-					} else {
-						// disable UTG
-						if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
-							while (vin_message_stack_check_line(&vin->context)) {
-								ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-							}
-						}
-					}
-					ast_mutex_unlock(&vin->lock);
-				} else {
-					ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
-				}
-				// set new state
-				ast_setstate(call->owner, AST_STATE_UP);
-				gettimeofday(&call->answer_time, NULL);
-				call->state = PG_CALL_FXS_STATE_ACTIVE;
+				ast_channel_set_fd(call->owner, 0, ch_fxs->channel_rtp->fd);
+				call->state = PG_CALL_FXS_STATE_OVERLAP_RECEIVING;
 				ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
 									ch_fxs->alias, call->line,
 									pg_call_fxs_state_to_string(call->state));
@@ -7839,9 +7693,83 @@ static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
 			} else {
 				ast_log(LOG_WARNING, "FXS channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
 									ch_fxs->alias, call->line,
-									pg_call_gsm_message_to_string(message),
-									pg_call_gsm_state_to_string(call->state));
+									pg_call_fxs_message_to_string(message),
+									pg_call_fxs_state_to_string(call->state));
 			}
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case PG_CALL_FXS_MSG_PROCEEDING_REQ:
+			// set new state
+			call->state = PG_CALL_FXS_STATE_OUTGOING_CALL_PROCEEDING;
+			ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
+								ch_fxs->alias, call->line,
+								pg_call_fxs_state_to_string(call->state));
+			res = 0;
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case PG_CALL_FXS_MSG_ALERTING_REQ:
+			// set new state
+			call->state = PG_CALL_FXS_STATE_CALL_RECEIVED;
+			ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
+								ch_fxs->alias, call->line,
+								pg_call_fxs_state_to_string(call->state));
+			res = 0;
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case PG_CALL_FXS_MSG_PROGRESS_REQ:
+			res = 0;
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case PG_CALL_FXS_MSG_SETUP_CONFIRM:
+			while (ast_channel_trylock(call->owner)) {
+				ast_mutex_unlock(&ch_fxs->lock);
+				usleep(1000);
+				ast_mutex_lock(&ch_fxs->lock);
+			}
+			ast_mutex_unlock(&ch_fxs->lock);
+			ast_queue_control(call->owner, AST_CONTROL_ANSWER);
+			ast_mutex_lock(&ch_fxs->lock);
+
+			ast_channel_unlock(call->owner);
+			gettimeofday(&call->answer_time, NULL);
+			// set new state
+			call->state = PG_CALL_FXS_STATE_ACTIVE;
+			ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
+								ch_fxs->alias, call->line,
+								pg_call_fxs_state_to_string(call->state));
+			res = 0;
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case PG_CALL_FXS_MSG_SETUP_RESPONSE:
+			// disable asterisk tone
+			ast_playtones_stop(call->owner);
+			// disable tone generator
+			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+				ast_mutex_lock(&vin->lock);
+				if (vin_reset_status(&vin->context) < 0) {
+					while (vin_message_stack_check_line(&vin->context)) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+					}
+				} else {
+					// disable UTG
+					if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+				}
+				ast_mutex_unlock(&vin->lock);
+			} else {
+				ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+			}
+			// set new state
+			ast_setstate(call->owner, AST_STATE_UP);
+			gettimeofday(&call->answer_time, NULL);
+			call->state = PG_CALL_FXS_STATE_ACTIVE;
+			ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
+								ch_fxs->alias, call->line,
+								pg_call_fxs_state_to_string(call->state));
+			res = 0;
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_CALL_FXS_MSG_RELEASE_REQ:
@@ -13832,8 +13760,8 @@ static void *pg_vinetic_workthread(void *data)
 							break;
 					}
 					if (vin->capabilities) {
-						ast_format_cap_append(pg_gsm_tech.capabilities, vin->capabilities);
-						ast_format_cap_append(pg_fxs_tech.capabilities, vin->capabilities);
+						if (pg_gsm_tech.capabilities) ast_format_cap_append(pg_gsm_tech.capabilities, vin->capabilities);
+						if (pg_fxs_tech.capabilities) ast_format_cap_append(pg_fxs_tech.capabilities, vin->capabilities);
 					}
 #else
 					switch (vin->context.edsp_sw_version_register.features) {
@@ -14407,6 +14335,12 @@ pg_channel_fxs_offhook_action_end:
 										}
 										// set asterisk tone into UTG
 										if (vin_utg_set_asterisk_tone(&vin->context, ch_fxs->vinetic_sig_slot, tone_zone_sound->data) < 0) {
+											while (vin_message_stack_check_line(&vin->context)) {
+												ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+											}
+										}
+										// write UTG coefficients
+										if (vin_utg_coefficients_write(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
 											while (vin_message_stack_check_line(&vin->context)) {
 												ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 											}
@@ -16019,8 +15953,6 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *dest, int timeout)
 	// start proceeding timer
 	x_timer_set(call->timers.proceeding, proceeding_timeout);
 
-	ast_channel_set_fd(ast_ch, 0, ch_gsm->channel_rtp->fd);
-
 	ast_mutex_unlock(&ch_gsm->lock);
 	return 0;
 }
@@ -16708,14 +16640,7 @@ static struct ast_frame *pg_gsm_read(struct ast_channel *ast_ch)
 			ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] end\n", rtp->name, dtmf_sym);
 			// send AST_FRAME_DTMF_END
 			memset(&rtp->frame, 0, sizeof(struct ast_frame));
-			if (dtmf_sym == 'X') {
-				rtp->frame.frametype = AST_FRAME_CONTROL;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = AST_CONTROL_FLASH;
-#else
-				rtp->frame.subclass.integer = AST_CONTROL_FLASH;
-#endif
-			} else {
+			if (dtmf_sym != 'X') {
 				rtp->frame.frametype = AST_FRAME_DTMF_END;
 #if ASTERISK_VERSION_NUMBER < 10800
 				rtp->frame.subclass = dtmf_sym;
@@ -16776,6 +16701,7 @@ static struct ast_frame *pg_gsm_read(struct ast_channel *ast_ch)
 	rtp->recv_ssrc = ssrc;
 	// store sequence number and timestamp
 	rtp->recv_seq_num = seq_num;
+	// calc smaples count
 	samples = timestamp - rtp->recv_timestamp;
 	rtp->recv_timestamp  = timestamp;
 	// fill asterisk frame
@@ -17569,6 +17495,12 @@ static int pg_fxs_hangup(struct ast_channel *ast_ch)
 									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 								}
 							}
+							// write UTG coefficients
+							if (vin_utg_coefficients_write(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+								while (vin_message_stack_check_line(&vin->context)) {
+									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+								}
+							}
 							// enable UTG
 							vin_utg_set_add_b(&vin->context, ch_fxs->vinetic_sig_slot, VIN_A2_INJECTION);
 							vin_utg_set_add_a(&vin->context, ch_fxs->vinetic_sig_slot, VIN_A1_NO);
@@ -17678,8 +17610,6 @@ static int pg_fxs_answer(struct ast_channel *ast_ch)
 	res = pg_call_fxs_sm(call, PG_CALL_FXS_MSG_SETUP_RESPONSE, 0);
 	ast_mutex_unlock(&ch_fxs->lock);
 
-	ast_channel_set_fd(ast_ch, 0, ch_fxs->channel_rtp->fd);
-
 	return res;
 }
 //------------------------------------------------------------------------------
@@ -17717,7 +17647,63 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 	switch (condition) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_RINGING:
-			ast_debug(4, "FXS channel=\"%s\": call line=%d indicate ringing\n", ch_fxs->alias, call->line);
+			ast_verb(4, "FXS channel=\"%s\": call line=%d indicate ringing\n", ch_fxs->alias, call->line);
+			// disable asterisk tone
+			ast_playtones_stop(call->owner);
+			// set ring tone
+			if ((tone_zone = ast_get_indication_zone(ch_fxs->config.tonezone))) {
+				tone = "ring";
+				if ((tone_zone_sound = ast_get_indication_tone(tone_zone, tone))) {
+					ast_verb(4, "FXS channel=\"%s\": \"%s\" sound of tone zone \"%s\" = \"%s\"\n", ch_fxs->alias, tone, ch_fxs->config.tonezone, tone_zone_sound->data);
+					if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+						ast_mutex_lock(&vin->lock);
+						if (vin_reset_status(&vin->context) < 0) {
+							while (vin_message_stack_check_line(&vin->context)) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+							}
+						} else {
+							// disable UTG
+							if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+								while (vin_message_stack_check_line(&vin->context)) {
+									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+								}
+							}
+							// set asterisk tone into UTG
+							if (vin_utg_set_asterisk_tone(&vin->context, ch_fxs->vinetic_sig_slot, tone_zone_sound->data) < 0) {
+								while (vin_message_stack_check_line(&vin->context)) {
+									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+								}
+							}
+							// write UTG coefficients
+							if (vin_utg_coefficients_write(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+								while (vin_message_stack_check_line(&vin->context)) {
+									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+								}
+							}
+							// enable UTG
+							vin_utg_set_add_b(&vin->context, ch_fxs->vinetic_sig_slot, VIN_A2_INJECTION);
+							vin_utg_set_add_a(&vin->context, ch_fxs->vinetic_sig_slot, VIN_A1_NO);
+							vin_utg_set_log(&vin->context, ch_fxs->vinetic_sig_slot, VIN_FADE_LINEAR);
+							vin_utg_set_sq(&vin->context, ch_fxs->vinetic_sig_slot, VIN_SQ_SINUS);
+							vin_utg_set_sm(&vin->context, ch_fxs->vinetic_sig_slot, VIN_SM_STOP);
+							if (vin_utg_enable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+								while (vin_message_stack_check_line(&vin->context)) {
+									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+								}
+							}
+						}
+						ast_mutex_unlock(&vin->lock);
+					} else {
+						ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+					}
+					ast_tone_zone_sound_unref(tone_zone_sound);
+				} else {
+					ast_log(LOG_ERROR, "FXS channel=\"%s\": \"%s\" sound of tone zone for country \"%s\" not found\n", ch_fxs->alias, tone, ch_fxs->config.tonezone);
+				}
+				ast_tone_zone_unref(tone_zone);
+			} else {
+				ast_log(LOG_ERROR, "FXS channel=\"%s\": tone zone for country \"%s\" not found\n", ch_fxs->alias, ch_fxs->config.tonezone);
+			}
 			res = pg_call_fxs_sm(call, PG_CALL_FXS_MSG_ALERTING_REQ, 0);
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -17754,6 +17740,12 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 								}
 								// set asterisk tone into UTG
 								if (vin_utg_set_asterisk_tone(&vin->context, ch_fxs->vinetic_sig_slot, tone_zone_sound->data) < 0) {
+									while (vin_message_stack_check_line(&vin->context)) {
+										ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+									}
+								}
+								// write UTG coefficients
+								if (vin_utg_coefficients_write(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
 									while (vin_message_stack_check_line(&vin->context)) {
 										ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 									}
@@ -17823,6 +17815,12 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 										ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 									}
 								}
+								// write UTG coefficients
+								if (vin_utg_coefficients_write(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+									while (vin_message_stack_check_line(&vin->context)) {
+										ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+									}
+								}
 								// enable UTG
 								vin_utg_set_add_b(&vin->context, ch_fxs->vinetic_sig_slot, VIN_A2_INJECTION);
 								vin_utg_set_add_a(&vin->context, ch_fxs->vinetic_sig_slot, VIN_A1_NO);
@@ -17853,11 +17851,54 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_PROCEEDING:
 			ast_verb(4, "FXS channel=\"%s\": call line=%d indicate proceeding\n", ch_fxs->alias, call->line);
+			// disable asterisk tone
+			ast_playtones_stop(ast_ch);
+			// disable tone generator
+			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+				ast_mutex_lock(&vin->lock);
+				if (vin_reset_status(&vin->context) < 0) {
+					while (vin_message_stack_check_line(&vin->context)) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+					}
+				} else {
+					// disable UTG
+					if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+				}
+				ast_mutex_unlock(&vin->lock);
+			} else {
+				ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+			}
+			res = pg_call_fxs_sm(call, PG_CALL_FXS_MSG_PROCEEDING_REQ, 0);
 			res = 0;
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_PROGRESS:
 			ast_debug(4, "FXS channel=\"%s\": call line=%d indicate progress\n", ch_fxs->alias, call->line);
+			// disable asterisk tone
+			ast_playtones_stop(ast_ch);
+			// disable tone generator
+			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+				ast_mutex_lock(&vin->lock);
+				if (vin_reset_status(&vin->context) < 0) {
+					while (vin_message_stack_check_line(&vin->context)) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+					}
+				} else {
+					// disable UTG
+					if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+				}
+				ast_mutex_unlock(&vin->lock);
+			} else {
+				ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+			}
 			res = pg_call_fxs_sm(call, PG_CALL_FXS_MSG_PROGRESS_REQ, 0);
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -18130,7 +18171,6 @@ static int pg_fxs_write(struct ast_channel *ast_ch, struct ast_frame *frame)
 #else
 	data_ptr = (char *)frame->data.ptr/* + frame->offset*/;
 #endif
-// 	memset(data_ptr, 0, frame->datalen);
 	data_ptr -= sizeof(struct rtp_hdr);
 	rtp_hdr_ptr = (struct rtp_hdr *)data_ptr ;
 
@@ -18151,16 +18191,17 @@ static int pg_fxs_write(struct ast_channel *ast_ch, struct ast_frame *frame)
 
 	send_len = frame->datalen + sizeof(struct rtp_hdr);
 
-// 	ast_log(LOG_DEBUG, "<%s>: write: %d bytes\n", chnl->name, send_len);
 	if ((rc = write(rtp->fd, data_ptr, send_len)) < 0) {
 		rtp->send_drop_count++;
-		if (errno != EAGAIN)
+		if (errno != EAGAIN) {
 			ast_log(LOG_ERROR, "RTP Channel=\"%s\": can't write frame: %s\n", rtp->name, strerror(errno));
+		}
 		ast_mutex_unlock(&rtp->lock);
 		return 0;
 	}
-	if (rc != send_len)
+	if (rc != send_len) {
 		ast_log(LOG_ERROR, "RTP Channel=\"%s\": can't write frame: rc=%d send_len=%d\n", rtp->name, rc, send_len);
+	}
 
 	rtp->send_frame_count++;
 
@@ -18236,8 +18277,9 @@ static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch)
 		return &ast_null_frame;
 	}
 	// test for padding ? get last octet == padding length
-	if (rtp_hdr_ptr->padding)
+	if (rtp_hdr_ptr->padding) {
 		pad_len = (*(read_ptr + read_len - 1)) & (0xff);
+	}
 	// check rtp header extension
 	if (rtp_hdr_ptr->extension) {
 		ast_log(LOG_WARNING, "RTP header extension not processed !!! -- code must be fixed _ :( _\n");
@@ -18245,8 +18287,9 @@ static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch)
 		return &ast_null_frame;
 	}
 	// check CSRC count ? add heder length in according CSRC count 32bit word
-	if (rtp_hdr_ptr->csrc_count)
+	if (rtp_hdr_ptr->csrc_count) {
 		hdr_len += rtp_hdr_ptr->csrc_count * 4;
+	}
 	// set data pointer to start voice frame position
 	data_ptr = read_ptr + hdr_len;
 	// calc data length
@@ -26776,8 +26819,14 @@ static int pg_load(void)
 				}
 				// context
 				ast_copy_string(ch_fxs->config.context, "default", sizeof(ch_fxs->config.context));
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "context")))
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "context"))) {
 					ast_copy_string(ch_fxs->config.context, cvar, sizeof(ch_fxs->config.context));
+				}
+				// extension
+				ast_copy_string(ch_fxs->config.extension, "s", sizeof(ch_fxs->config.extension));
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "extension"))) {
+					ast_copy_string(ch_fxs->config.extension, cvar, sizeof(ch_fxs->config.extension));
+				}
 				// language
 				ast_copy_string(ch_fxs->config.language, "en", sizeof(ch_fxs->config.language));
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "language"))) {
