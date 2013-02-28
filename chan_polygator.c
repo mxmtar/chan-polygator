@@ -7516,6 +7516,8 @@ pg_channel_fxs_call_outgoing_end:
 	ast_ch->tech_pvt = call;
 #endif
 
+	ast_channel_set_fd(ast_ch, 0, ch_fxs->channel_rtp->fd);
+
 	call->owner = ast_ch;
 	call->channel_rtp = rtp;
 
@@ -7684,7 +7686,6 @@ static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
 					ast_log(LOG_ERROR, "FXS channel=\"%s\": tone zone for country \"%s\" not found\n", ch_fxs->alias, ch_fxs->config.tonezone);
 				}
 				// set new state
-				ast_channel_set_fd(call->owner, 0, ch_fxs->channel_rtp->fd);
 				call->state = PG_CALL_FXS_STATE_OVERLAP_RECEIVING;
 				ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s\n",
 									ch_fxs->alias, call->line,
@@ -20438,8 +20439,7 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 	static char * const choices_pos8_last[] = { "minutes", "hours", "days", "weeks", NULL };
 #endif
 	
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator show gsm call stat out";
@@ -20449,30 +20449,33 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 		case CLI_GENERATE:
 			gline = ast_strdupa(a->line);
 			if (!(pg_cli_generating_prepare(gline, &gargc, gargv))) {
-
-				if (a->pos == 6)
+				if (a->pos == 6) {
     	    		return ast_cli_complete(a->word, choices_pos6, a->n);
-				else if (a->pos == 7)
+				} else if (a->pos == 7) {
 					return ast_cli_complete(a->word, choices_pos7, a->n);
-				else if (a->pos == 8) {
-					if (!strcmp(gargv[6], "last") && is_str_digit(gargv[7]))
+				} else if (a->pos == 8) {
+					if (!strcmp(gargv[6], "last") && is_str_digit(gargv[7])) {
 						return ast_cli_complete(a->word, choices_pos8_last, a->n);
-					else if (!strcmp(gargv[6], "from"))
+					} else if (!strcmp(gargv[6], "from")) {
 						return ast_cli_complete(a->word, choices_pos8_from, a->n);
-					else
+					} else {
 						return NULL;
-				} else
+					}
+				} else {
 					return NULL;
-			} else
+				}
+			} else {
 				return NULL;
+			}
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		default:
 			break;
 	}
 
 	// check args count
-	if(a->argc < 6)
+	if(a->argc < 6) {
 		return CLI_SHOWUSAGE;
+	}
 
 	start_time = 0;
 	tv_begin.tv_sec = 0;
@@ -20541,10 +20544,8 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 	acd_fl = strlen("ACD");
 	asr_fl = strlen("ASR");
 
-	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
-
 		if (ch_gsm->imsi) {
 			key = "imsi";
 			value = ch_gsm->imsi;
@@ -20552,31 +20553,29 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 			key = "channel";
 			value = ch_gsm->device;
 		}
-
 		ch_gsm->out_total_call_count = pg_cdr_table_get_out_total_call_count(key, value, tv_begin.tv_sec, tv_end.tv_sec, NULL);
 		ch_gsm->out_answered_call_count = pg_cdr_table_get_out_answered_call_count(key, value, tv_begin.tv_sec, tv_end.tv_sec, NULL);
 		ch_gsm->out_active_call_duration = pg_cdr_table_get_out_active_call_duration(key, value, tv_begin.tv_sec, tv_end.tv_sec, NULL);
-
 		if (!tv_begin.tv_sec) {
 			tmp_time = pg_cdr_table_get_out_call_starttime(key, value, NULL);
 			if (tmp_time) {
-				if (start_time)
+				if (start_time) {
 					start_time = mmin(start_time, tmp_time);
-				else
+				} else {
 					start_time = tmp_time;
+				}
 			}
 		}
-
-		if (ch_gsm->out_answered_call_count)
+		if (ch_gsm->out_answered_call_count) {
 			ch_gsm->acd = ch_gsm->out_active_call_duration/ch_gsm->out_answered_call_count;
-		else
+		} else {
 			ch_gsm->acd = 0;
-
-		if (ch_gsm->out_total_call_count)
+		}
+		if (ch_gsm->out_total_call_count) {
 			ch_gsm->asr = (100 * ch_gsm->out_answered_call_count)/ch_gsm->out_total_call_count;
-		else
+		} else {
 			ch_gsm->asr = 0;
-
+		}
 		number_fl = mmax(number_fl, snprintf(numbuf, sizeof(numbuf), "%lu", (unsigned long int)count));
 		channel_fl = mmax(channel_fl, strlen(ch_gsm->alias));
 		total_fl = mmax(total_fl, snprintf(totbuf, sizeof(totbuf), "%ld", (long int)ch_gsm->out_total_call_count));
@@ -20584,15 +20583,14 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 		duration_fl = mmax(duration_fl, snprintf(durbuf, sizeof(durbuf), "%ld", (long int)ch_gsm->out_active_call_duration));
 		acd_fl = mmax(acd_fl, snprintf(acdbuf, sizeof(acdbuf), "%ld", (long int)ch_gsm->acd));
 		asr_fl = mmax(asr_fl, snprintf(asrbuf, sizeof(asrbuf), "%ld%%", (long int)ch_gsm->asr));
-
 		count++;
 		ast_mutex_unlock(&ch_gsm->lock);
 	}
 
 	if (count) {
-
-		if (!tv_begin.tv_sec && start_time) tv_begin.tv_sec = start_time;
-
+		if (!tv_begin.tv_sec && start_time) {
+			tv_begin.tv_sec = start_time;
+		}
 		ast_localtime(&tv_begin, &tm_begin, NULL);
 		ast_strftime(frombuf, sizeof(frombuf), "%Y-%m-%d %H:%M:%S", &tm_begin);
 		ast_localtime(&tv_end, &tm_end, NULL);
@@ -20609,8 +20607,7 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 				acd_fl, "ACD",
 				asr_fl, "ASR");
 		count = 0;
-		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-		{
+		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 			ast_mutex_lock(&ch_gsm->lock);
 			snprintf(numbuf, sizeof(numbuf), "%lu", (unsigned long int)count);
 			snprintf(totbuf, sizeof(totbuf), "%ld", (long int)ch_gsm->out_total_call_count);
@@ -20633,9 +20630,9 @@ static char *pg_cli_show_gsm_call_stat_out(struct ast_cli_entry *e, int cmd, str
 		ast_cli(a->fd, "  Total %lu GSM channel%s\n", (unsigned long int)count, ESS(count));
 	}
 
-	if (!total)
+	if (!total) {
 		ast_cli(a->fd, "  No channels found\n");
-
+	}
 	return CLI_SUCCESS;
 }
 //------------------------------------------------------------------------------
@@ -20653,6 +20650,7 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 
 	char buf[20];
 	char rssi[32];
+	char subscriber[128];
 	int number_fl;
 	int alias_fl;
 	int status_fl;
@@ -20661,11 +20659,11 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 	int oper_fl;
 	int code_fl;
 	int imsi_fl;
+	int subscriber_fl;
 	int rssi_fl;
 	int ber_fl;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator show gsm netinfo";
@@ -20683,8 +20681,9 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 			return CLI_FAILURE;
 	}
 
-	if (a->argc < 4)
+	if (a->argc < 4) {
 		return CLI_SHOWUSAGE;
+	}
 
 	total = 0;
 	count = 0;
@@ -20696,10 +20695,10 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 	oper_fl = strlen("Operator");
 	code_fl = strlen("Code");
 	imsi_fl = strlen("IMSI");
+	subscriber_fl = strlen("Subscriber");
 	rssi_fl = strlen("RSSI");
 	ber_fl = strlen("BER");
-	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
 		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
 		alias_fl = mmax(alias_fl, strlen(ch_gsm->alias));
@@ -20709,6 +20708,7 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 		oper_fl = mmax(oper_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->operator_name?ch_gsm->operator_name:"unknown"):""));
 		code_fl = mmax(code_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->operator_code?ch_gsm->operator_code:"unknown"):""));
 		imsi_fl = mmax(imsi_fl, strlen(ch_gsm->flags.sim_inserted?(ch_gsm->imsi?ch_gsm->imsi:"unknown"):""));
+		subscriber_fl = mmax(subscriber_fl, strlen(ch_gsm->flags.sim_inserted?address_show(subscriber, &ch_gsm->subscriber_number, 0):""));
 		rssi_fl = mmax(rssi_fl, strlen(ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):""));
 		ber_fl = mmax(ber_fl, strlen(ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):""));
 		count++;
@@ -20716,7 +20716,7 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 	}
 	if (count) {
 		ast_cli(a->fd, "  GSM channel%s:\n", ESS(count));
-		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
 				number_fl, "#",
 				alias_fl, "Alias",
 				status_fl, "Status",
@@ -20725,13 +20725,13 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 				oper_fl, "Operator",
 				code_fl, "Code",
 				imsi_fl, "IMSI",
+		  		subscriber_fl, "Subscriber",
 				rssi_fl, "RSSI",
 				ber_fl, "BER");
 		count = 0;
-		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-		{
+		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 			ast_mutex_lock(&ch_gsm->lock);
-			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %*s | %*s |\n",
+			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %*s | %*s | %*s |\n",
 					number_fl, (unsigned long int)count++,
 					alias_fl, ch_gsm->alias,
 					status_fl, ch_gsm->flags.enable?"enabled":"disabled",
@@ -20740,6 +20740,7 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 					oper_fl, ch_gsm->flags.sim_inserted?(ch_gsm->operator_name?ch_gsm->operator_name:"unknown"):"",
 					code_fl, ch_gsm->flags.sim_inserted?(ch_gsm->operator_code?ch_gsm->operator_code:"unknown"):"",
 					imsi_fl, ch_gsm->flags.sim_inserted?(ch_gsm->imsi?ch_gsm->imsi:"unknown"):"",
+					subscriber_fl, ch_gsm->flags.sim_inserted?address_show(subscriber, &ch_gsm->subscriber_number, 0):"",
 					rssi_fl, ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):"",
 					ber_fl, ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):"");
 			ast_mutex_unlock(&ch_gsm->lock);
@@ -20748,8 +20749,9 @@ static char *pg_cli_show_gsm_netinfo(struct ast_cli_entry *e, int cmd, struct as
 		ast_cli(a->fd, "  Total %lu GSM channel%s\n", (unsigned long int)count, ESS(count));
 	}
 
-	if (!total)
+	if (!total) {
 		ast_cli(a->fd, "  No channels found\n");
+	}
 
 	return CLI_SUCCESS;
 }
@@ -20765,6 +20767,7 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 {
 	struct pg_channel_gsm *ch_gsm;
 	char rssi[32];
+	char subscriber[128];
 	const char *id = astman_get_header(m, "ActionID");
 	const char *alias = astman_get_header(m, "Channel");
 	char idText[256] = "";
@@ -20773,12 +20776,9 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 	astman_send_ack(s, m, "Polygator GSM channel network information will follow");
 	if (!ast_strlen_zero(id)) snprintf(idText, sizeof(idText), "ActionID: %s\r\n", id);
 
-	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
-
 		if (ast_strlen_zero(alias) || !strcmp(alias, ch_gsm->alias)) {
-
 			astman_append(s,
 				"Event: PolygatorShowGSMNetInfo\r\n"
 				"%s"
@@ -20789,6 +20789,7 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 				"Operator: %s\r\n"
 				"Code: %s\r\n"
 				"IMSI: %s\r\n"
+				"Subscriber: %s\r\n"
 				"RSSI: %s\r\n"
 				"BER: %s\r\n"
 				"\r\n",
@@ -20800,9 +20801,9 @@ static int pg_man_show_gsm_netinfo(struct mansession *s, const struct message *m
 				ch_gsm->operator_name?ch_gsm->operator_name:"unknown",
 				ch_gsm->operator_code?ch_gsm->operator_code:"unknown",
 				ch_gsm->imsi?ch_gsm->imsi:"unknown",
+				 ch_gsm->flags.sim_inserted?address_show(subscriber, &ch_gsm->subscriber_number, 0):"unknown",
 				ch_gsm->flags.sim_inserted?rssi_print_short(rssi, ch_gsm->rssi):"unknown",
 				ch_gsm->flags.sim_inserted?ber_print_short(ch_gsm->ber):"unknown");
-
 			total++;
 		}
 
@@ -20842,8 +20843,7 @@ static char *pg_cli_show_gsm_devinfo(struct ast_cli_entry *e, int cmd, struct as
 	int fw_fl;
 	int imei_fl;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator show gsm devinfo";
@@ -20861,8 +20861,9 @@ static char *pg_cli_show_gsm_devinfo(struct ast_cli_entry *e, int cmd, struct as
 			return CLI_FAILURE;
 	}
 
-	if (a->argc < 3)
+	if (a->argc < 3) {
 		return CLI_SHOWUSAGE;
+	}
 
 	total = 0;
 	count = 0;
@@ -20874,8 +20875,7 @@ static char *pg_cli_show_gsm_devinfo(struct ast_cli_entry *e, int cmd, struct as
 	hw_fl = strlen("Hardware");
 	fw_fl = strlen("Firmware");
 	imei_fl = strlen("IMEI");
-	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
 		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
 		alias_fl = mmax(alias_fl, strlen(ch_gsm->alias));
@@ -20900,8 +20900,7 @@ static char *pg_cli_show_gsm_devinfo(struct ast_cli_entry *e, int cmd, struct as
 				fw_fl, "Firmware",
 				imei_fl, "IMEI");
 		count = 0;
-		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-		{
+		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 			ast_mutex_lock(&ch_gsm->lock);
 			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
 					number_fl, (unsigned long int)count++,
@@ -20918,8 +20917,9 @@ static char *pg_cli_show_gsm_devinfo(struct ast_cli_entry *e, int cmd, struct as
 		ast_cli(a->fd, "  Total %lu GSM channel%s\n", (unsigned long int)count, ESS(count));
 	}
 
-	if (!total)
+	if (!total) {
 		ast_cli(a->fd, "  No channels found\n");
+	}
 
 	return CLI_SUCCESS;
 }
@@ -20942,12 +20942,9 @@ static int pg_man_show_gsm_devinfo(struct mansession *s, const struct message *m
 	astman_send_ack(s, m, "Polygator GSM channel device information will follow");
 	if (!ast_strlen_zero(id)) snprintf(idText, sizeof(idText), "ActionID: %s\r\n", id);
 
-	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-	{
+	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
-
 		if (ast_strlen_zero(alias) || !strcmp(alias, ch_gsm->alias)) {
-
 			astman_append(s,
 				"Event: PolygatorShowGSMDevInfo\r\n"
 				"%s"
@@ -20997,8 +20994,7 @@ static char *pg_cli_show_board(struct ast_cli_entry *e, int cmd, struct ast_cli_
 {
 	struct pg_board *brd;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator show board";
@@ -21007,27 +21003,27 @@ static char *pg_cli_show_board(struct ast_cli_entry *e, int cmd, struct ast_cli_
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_GENERATE:
 			// try to generate complete board name
-			if (a->pos == 3)
+			if (a->pos == 3) {
 				return pg_cli_generate_complete_board_name(a->word, a->n);
-
+			}
 			return NULL;
 	}
 
-	if (a->argc != 4)
+	if (a->argc != 4) {
 		return CLI_SHOWUSAGE;
+	}
 
 	// get board by name
 	brd = pg_get_board_by_name(a->argv[3]);
 
 	if (brd) {
 		ast_mutex_lock(&brd->lock);
-
 		ast_cli(a->fd, "  Board \"%s\"\n", brd->name);
 		ast_cli(a->fd, "  -- type = %s\n", brd->type);
-
 		ast_mutex_unlock(&brd->lock);
-	} else
+	} else {
 		ast_cli(a->fd, "  Board \"%s\" not found\n", a->argv[3]);
+	}
 
 	return CLI_SUCCESS;
 }
@@ -21042,8 +21038,7 @@ static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cl
 {
 	struct pg_vinetic *vin;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator show vinetic";
@@ -21052,14 +21047,15 @@ static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cl
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_GENERATE:
 			// try to generate complete VINETIC name
-			if (a->pos == 3)
+			if (a->pos == 3) {
 				return pg_cli_generate_complete_vinetic_name(a->word, a->n);
-
+			}
 			return NULL;
 	}
 
-	if (a->argc != 4)
+	if (a->argc != 4) {
 		return CLI_SHOWUSAGE;
+	}
 
 	// get vinetic by name
 	vin = pg_get_vinetic_by_name(a->argv[3]);
@@ -21079,8 +21075,9 @@ static char *pg_cli_show_vinetic(struct ast_cli_entry *e, int cmd, struct ast_cl
 			ast_cli(a->fd, "  is not running\n");
 		}
 		ast_mutex_unlock(&vin->lock);
-	} else
+	} else {
 		ast_cli(a->fd, "  VINETIC \"%s\" not found\n", a->argv[3]);
+	}
 
 	return CLI_SUCCESS;
 }
@@ -21096,8 +21093,7 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 	struct pg_channel_gsm *ch_gsm;
 	char buf[256];
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator show channel gsm";
@@ -21106,22 +21102,21 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_GENERATE:
 			// try to generate complete channel name
-			if (a->pos == 4)
+			if (a->pos == 4) {
 				return pg_cli_generate_complete_channel_gsm_name(a->word, a->n, 0);
-			else if (a->pos == 5)
+			} else if (a->pos == 5) {
 				return pg_cli_generate_complete_channel_gsm_show_detail(a->word, a->n);
+			}
 			return NULL;
 	}
 
-	if (a->argc < 5)
+	if (a->argc < 5) {
 		return CLI_SHOWUSAGE;
+	}
 
 	if ((ch_gsm = pg_get_channel_gsm_by_name(a->argv[4]))) {
-
 		ast_mutex_lock(&ch_gsm->lock);
-
 		ast_cli(a->fd, "  Channel \"%s\"\n", ch_gsm->alias);
-
 		if (a->argc == 5) {
 			// summary
 			ast_cli(a->fd, "  -- device = %s\n", ch_gsm->device);
@@ -21215,8 +21210,9 @@ do { \
 			CHANNEL_GSM_TIMER_INFO(registering);
 		}
 		ast_mutex_unlock(&ch_gsm->lock);
-	} else
+	} else {
 		ast_cli(a->fd, "  Channel <%s> not found\n", a->argv[4]);
+	}
 
 	return CLI_SUCCESS;
 }
@@ -21239,8 +21235,7 @@ static char *pg_cli_config_actions(struct ast_cli_entry *e, int cmd, struct ast_
 	char *gargv[AST_MAX_ARGS];
 	int gargc;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator config [save|copy|delete]";
@@ -21282,22 +21277,25 @@ static char *pg_cli_config_actions(struct ast_cli_entry *e, int cmd, struct ast_
 				ast_cli(a->fd, "  -- bad file name \"%s\" - must begin by \"polygator\"\n", a->argv[3]);
 				return CLI_SUCCESS;
 			}
-		} else
+		} else {
 			// use default filename "polygator.conf"
 			sprintf(dst_fn, "%s", pg_config_file);
+		}
 		// build full path filename
 		// new file -- file to create
 		sprintf(dst_path, "%s/%s", ast_config_AST_CONFIG_DIR, dst_fn);
 		// old file -- file to backup
 		sprintf(src_path, "%s/%s.bak", ast_config_AST_CONFIG_DIR, dst_fn);
 		// if new file is existing file store as backup file
-		if (!rename(dst_path, src_path))
+		if (!rename(dst_path, src_path)) {
 			ast_cli(a->fd, "  -- file \"%s\" exist - stored as \"%s.bak\"\n", dst_fn, dst_fn);
+		}
 		// build new configuration file
-		if ((sz = pg_config_file_build(dst_fn)) > 0)
+		if ((sz = pg_config_file_build(dst_fn)) > 0) {
 			ast_cli(a->fd, "  -- configuration saved to \"%s\" - %d bytes\n", dst_fn, sz);
-		else
+		} else {
 			ast_cli(a->fd, "  -- can't build \"%s\" file\n", dst_fn);
+		}
 	} else if (!strcasecmp(a->argv[2], "copy")) {
 		// copy config file
 		// get destination filename
@@ -21317,34 +21315,38 @@ static char *pg_cli_config_actions(struct ast_cli_entry *e, int cmd, struct ast_
 		// get source filename - optional
 		if (a->argv[4]) {
 			// check for file name leaded "polygator"
-			if (!strncasecmp(a->argv[4], "polygator", strlen("polygator")))
+			if (!strncasecmp(a->argv[4], "polygator", strlen("polygator"))) {
 				sprintf(src_fn, "%s", a->argv[4]);
-			else {
+			} else {
 				ast_cli(a->fd, "  -- bad source file name \"%s\" - must begin by \"polygator\"\n", a->argv[4]);
 				return CLI_SUCCESS;
 			}
-		} else 
+		} else {
 			// use default filename "polygator.conf"
 			sprintf(src_fn, "%s", pg_config_file);
+		}
 		// copy configuration file
-		if (!pg_config_file_copy(dst_fn, src_fn))
+		if (!pg_config_file_copy(dst_fn, src_fn)) {
 			ast_cli(a->fd, "  -- configuration copying from \"%s\" to \"%s\" succeeded\n", src_fn, dst_fn);
-		else
+		} else {
 			ast_cli(a->fd, "  -- can't copy configuration from \"%s\" to \"%s\"\n", src_fn, dst_fn);
+		}
 	} else if(!strcasecmp(a->argv[2], "delete")) {
 		// delete config file
 		// get filename for deleting
-		if (a->argv[3])
+		if (a->argv[3]) {
 			snprintf(dst_fn, sizeof(dst_fn), "%s", a->argv[3]);
-		else
+		} else {
 			snprintf(dst_fn, sizeof(dst_fn), "%s", pg_config_file);
+		}
 		// build full path filename
 		sprintf(dst_path, "%s/%s", ast_config_AST_CONFIG_DIR, dst_fn);
 		// remove file from filesystem
-		if (unlink(dst_path) < 0)
+		if (unlink(dst_path) < 0) {
 			ast_cli(a->fd, "  -- can't delete file \"%s\": %s\n", dst_fn, strerror(errno));
-		else
+		} else {
 			ast_cli(a->fd, "  -- file \"%s\" deleted\n", dst_fn);
+		}
 	} else {
 		ast_cli(a->fd, "  -- unknown operation - %s\n", a->argv[2]);
 		snprintf(pg_cli_config_actions_usage, sizeof(pg_cli_config_actions_usage),
@@ -21379,14 +21381,14 @@ static char *pg_cli_channel_gsm_actions(struct ast_cli_entry *e, int cmd, struct
 			return NULL;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_GENERATE:
-			// try to generate complete GSM channel name
-			if (a->pos == 3)
+			if (a->pos == 3) {
+				// try to generate complete GSM channel name
 				return pg_cli_generate_complete_channel_gsm_name(a->word, a->n, 1);
-			// try to generate complete GSM channel action
-			else if (a->pos == 4)
+			} else if (a->pos == 4) {
+				// try to generate complete GSM channel action
 				return pg_cli_generate_complete_channel_gsm_action(a->word, a->n);
-			// generation channel action parameters ...
-			else if (a->pos >= 5) {
+			} else if (a->pos >= 5) {
+				// generation channel action parameters ...
 				// from this point delegate generation function to
 				// action depended CLI entries
 				subhandler = NULL;
@@ -21401,9 +21403,9 @@ static char *pg_cli_channel_gsm_actions(struct ast_cli_entry *e, int cmd, struct
 						}
 					}
 				}
-
-				if (subhandler)
+				if (subhandler) {
 					return subhandler(e, cmd, a);
+				}
 			}
 			return NULL;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
