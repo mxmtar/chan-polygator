@@ -6753,7 +6753,7 @@ pg_channel_gsm_call_incoming_end:
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = /*vin->capabilities*/rtp->format;
+	ast_ch->nativeformats = rtp->format;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -7471,7 +7471,7 @@ pg_channel_fxs_call_outgoing_end:
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = /* vin->capabilities */rtp->format;
+	ast_ch->nativeformats = rtp->format;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -15815,6 +15815,8 @@ pg_gsm_requester_vinetic_end:
 	// init asterisk channel tag's
 #if ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
+	ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
+	ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -15822,13 +15824,15 @@ pg_gsm_requester_vinetic_end:
 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
+	ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
+	ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = vin->capabilities;
+	ast_ch->nativeformats = rtp->format;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -16338,6 +16342,8 @@ pg_gsm_indicate_srcupdate_end:
 				ast_mutex_unlock(&vin->lock);
 #if ASTERISK_VERSION_NUMBER >= 110000
 				ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
+				ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
+				ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -16345,13 +16351,16 @@ pg_gsm_indicate_srcupdate_end:
 				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
+				ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
+				ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
+				ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
 				ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 				ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 				ast_format_copy(&ast_ch->writeformat, &rtp->format);
 				ast_format_copy(&ast_ch->readformat, &rtp->format);
 				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
-				ast_ch->nativeformats = vin->capabilities;
+				ast_ch->nativeformats = rtp->format;
 				ast_ch->rawreadformat = rtp->format;
 				ast_ch->rawwriteformat = rtp->format;
 				ast_ch->writeformat = rtp->format;
@@ -17259,6 +17268,8 @@ pg_fxs_requester_vinetic_end:
 	// init asterisk channel tag's
 #if ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
+	ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
+	ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -17266,13 +17277,15 @@ pg_fxs_requester_vinetic_end:
 	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
+	ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
+	ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = vin->capabilities;
+	ast_ch->nativeformats = rtp->format;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -18042,6 +18055,8 @@ pg_fxs_indicate_srcupdate_end:
 				ast_mutex_unlock(&vin->lock);
 #if ASTERISK_VERSION_NUMBER >= 110000
 				ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
+				ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
+				ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -18049,13 +18064,15 @@ pg_fxs_indicate_srcupdate_end:
 				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
+				ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
+				ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 				ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 				ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 				ast_format_copy(&ast_ch->writeformat, &rtp->format);
 				ast_format_copy(&ast_ch->readformat, &rtp->format);
 				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #else
-				ast_ch->nativeformats = vin->capabilities;
+				ast_ch->nativeformats = rtp->format;
 				ast_ch->rawreadformat = rtp->format;
 				ast_ch->rawwriteformat = rtp->format;
 				ast_ch->writeformat = rtp->format;
