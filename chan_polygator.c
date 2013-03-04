@@ -256,6 +256,11 @@ struct pg_vinetic {
 	AST_LIST_ENTRY(pg_vinetic) pg_board_vinetic_list_entry;
 };
 
+struct pg_channel_rtp_cb {
+	void *data;
+	void (* handler)(void *data);
+};
+
 struct pg_channel_rtp {
 	// RTP channel private lock
 	ast_mutex_t lock;
@@ -304,6 +309,9 @@ struct pg_channel_rtp {
 
 	char dtmfbuf[PG_MAX_DTMF_LEN];
 	char *dtmfptr;
+
+	// callbacks
+	struct pg_channel_rtp_cb on_read_dtmf_first;
 
 	// entry for board vinetic list
 	AST_LIST_ENTRY(pg_channel_rtp) pg_vinetic_channel_rtp_list_entry;
@@ -785,6 +793,9 @@ struct pg_channel_fxs {
 	typedef char*(*cli_fn_type)(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 #endif
 
+static int pg_xxx_write(struct ast_channel *ast_ch, struct ast_frame *frame);
+static struct ast_frame *pg_xxx_read(struct ast_channel *ast_ch);
+
 #if ASTERISK_VERSION_NUMBER >= 110000
 static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *cap, const struct ast_channel *requestor, const char *data, int *cause);
 #elif ASTERISK_VERSION_NUMBER >= 100000
@@ -802,8 +813,6 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *dest, int timeout);
 static int pg_gsm_hangup(struct ast_channel *ast_ch);
 static int pg_gsm_answer(struct ast_channel *ast);
 static int pg_gsm_indicate(struct ast_channel *ast, int condition, const void *data, size_t datalen);
-static int pg_gsm_write(struct ast_channel *ast_ch, struct ast_frame *frame);
-static struct ast_frame *pg_gsm_read(struct ast_channel *ast_ch);
 static int pg_gsm_fixup(struct ast_channel *oldchan, struct ast_channel *newchan);
 static int pg_gsm_dtmf_start(struct ast_channel *ast_ch, char digit);
 static int pg_gsm_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int duration);
@@ -825,8 +834,6 @@ static int pg_fxs_call(struct ast_channel *ast_ch, char *dest, int timeout);
 static int pg_fxs_hangup(struct ast_channel *ast_ch);
 static int pg_fxs_answer(struct ast_channel *ast);
 static int pg_fxs_indicate(struct ast_channel *ast, int condition, const void *data, size_t datalen);
-static int pg_fxs_write(struct ast_channel *ast_ch, struct ast_frame *frame);
-static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch);
 static int pg_fxs_fixup(struct ast_channel *oldchan, struct ast_channel *newchan);
 static int pg_fxs_dtmf_start(struct ast_channel *ast_ch, char digit);
 static int pg_fxs_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int duration);
@@ -845,8 +852,8 @@ static struct ast_channel_tech pg_gsm_tech = {
 	.hangup = pg_gsm_hangup,
 	.answer = pg_gsm_answer,
 	.indicate = pg_gsm_indicate,
-	.write = pg_gsm_write,
-	.read = pg_gsm_read,
+	.write = pg_xxx_write,
+	.read = pg_xxx_read,
 	.fixup = pg_gsm_fixup,
 	.send_digit_begin = pg_gsm_dtmf_start,
 	.send_digit_end = pg_gsm_dtmf_end,
@@ -864,8 +871,8 @@ static struct ast_channel_tech pg_fxs_tech = {
 	.hangup = pg_fxs_hangup,
 	.answer = pg_fxs_answer,
 	.indicate = pg_fxs_indicate,
-	.write = pg_fxs_write,
-	.read = pg_fxs_read,
+	.write = pg_xxx_write,
+	.read = pg_xxx_read,
 	.fixup = pg_fxs_fixup,
 	.send_digit_begin = pg_fxs_dtmf_start,
 	.send_digit_end = pg_fxs_dtmf_end,
@@ -3982,6 +3989,10 @@ static inline struct pg_channel_rtp *pg_get_channel_rtp_by_number(struct pg_vine
 					// init DTMF buffer
 					rtp->dtmfptr = rtp->dtmfbuf;
 					rtp->dtmfbuf[0] = '\0';
+					// init callbacks
+					rtp->on_read_dtmf_first.handler = NULL;
+					rtp->on_read_dtmf_first.data = NULL;
+					// set channel state as busy
 					rtp->busy = 1;
 					ast_mutex_unlock(&rtp->lock);
 					break;
@@ -7145,6 +7156,42 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// end of pg_call_fxs_read_first_dtmf_handler()
+//------------------------------------------------------------------------------
+void pg_call_fxs_read_first_dtmf_handler(void *data)
+{
+	struct pg_vinetic *vin;
+	struct pg_channel_fxs *ch_fxs = (struct pg_channel_fxs *)data;
+
+	ast_mutex_lock(&ch_fxs->lock);
+
+	// disable tone generator
+	if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+		ast_mutex_lock(&vin->lock);
+		if (vin_reset_status(&vin->context) < 0) {
+			while (vin_message_stack_check_line(&vin->context)) {
+				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+			}
+		} else {
+			// disable UTG
+			if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+		}
+		ast_mutex_unlock(&vin->lock);
+	} else {
+		ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+	}
+
+	ast_mutex_unlock(&ch_fxs->lock);
+}
+//------------------------------------------------------------------------------
+// end of pg_call_fxs_read_dtmf_first_handler()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_channel_fxs_call_outgoing()
 //------------------------------------------------------------------------------
 static int pg_channel_fxs_call_outgoing(struct pg_channel_fxs *ch_fxs, struct pg_call *call)
@@ -7166,6 +7213,9 @@ static int pg_channel_fxs_call_outgoing(struct pg_channel_fxs *ch_fxs, struct pg
 		ast_log(LOG_WARNING, "pg_get_channel_rtp() failed\n");
 		return -1;
 	}
+
+	rtp->on_read_dtmf_first.handler = pg_call_fxs_read_first_dtmf_handler;
+	rtp->on_read_dtmf_first.data = ch_fxs;
 
 	if (!ch_fxs->channel_rtp_usage) {
 
@@ -9402,78 +9452,129 @@ static void *pg_channel_gsm_workthread(void *data)
 										if (ch_gsm->balance) ast_free(ch_gsm->balance);
 										ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 									}
-									write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+									if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 									close(ch_gsm->ussd_pipe[1]);
 								} else {
-									if (parser_ptrs.cusd_wr->str_len > 0) {
-										if ((str0 =  get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs))) {
+									switch (parser_ptrs.cusd_wr->n) {
+										case 0: // no further user action required
+											ip = "no further user action required";
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-											ch_gsm->ussd = ast_strdup(str0);
-											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (parser_ptrs.cusd_wr->str_len > 0) {
+												ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+											} else {
+												ch_gsm->ussd = ast_strdup(ip);
+											}
+											if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
-											write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+											if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 											close(ch_gsm->ussd_pipe[1]);
-											free(str0);
-										} else {
+											break;
+										case 1: // further user action required
+											ip = "further user action required";
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-											ch_gsm->ussd = ast_strdup("bad response");
-											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (parser_ptrs.cusd_wr->str_len > 0) {
+												ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+											} else {
+												ch_gsm->ussd = ast_strdup(ip);
+											}
+											if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
-											write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
-											close(ch_gsm->ussd_pipe[1]);
-										}
-									} else {
-										if (parser_ptrs.cusd_wr->n == 0) {
+											if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+											break;
+										case 2: // USSD terminated by network
+											ip = "USSD terminated by network";
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-											ch_gsm->ussd = ast_strdup("empty response");
-											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (parser_ptrs.cusd_wr->str_len > 0) {
+												ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+											} else {
+												ch_gsm->ussd = ast_strdup(ip);
+											}
+											if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
-											write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+											if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 											close(ch_gsm->ussd_pipe[1]);
-										}
-										else if (parser_ptrs.cusd_wr->n == 1) {
+											break;
+										case 3: // other local client has responded
+											ip = "other local client has responded";
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-											ch_gsm->ussd = ast_strdup("response can't be presented");
-											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (parser_ptrs.cusd_wr->str_len > 0) {
+												ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+											} else {
+												ch_gsm->ussd = ast_strdup(ip);
+											}
+											if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
-											write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+											if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 											close(ch_gsm->ussd_pipe[1]);
-										}
-										else if (parser_ptrs.cusd_wr->n == 2) {
+											break;
+										case 4: // operation not supported
+											ip = "operation not supported";
 											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-											ch_gsm->ussd = ast_strdup("bad request");
-											if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+											if (parser_ptrs.cusd_wr->str_len > 0) {
+												ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+											} else {
+												ch_gsm->ussd = ast_strdup(ip);
+											}
+											if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 												if (ch_gsm->balance) ast_free(ch_gsm->balance);
 												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 											}
-											write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+											if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 											close(ch_gsm->ussd_pipe[1]);
-										}
+											break;
+										case 5: // network time out
+											ip = "network time out";
+											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
+											if (parser_ptrs.cusd_wr->str_len > 0) {
+												ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+											} else {
+												ch_gsm->ussd = ast_strdup(ip);
+											}
+											if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+												if (ch_gsm->balance) ast_free(ch_gsm->balance);
+												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
+											}
+											if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+											close(ch_gsm->ussd_pipe[1]);
+											break;
+										default:
+											ip = "unknown response type";
+											if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
+											if (parser_ptrs.cusd_wr->str_len > 0) {
+												ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+											} else {
+												ch_gsm->ussd = ast_strdup(ip);
+											}
+											if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+												if (ch_gsm->balance) ast_free(ch_gsm->balance);
+												ch_gsm->balance = ast_strdup(ch_gsm->ussd);
+											}
+											if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+											close(ch_gsm->ussd_pipe[1]);
+											break;
 									}
 								}
-							}
-							else if(strstr(r_buf, "OK")) {
+							} else if(strstr(r_buf, "OK")) {
 								if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SERVICE) {
 									ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
 									ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 								}
-							}
-							else if (strstr(r_buf, "ERROR")) {
+							} else if (strstr(r_buf, "ERROR")) {
 								if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
 								ch_gsm->ussd = ast_strdup("AT command error");
 								if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 									if (ch_gsm->balance) ast_free(ch_gsm->balance);
 									ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 								}
-								write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+								if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 								close(ch_gsm->ussd_pipe[1]);
 								if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SERVICE) {
 									ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
@@ -11076,67 +11177,121 @@ static void *pg_channel_gsm_workthread(void *data)
 				parser_ptrs.cusd_wr = (struct at_gen_cusd_write *)tmpbuf;
 				if (at_gen_cusd_write_parse(r_buf, r_buf_len, parser_ptrs.cusd_wr) < 0) {
 					ast_log(LOG_ERROR, "GSM channel=\"%s\": at_gen_cusd_write_parse(%.*s) error\n", ch_gsm->alias, r_buf_len, r_buf);
+					ip = "USSD response parsing error";
 					if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-					ch_gsm->ussd = ast_strdup("USSD response parsing error");
+					ch_gsm->ussd = ast_strdup(ip);
 					if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 						if (ch_gsm->balance) ast_free(ch_gsm->balance);
 						ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 					}
-					write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+					if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 					close(ch_gsm->ussd_pipe[1]);
 				} else {
-					if (parser_ptrs.cusd_wr->str_len > 0) {
-						if ((str0 =  get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs))) {
+					switch (parser_ptrs.cusd_wr->n) {
+						case 0: // no further user action required
+							ip = "no further user action required";
 							if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-							ch_gsm->ussd = ast_strdup(str0);
+							if (parser_ptrs.cusd_wr->str_len > 0) {
+								ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+							} else {
+								ch_gsm->ussd = ast_strdup(ip);
+							}
 							if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 								if (ch_gsm->balance) ast_free(ch_gsm->balance);
 								ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 							}
-							write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+							if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 							close(ch_gsm->ussd_pipe[1]);
-							free(str0);
-						} else {
+							break;
+						case 1: // further user action required
+							ip = "further user action required";
 							if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-							ch_gsm->ussd = ast_strdup("bad response");
+							if (parser_ptrs.cusd_wr->str_len > 0) {
+								ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+							} else {
+								ch_gsm->ussd = ast_strdup(ip);
+							}
 							if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 								if (ch_gsm->balance) ast_free(ch_gsm->balance);
 								ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 							}
-							write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
-							close(ch_gsm->ussd_pipe[1]);
-						}
-					} else {
-						if (parser_ptrs.cusd_wr->n == 0) {
+							if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+							break;
+						case 2: // USSD terminated by network
+							ip = "USSD terminated by network";
 							if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-							ch_gsm->ussd = ast_strdup("empty response");
+							if (parser_ptrs.cusd_wr->str_len > 0) {
+								ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+							} else {
+								ch_gsm->ussd = ast_strdup(ip);
+							}
 							if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 								if (ch_gsm->balance) ast_free(ch_gsm->balance);
 								ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 							}
-							write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+							if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 							close(ch_gsm->ussd_pipe[1]);
-						}
-						else if (parser_ptrs.cusd_wr->n == 1) {
+							break;
+						case 3: // other local client has responded
+							ip = "other local client has responded";
 							if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-							ch_gsm->ussd = ast_strdup("response can't be presented");
+							if (parser_ptrs.cusd_wr->str_len > 0) {
+								ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+							} else {
+								ch_gsm->ussd = ast_strdup(ip);
+							}
 							if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 								if (ch_gsm->balance) ast_free(ch_gsm->balance);
 								ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 							}
-							write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+							if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 							close(ch_gsm->ussd_pipe[1]);
-						}
-						else if (parser_ptrs.cusd_wr->n == 2) {
+							break;
+						case 4: // operation not supported
+							ip = "operation not supported";
 							if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
-							ch_gsm->ussd = ast_strdup("bad request");
+							if (parser_ptrs.cusd_wr->str_len > 0) {
+								ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+							} else {
+								ch_gsm->ussd = ast_strdup(ip);
+							}
 							if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
 								if (ch_gsm->balance) ast_free(ch_gsm->balance);
 								ch_gsm->balance = ast_strdup(ch_gsm->ussd);
 							}
-							write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+							if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
 							close(ch_gsm->ussd_pipe[1]);
-						}
+							break;
+						case 5: // network time out
+							ip = "network time out";
+							if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
+							if (parser_ptrs.cusd_wr->str_len > 0) {
+								ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+							} else {
+								ch_gsm->ussd = ast_strdup(ip);
+							}
+							if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+								if (ch_gsm->balance) ast_free(ch_gsm->balance);
+								ch_gsm->balance = ast_strdup(ch_gsm->ussd);
+							}
+							if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+							close(ch_gsm->ussd_pipe[1]);
+							break;
+						default:
+							ip = "unknown response type";
+							if (ch_gsm->ussd) ast_free(ch_gsm->ussd);
+							if (parser_ptrs.cusd_wr->str_len > 0) {
+								ch_gsm->ussd = get_ussd_decoded(parser_ptrs.cusd_wr->str, parser_ptrs.cusd_wr->str_len, parser_ptrs.cusd_wr->dcs);
+							} else {
+								ch_gsm->ussd = ast_strdup(ip);
+							}
+							if (ch_gsm->ussd_sub_cmd == PG_AT_SUBCMD_CUSD_GET_BALANCE) {
+								if (ch_gsm->balance) ast_free(ch_gsm->balance);
+								ch_gsm->balance = ast_strdup(ch_gsm->ussd);
+							}
+							if (ch_gsm->ussd) write(ch_gsm->ussd_pipe[1], ch_gsm->ussd, strlen(ch_gsm->ussd));
+							close(ch_gsm->ussd_pipe[1]);
+							break;
 					}
 				}
 			}
@@ -15029,6 +15184,344 @@ static int pg_config_file_copy(char *dst, char *src)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_xxx_write()
+//------------------------------------------------------------------------------
+static int pg_xxx_write(struct ast_channel *ast_ch, struct ast_frame *frame)
+{
+	struct rtp_hdr *rtp_hdr_ptr;
+	char *data_ptr;
+	int rc;
+	int send_len;
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call *call = ast_ch->tech_pvt;
+#endif
+	struct pg_channel_rtp *rtp = call->channel_rtp;
+
+	ast_mutex_lock(&rtp->lock);
+
+	if (!call->owner) {
+		ast_log(LOG_DEBUG, "pvt channel has't owner\n");
+		ast_mutex_unlock(&rtp->lock);
+		return 0;
+	}
+	// check for frame present
+	if (!frame) {
+		ast_log(LOG_ERROR, "RTP Channel=\"%s\": frame expected\n", rtp->name);
+		ast_mutex_unlock(&rtp->lock);
+		return 0;
+	}
+	// check for frame type
+	if (frame->frametype != AST_FRAME_VOICE) {
+		ast_log(LOG_ERROR, "RTP Channel=\"%s\": unsupported frame type = [%d]\n", rtp->name, frame->frametype);
+		ast_mutex_unlock(&rtp->lock);
+		return 0;
+	}
+	// get buffer for rtp header in AST_FRIENDLY_OFFSET
+	if (frame->offset < sizeof(struct rtp_hdr)) {
+		ast_log(LOG_DEBUG, "RTP Channel=\"%s\": not free space=%d in frame data for RTP header\n", rtp->name, frame->offset);
+		ast_mutex_unlock(&rtp->lock);
+		return 0;
+	}
+	// check for valid frame datalen - SID packet was droped
+	if (frame->datalen <= 4) {
+		rtp->send_sid_count++;
+		ast_mutex_unlock(&rtp->lock);
+		return 0;
+	}
+#if ASTERISK_VERSION_NUMBER == 10600
+	if (!frame->data) {
+#else
+	if (!frame->data.ptr) {
+#endif
+		ast_log(LOG_ERROR, "RTP Channel=\"%s\": frame without data\n", rtp->name);
+		ast_mutex_unlock(&rtp->lock);
+		return 0;
+	}
+#if ASTERISK_VERSION_NUMBER == 10600
+	data_ptr = (char *)frame->data/* + frame->offset*/;
+#else
+	data_ptr = (char *)frame->data.ptr/* + frame->offset*/;
+#endif
+	data_ptr -= sizeof(struct rtp_hdr);
+	rtp_hdr_ptr = (struct rtp_hdr *)data_ptr ;
+
+	// fill RTP header fields
+	rtp_hdr_ptr->version = RTP_VERSION;
+	rtp_hdr_ptr->padding = 0;
+	rtp_hdr_ptr->extension = 0;
+	rtp_hdr_ptr->csrc_count = 0;
+	rtp_hdr_ptr->marker = 0;
+	rtp_hdr_ptr->payload_type = rtp->payload_type;
+
+	rtp->loc_seq_num++;
+	rtp_hdr_ptr->sequence_number = htons(rtp->loc_seq_num);
+	rtp->loc_timestamp += frame->samples;
+	rtp_hdr_ptr->timestamp = htonl(rtp->loc_timestamp);
+
+	rtp_hdr_ptr->ssrc = htonl(rtp->loc_ssrc);
+
+	send_len = frame->datalen + sizeof(struct rtp_hdr);
+
+	if ((rc = write(rtp->fd, data_ptr, send_len)) < 0) {
+		rtp->send_drop_count++;
+		if (errno != EAGAIN) {
+			ast_log(LOG_ERROR, "RTP Channel=\"%s\": can't write frame: %s\n", rtp->name, strerror(errno));
+		}
+		ast_mutex_unlock(&rtp->lock);
+		return 0;
+	}
+	if (rc != send_len) {
+		ast_log(LOG_ERROR, "RTP Channel=\"%s\": can't write frame: rc=%d send_len=%d\n", rtp->name, rc, send_len);
+	}
+
+	rtp->send_frame_count++;
+
+	ast_mutex_unlock(&rtp->lock);
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_xxx_write()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_xxx_read()
+//------------------------------------------------------------------------------
+static struct ast_frame *pg_xxx_read(struct ast_channel *ast_ch)
+{
+	int read_len;
+	char *read_ptr;
+	char *data_ptr;
+	int data_len;
+	int samples;
+
+	struct rtp_hdr *rtp_hdr_ptr;
+	int hdr_len;
+	int pad_len;
+
+	struct rfc2833_event_payload *event_ptr;
+
+	unsigned short seq_num;
+	unsigned int timestamp;
+	unsigned int ssrc;
+
+#if ASTERISK_VERSION_NUMBER >= 110000
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
+#else
+	struct pg_call *call = ast_ch->tech_pvt;
+#endif
+	struct pg_channel_rtp *rtp = call->channel_rtp;
+
+	ast_mutex_lock(&rtp->lock);
+
+	if (!call->owner) {
+		ast_log(LOG_DEBUG, "call has't owner\n");
+		ast_mutex_unlock(&rtp->lock);
+		return &ast_null_frame;
+	}
+	// read data from voice channel driver
+	read_ptr = rtp->voice_recv_buf + AST_FRIENDLY_OFFSET;
+	if ((read_len = read(rtp->fd, read_ptr, PG_VOICE_BUF_LEN)) < 0) {
+		if (errno != EAGAIN) {
+			ast_log(LOG_ERROR, "read error=%d:(%s)\n", errno, strerror(errno));
+		}
+		ast_mutex_unlock(&rtp->lock);
+		return &ast_null_frame;
+	}
+	if (read_len == 0) {
+		ast_mutex_unlock(&rtp->lock);
+		return &ast_null_frame;
+	}
+
+	// parsing rtp header
+	rtp_hdr_ptr = (struct rtp_hdr *)read_ptr;
+	hdr_len = sizeof(struct rtp_hdr);
+	pad_len = 0;
+	// check rtp version
+	if (rtp_hdr_ptr->version != RTP_VERSION) {
+		ast_log(LOG_ERROR, "wrong RTP version=%d\n", rtp_hdr_ptr->version);
+		ast_mutex_unlock(&rtp->lock);
+		return &ast_null_frame;
+	}
+	// test for padding ? get last octet == padding length
+	if (rtp_hdr_ptr->padding) {
+		pad_len = (*(read_ptr + read_len - 1)) & (0xff);
+	}
+	// check rtp header extension
+	if (rtp_hdr_ptr->extension) {
+		ast_log(LOG_WARNING, "RTP header extension not processed !!! -- code must be fixed _ :( _\n");
+		ast_mutex_unlock(&rtp->lock);
+		return &ast_null_frame;
+	}
+	// check CSRC count ? add heder length in according CSRC count 32bit word
+	if (rtp_hdr_ptr->csrc_count) {
+		hdr_len += rtp_hdr_ptr->csrc_count * 4;
+	}
+	// set data pointer to start voice frame position
+	data_ptr = read_ptr + hdr_len;
+	// calc data length
+	data_len = read_len - hdr_len - pad_len;
+	// check for event payload type
+	if (rtp_hdr_ptr->payload_type == rtp->event_payload_type) {
+		// check sequence number for monotonic increasing
+		seq_num = ntohs(rtp_hdr_ptr->sequence_number);
+		if ((seq_num) && (seq_num <= rtp->recv_seq_num)) {
+			ast_verb(5, "RTP Channel=\"%s\": sequence number=%u is less then or equal previous received=%u\n", rtp->name, seq_num, rtp->recv_seq_num);
+			ast_mutex_unlock(&rtp->lock);
+			return &ast_null_frame;
+		}
+		// store current sequence number
+		rtp->recv_seq_num = seq_num;
+		// get RTP event payload
+		event_ptr = (struct rfc2833_event_payload *)data_ptr;
+		// check for start event
+		if ((!rtp->event_is_now_recv) && (rtp_hdr_ptr->marker) && (!event_ptr->end)) {
+			// now event start
+			rtp->event_is_now_recv = 1;
+			// check event type
+			if (rtp_is_event_dtmf(event_ptr->event)) {
+				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] begin\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
+				// store DTMF symbol into temporary buffer
+				if ((rtp->dtmfptr - rtp->dtmfbuf) < PG_MAX_DTMF_LEN) {
+					*rtp->dtmfptr++ = rtp_event_dtmf_to_char(event_ptr->event);
+					*rtp->dtmfptr = '\0';
+				}
+				if ((strlen(rtp->dtmfbuf) == 1) && (rtp->on_read_dtmf_first.handler) && (rtp->on_read_dtmf_first.data)) {
+#if 0
+					// disable asterisk tone
+					ast_playtones_stop(ast_ch);
+#endif
+					rtp->on_read_dtmf_first.handler(rtp->on_read_dtmf_first.data);
+				}
+				// send AST_FRAME_DTMF_BEGIN
+				memset(&rtp->frame, 0, sizeof(struct ast_frame));
+				rtp->frame.frametype = AST_FRAME_DTMF_BEGIN;
+#if ASTERISK_VERSION_NUMBER < 10800
+				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
+#else
+				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
+#endif
+				rtp->frame.datalen = 0;
+				rtp->frame.samples = 0;
+				rtp->frame.mallocd = 0;
+				rtp->frame.src = "Polygator";
+				rtp->frame.len = 0;
+				ast_mutex_unlock(&rtp->lock);
+				return &rtp->frame;
+			} else {
+				// unsupported event
+				ast_log(LOG_ERROR, "RTP Channel=\"%s\": unsupported event code = [%u]\n", rtp->name, event_ptr->event);
+				rtp->event_is_now_recv = 0;
+				ast_mutex_unlock(&rtp->lock);
+				return &ast_null_frame;
+			}
+		}
+		// check for stop event
+		if ((rtp->event_is_now_recv) && (event_ptr->end)) {
+			// now event end
+			rtp->event_is_now_recv = 0;
+			// check event type
+			if (rtp_is_event_dtmf(event_ptr->event)) {
+				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] end\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
+				// send AST_FRAME_DTMF_END
+				memset(&rtp->frame, 0, sizeof(struct ast_frame));
+				rtp->frame.frametype = AST_FRAME_DTMF_END;
+#if ASTERISK_VERSION_NUMBER < 10800
+				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
+#else
+				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
+#endif
+				rtp->frame.datalen = 0;
+				rtp->frame.samples = 0;
+				rtp->frame.mallocd = 0;
+				rtp->frame.src = "Polygator";
+				rtp->frame.len = 0;
+				ast_mutex_unlock(&rtp->lock);
+				return &rtp->frame;
+			}
+		}
+		ast_mutex_unlock(&rtp->lock);
+		return &ast_null_frame;
+	} else if (rtp_hdr_ptr->payload_type != rtp->payload_type) {
+// 		ast_verb(4, "RTP Channel=\"%s\": unknown pt=%u\n", rtp->name, rtp_hdr_ptr->payload_type);
+		ast_mutex_unlock(&rtp->lock);
+		return &ast_null_frame;
+	}
+	// check sequence number for monotonic increasing
+	seq_num = ntohs(rtp_hdr_ptr->sequence_number);
+	// if rtp session just started
+	if (!rtp->recv_seq_num && !rtp->recv_frame_count) {
+		// init start sequence number
+		ast_verb(4, "RTP Channel=\"%s\": staring sequence number=%u\n", rtp->name, seq_num);
+		rtp->recv_seq_num = seq_num - 1;
+		
+	}
+	if ((seq_num) && (seq_num <= rtp->recv_seq_num)) {
+		ast_verb(5, "RTP Channel=\"%s\": sequence number=%u is less then or equal previous received=%u\n", rtp->name, seq_num, rtp->recv_seq_num);
+		ast_mutex_unlock(&rtp->lock);
+		return &ast_null_frame;
+	}
+	// check timestamp value
+	timestamp = ntohl(rtp_hdr_ptr->timestamp);
+	// if rtp session just started
+	if (!rtp->recv_timestamp && !rtp->recv_frame_count) {
+		// init start timestamp
+		ast_verb(4, "RTP Channel=\"%s\": starting timestamp=%u\n", rtp->name, timestamp);
+// 		rtp->recv_timestamp = timestamp - 160;
+	}
+	// check ssrc value
+	ssrc = ntohl(rtp_hdr_ptr->ssrc);
+	// if rtp session just started
+	if (!rtp->recv_ssrc && !rtp->recv_frame_count) {
+		// store SSRC
+		ast_verb(4, "RTP Channel=\"%s\": SSRC=0x%08x\n", rtp->name, ssrc);
+		rtp->recv_ssrc = ssrc;
+		
+	}
+	if (rtp->recv_ssrc != ssrc) {
+		ast_verb(4, "RTP Channel=\"%s\": SSRC 0x%08x changed to 0x%08x \n", rtp->name, rtp->recv_ssrc, ssrc);
+	}
+	// store SSRC
+	rtp->recv_ssrc = ssrc;
+	// store sequence number and timestamp
+	rtp->recv_seq_num = seq_num;
+	// calc smaples count
+	samples = timestamp - rtp->recv_timestamp;
+	rtp->recv_timestamp  = timestamp;
+	// fill asterisk frame
+	rtp->frame.frametype = AST_FRAME_VOICE;
+#if ASTERISK_VERSION_NUMBER >= 100000
+	ast_format_copy(&rtp->frame.subclass.format, &rtp->format);
+#elif ASTERISK_VERSION_NUMBER >= 10800
+	rtp->frame.subclass.codec = rtp->format;
+#else
+	rtp->frame.subclass = rtp->format;
+#endif
+	rtp->frame.datalen = data_len;
+	rtp->frame.samples = samples;
+	rtp->frame.src = "Polygator";
+	rtp->frame.offset = AST_FRIENDLY_OFFSET + hdr_len;
+	rtp->frame.mallocd = 0;
+	rtp->frame.delivery.tv_sec = 0;
+	rtp->frame.delivery.tv_usec = 0;
+#if ASTERISK_VERSION_NUMBER == 10600
+	rtp->frame.data = data_ptr;
+#else
+	rtp->frame.data.ptr = data_ptr;
+#endif
+
+	// increment statistic counter
+	rtp->recv_frame_count++;
+
+	ast_mutex_unlock(&rtp->lock);
+	return &rtp->frame;
+}
+//------------------------------------------------------------------------------
+// end of pg_xxx_read()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_gsm_requester()
 //------------------------------------------------------------------------------
 #if ASTERISK_VERSION_NUMBER >= 110000
@@ -16377,334 +16870,6 @@ pg_gsm_indicate_srcupdate_end:
 }
 //------------------------------------------------------------------------------
 // end of pg_gsm_indicate()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_gsm_write()
-//------------------------------------------------------------------------------
-static int pg_gsm_write(struct ast_channel *ast_ch, struct ast_frame *frame)
-{
-	struct rtp_hdr *rtp_hdr_ptr;
-	char *data_ptr;
-	int rc;
-	int send_len;
-#if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
-#else
-	struct pg_call *call = ast_ch->tech_pvt;
-#endif
-	struct pg_channel_rtp *rtp = call->channel_rtp;
-
-	ast_mutex_lock(&rtp->lock);
-
-	if (!call->owner) {
-		ast_log(LOG_DEBUG, "pvt channel has't owner\n");
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	// check for frame present
-	if (!frame) {
-		ast_log(LOG_ERROR, "RTP Channel=\"%s\": frame expected\n", rtp->name);
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	// check for frame type
-	if (frame->frametype != AST_FRAME_VOICE) {
-		ast_log(LOG_ERROR, "RTP Channel=\"%s\": unsupported frame type = [%d]\n", rtp->name, frame->frametype);
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	// get buffer for rtp header in AST_FRIENDLY_OFFSET
-	if (frame->offset < sizeof(struct rtp_hdr)) {
-		ast_log(LOG_DEBUG, "RTP Channel=\"%s\": not free space=%d in frame data for RTP header\n", rtp->name, frame->offset);
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	// check for valid frame datalen - SID packet was droped
-	if (frame->datalen <= 4) {
-		rtp->send_sid_count++;
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-#if ASTERISK_VERSION_NUMBER == 10600
-	if (!frame->data) {
-#else
-	if (!frame->data.ptr) {
-#endif
-		ast_log(LOG_ERROR, "RTP Channel=\"%s\": frame without data\n", rtp->name);
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-#if ASTERISK_VERSION_NUMBER == 10600
-	data_ptr = (char *)frame->data/* + frame->offset*/;
-#else
-	data_ptr = (char *)frame->data.ptr/* + frame->offset*/;
-#endif
-// 	memset(data_ptr, 0, frame->datalen);
-	data_ptr -= sizeof(struct rtp_hdr);
-	rtp_hdr_ptr = (struct rtp_hdr *)data_ptr ;
-
-	// fill RTP header fields
-	rtp_hdr_ptr->version = RTP_VERSION;
-	rtp_hdr_ptr->padding = 0;
-	rtp_hdr_ptr->extension = 0;
-	rtp_hdr_ptr->csrc_count = 0;
-	rtp_hdr_ptr->marker = 0;
-	rtp_hdr_ptr->payload_type = rtp->payload_type;
-
-	rtp->loc_seq_num++;
-	rtp_hdr_ptr->sequence_number = htons(rtp->loc_seq_num);
-	rtp->loc_timestamp += frame->samples;
-	rtp_hdr_ptr->timestamp = htonl(rtp->loc_timestamp);
-
-	rtp_hdr_ptr->ssrc = htonl(rtp->loc_ssrc);
-
-	send_len = frame->datalen + sizeof(struct rtp_hdr);
-
-// 	ast_log(LOG_DEBUG, "<%s>: write: %d bytes\n", chnl->name, send_len);
-	if ((rc = write(rtp->fd, data_ptr, send_len)) < 0) {
-		rtp->send_drop_count++;
-		if (errno != EAGAIN)
-			ast_log(LOG_ERROR, "RTP Channel=\"%s\": can't write frame: %s\n", rtp->name, strerror(errno));
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	if (rc != send_len)
-		ast_log(LOG_ERROR, "RTP Channel=\"%s\": can't write frame: rc=%d send_len=%d\n", rtp->name, rc, send_len);
-
-	rtp->send_frame_count++;
-
-	ast_mutex_unlock(&rtp->lock);
-	return 0;
-}
-//------------------------------------------------------------------------------
-// end of pg_gsm_write()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_gsm_read()
-//------------------------------------------------------------------------------
-static struct ast_frame *pg_gsm_read(struct ast_channel *ast_ch)
-{
-	int read_len;
-	char *read_ptr;
-	char *data_ptr;
-	int data_len;
-	int samples;
-
-	struct rtp_hdr *rtp_hdr_ptr;
-	int hdr_len;
-	int pad_len;
-
-	struct rfc2833_event_payload *event_ptr;
-
-	unsigned short seq_num;
-	unsigned int timestamp;
-	unsigned int ssrc;
-
-#if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
-#else
-	struct pg_call *call = ast_ch->tech_pvt;
-#endif
-	struct pg_channel_rtp *rtp = call->channel_rtp;
-
-	ast_mutex_lock(&rtp->lock);
-
-	if (!call->owner) {
-		ast_log(LOG_DEBUG, "call has't owner\n");
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// read data from voice channel driver
-	read_ptr = rtp->voice_recv_buf + AST_FRIENDLY_OFFSET;
-	if ((read_len = read(rtp->fd, read_ptr, PG_VOICE_BUF_LEN)) < 0) {
-		if (errno != EAGAIN) {
-			ast_log(LOG_ERROR, "read error=%d:(%s)\n", errno, strerror(errno));
-		}
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	if (read_len == 0) {
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// parsing rtp header
-	rtp_hdr_ptr = (struct rtp_hdr *)read_ptr;
-	hdr_len = sizeof(struct rtp_hdr);
-	pad_len = 0;
-	// check rtp version
-	if (rtp_hdr_ptr->version != RTP_VERSION) {
-		ast_log(LOG_ERROR, "wrong RTP version=%d\n", rtp_hdr_ptr->version);
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// test for padding ? get last octet == padding length
-	if (rtp_hdr_ptr->padding)
-		pad_len = (*(read_ptr + read_len - 1)) & (0xff);
-	// check rtp header extension
-	if (rtp_hdr_ptr->extension) {
-		ast_log(LOG_WARNING, "RTP header extension not processed !!! -- code must be fixed _ :( _\n");
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// check CSRC count ? add heder length in according CSRC count 32bit word
-	if (rtp_hdr_ptr->csrc_count)
-		hdr_len += rtp_hdr_ptr->csrc_count * 4;
-	// set data pointer to start voice frame position
-	data_ptr = read_ptr + hdr_len;
-	// calc data length
-	data_len = read_len - hdr_len - pad_len;
-	// check for event payload type
-	if (rtp_hdr_ptr->payload_type == rtp->event_payload_type) {
-		// check sequence number for monotonic increasing
-		seq_num = ntohs(rtp_hdr_ptr->sequence_number);
-		if ((seq_num) && (seq_num <= rtp->recv_seq_num)) {
-			ast_verb(5, "RTP Channel=\"%s\": sequence number=%u is less then or equal previous received=%u\n", rtp->name, seq_num, rtp->recv_seq_num);
-			ast_mutex_unlock(&rtp->lock);
-			return &ast_null_frame;
-		}
-		// store current sequence number
-		rtp->recv_seq_num = seq_num;
-		// get RTP event payload
-		event_ptr = (struct rfc2833_event_payload *)data_ptr;
-		// check for start event
-		if ((!rtp->event_is_now_recv) && (rtp_hdr_ptr->marker) && (!event_ptr->end)) {
-			// now event start
-			rtp->event_is_now_recv = 1;
-			// check event type
-			if (rtp_is_event_dtmf(event_ptr->event)) {
-				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] begin\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
-				// store DTMF symbol into temporary buffer
-				if ((rtp->dtmfptr - rtp->dtmfbuf) < PG_MAX_DTMF_LEN) {
-					*rtp->dtmfptr++ = rtp_event_dtmf_to_char(event_ptr->event);
-					*rtp->dtmfptr = '\0';
-				}
-				// send AST_FRAME_DTMF_BEGIN
-				memset(&rtp->frame, 0, sizeof(struct ast_frame));
-				rtp->frame.frametype = AST_FRAME_DTMF_BEGIN;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
-#else
-				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
-#endif
-				rtp->frame.datalen = 0;
-				rtp->frame.samples = 0;
-				rtp->frame.mallocd = 0;
-				rtp->frame.src = "Polygator";
-				rtp->frame.len = 0;
-				ast_mutex_unlock(&rtp->lock);
-				return &rtp->frame;
-			} else {
-				// unsupported event
-				ast_log(LOG_ERROR, "RTP Channel=\"%s\": unsupported event code = [%u]\n", rtp->name, event_ptr->event);
-				rtp->event_is_now_recv = 0;
-				ast_mutex_unlock(&rtp->lock);
-				return &ast_null_frame;
-			}
-		}
-		// check for stop event
-		if ((rtp->event_is_now_recv) && (event_ptr->end)) {
-			// now event end
-			rtp->event_is_now_recv = 0;
-			// check event type
-			if (rtp_is_event_dtmf(event_ptr->event)) {
-				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] end\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
-				// send AST_FRAME_DTMF_END
-				memset(&rtp->frame, 0, sizeof(struct ast_frame));
-				rtp->frame.frametype = AST_FRAME_DTMF_END;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
-#else
-				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
-#endif
-				rtp->frame.datalen = 0;
-				rtp->frame.samples = 0;
-				rtp->frame.mallocd = 0;
-				rtp->frame.src = "Polygator";
-				rtp->frame.len = 0;
-				ast_mutex_unlock(&rtp->lock);
-				return &rtp->frame;
-			}
-		}
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	} else if (rtp_hdr_ptr->payload_type != rtp->payload_type) {
-// 		ast_verb(4, "RTP Channel=\"%s\": unknown pt=%u\n", rtp->name, rtp_hdr_ptr->payload_type);
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// check sequence number for monotonic increasing
-	seq_num = ntohs(rtp_hdr_ptr->sequence_number);
-	// if rtp session just started
-	if (!rtp->recv_seq_num && !rtp->recv_frame_count) {
-		// init start sequence number
-		ast_verb(4, "RTP Channel=\"%s\": staring sequence number=%u\n", rtp->name, seq_num);
-		rtp->recv_seq_num = seq_num - 1;
-		
-	}
-	if ((seq_num) && (seq_num <= rtp->recv_seq_num)) {
-		ast_verb(5, "RTP Channel=\"%s\": sequence number=%u is less then or equal previous received=%u\n", rtp->name, seq_num, rtp->recv_seq_num);
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// check timestamp value
-	timestamp = ntohl(rtp_hdr_ptr->timestamp);
-	// if rtp session just started
-	if (!rtp->recv_timestamp && !rtp->recv_frame_count) {
-		// init start timestamp
-		ast_verb(4, "RTP Channel=\"%s\": starting timestamp=%u\n", rtp->name, timestamp);
-		rtp->recv_timestamp = timestamp - 160;
-	}
-	// check ssrc value
-	ssrc = ntohl(rtp_hdr_ptr->ssrc);
-	// if rtp session just started
-	if (!rtp->recv_ssrc && !rtp->recv_frame_count) {
-		// store SSRC
-		ast_verb(4, "RTP Channel=\"%s\": SSRC=0x%08x\n", rtp->name, ssrc);
-		rtp->recv_ssrc = ssrc;
-		
-	}
-	if (rtp->recv_ssrc != ssrc) {
-		ast_verb(4, "RTP Channel=\"%s\": SSRC 0x%08x changed to 0x%08x \n", rtp->name, rtp->recv_ssrc, ssrc);
-	}
-	// store SSRC
-	rtp->recv_ssrc = ssrc;
-	// store sequence number and timestamp
-	rtp->recv_seq_num = seq_num;
-	// calc smaples count
-	samples = timestamp - rtp->recv_timestamp;
-	rtp->recv_timestamp  = timestamp;
-	// fill asterisk frame
-	rtp->frame.frametype = AST_FRAME_VOICE;
-#if ASTERISK_VERSION_NUMBER >= 100000
-	ast_format_copy(&rtp->frame.subclass.format, &rtp->format);
-#elif ASTERISK_VERSION_NUMBER >= 10800
-	rtp->frame.subclass.codec = rtp->format;
-#else
-	rtp->frame.subclass = rtp->format;
-#endif
-	rtp->frame.datalen = data_len;
-	rtp->frame.samples = samples;
-	rtp->frame.src = "Polygator";
-	rtp->frame.offset = AST_FRIENDLY_OFFSET + hdr_len;
-	rtp->frame.mallocd = 0;
-	rtp->frame.delivery.tv_sec = 0;
-	rtp->frame.delivery.tv_usec = 0;
-#if ASTERISK_VERSION_NUMBER == 10600
-	rtp->frame.data = data_ptr;
-#else
-	rtp->frame.data.ptr = data_ptr;
-#endif
-
-	// increment statistic counter
-	rtp->recv_frame_count++;
-
-	ast_mutex_unlock(&rtp->lock);
-	return &rtp->frame;
-}
-//------------------------------------------------------------------------------
-// end of pg_gsm_read()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -18088,364 +18253,6 @@ pg_fxs_indicate_srcupdate_end:
 }
 //------------------------------------------------------------------------------
 // end of pg_fxs_indicate()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_fxs_write()
-//------------------------------------------------------------------------------
-static int pg_fxs_write(struct ast_channel *ast_ch, struct ast_frame *frame)
-{
-	struct rtp_hdr *rtp_hdr_ptr;
-	char *data_ptr;
-	int rc;
-	int send_len;
-#if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
-#else
-	struct pg_call *call = ast_ch->tech_pvt;
-#endif
-	struct pg_channel_rtp *rtp = call->channel_rtp;
-
-	ast_mutex_lock(&rtp->lock);
-
-	if (!call->owner) {
-		ast_log(LOG_DEBUG, "pvt channel has't owner\n");
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	// check for frame present
-	if (!frame) {
-		ast_log(LOG_ERROR, "RTP Channel=\"%s\": frame expected\n", rtp->name);
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	// check for frame type
-	if (frame->frametype != AST_FRAME_VOICE) {
-		ast_log(LOG_ERROR, "RTP Channel=\"%s\": unsupported frame type = [%d]\n", rtp->name, frame->frametype);
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	// get buffer for rtp header in AST_FRIENDLY_OFFSET
-	if (frame->offset < sizeof(struct rtp_hdr)) {
-		ast_log(LOG_DEBUG, "RTP Channel=\"%s\": not free space=%d in frame data for RTP header\n", rtp->name, frame->offset);
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	// check for valid frame datalen - SID packet was droped
-	if (frame->datalen <= 4) {
-		rtp->send_sid_count++;
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-#if ASTERISK_VERSION_NUMBER == 10600
-	if (!frame->data) {
-#else
-	if (!frame->data.ptr) {
-#endif
-		ast_log(LOG_ERROR, "RTP Channel=\"%s\": frame without data\n", rtp->name);
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-#if ASTERISK_VERSION_NUMBER == 10600
-	data_ptr = (char *)frame->data/* + frame->offset*/;
-#else
-	data_ptr = (char *)frame->data.ptr/* + frame->offset*/;
-#endif
-	data_ptr -= sizeof(struct rtp_hdr);
-	rtp_hdr_ptr = (struct rtp_hdr *)data_ptr ;
-
-	// fill RTP header fields
-	rtp_hdr_ptr->version = RTP_VERSION;
-	rtp_hdr_ptr->padding = 0;
-	rtp_hdr_ptr->extension = 0;
-	rtp_hdr_ptr->csrc_count = 0;
-	rtp_hdr_ptr->marker = 0;
-	rtp_hdr_ptr->payload_type = rtp->payload_type;
-
-	rtp->loc_seq_num++;
-	rtp_hdr_ptr->sequence_number = htons(rtp->loc_seq_num);
-	rtp->loc_timestamp += frame->samples;
-	rtp_hdr_ptr->timestamp = htonl(rtp->loc_timestamp);
-
-	rtp_hdr_ptr->ssrc = htonl(rtp->loc_ssrc);
-
-	send_len = frame->datalen + sizeof(struct rtp_hdr);
-
-	if ((rc = write(rtp->fd, data_ptr, send_len)) < 0) {
-		rtp->send_drop_count++;
-		if (errno != EAGAIN) {
-			ast_log(LOG_ERROR, "RTP Channel=\"%s\": can't write frame: %s\n", rtp->name, strerror(errno));
-		}
-		ast_mutex_unlock(&rtp->lock);
-		return 0;
-	}
-	if (rc != send_len) {
-		ast_log(LOG_ERROR, "RTP Channel=\"%s\": can't write frame: rc=%d send_len=%d\n", rtp->name, rc, send_len);
-	}
-
-	rtp->send_frame_count++;
-
-	ast_mutex_unlock(&rtp->lock);
-	return 0;
-}
-//------------------------------------------------------------------------------
-// end of pg_fxs_write()
-//------------------------------------------------------------------------------
-
-//------------------------------------------------------------------------------
-// pg_fxs_read()
-//------------------------------------------------------------------------------
-static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch)
-{
-	int read_len;
-	char *read_ptr;
-	char *data_ptr;
-	int data_len;
-	int samples;
-
-	struct rtp_hdr *rtp_hdr_ptr;
-	int hdr_len;
-	int pad_len;
-
-	struct rfc2833_event_payload *event_ptr;
-
-	unsigned short seq_num;
-	unsigned int timestamp;
-	unsigned int ssrc;
-
-	struct pg_vinetic *vin;
-
-
-#if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
-#else
-	struct pg_call *call = ast_ch->tech_pvt;
-#endif
-	struct pg_channel_rtp *rtp = call->channel_rtp;
-	struct pg_channel_fxs *ch_fxs = call->channel.fxs;
-
-	ast_mutex_lock(&rtp->lock);
-
-	if (!call->owner) {
-		ast_log(LOG_DEBUG, "call has't owner\n");
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// read data from voice channel driver
-	read_ptr = rtp->voice_recv_buf + AST_FRIENDLY_OFFSET;
-	if ((read_len = read(rtp->fd, read_ptr, PG_VOICE_BUF_LEN)) < 0) {
-		if (errno != EAGAIN) {
-			ast_log(LOG_ERROR, "read error=%d:(%s)\n", errno, strerror(errno));
-		}
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	if (read_len == 0) {
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-
-	// parsing rtp header
-	rtp_hdr_ptr = (struct rtp_hdr *)read_ptr;
-	hdr_len = sizeof(struct rtp_hdr);
-	pad_len = 0;
-	// check rtp version
-	if (rtp_hdr_ptr->version != RTP_VERSION) {
-		ast_log(LOG_ERROR, "wrong RTP version=%d\n", rtp_hdr_ptr->version);
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// test for padding ? get last octet == padding length
-	if (rtp_hdr_ptr->padding) {
-		pad_len = (*(read_ptr + read_len - 1)) & (0xff);
-	}
-	// check rtp header extension
-	if (rtp_hdr_ptr->extension) {
-		ast_log(LOG_WARNING, "RTP header extension not processed !!! -- code must be fixed _ :( _\n");
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// check CSRC count ? add heder length in according CSRC count 32bit word
-	if (rtp_hdr_ptr->csrc_count) {
-		hdr_len += rtp_hdr_ptr->csrc_count * 4;
-	}
-	// set data pointer to start voice frame position
-	data_ptr = read_ptr + hdr_len;
-	// calc data length
-	data_len = read_len - hdr_len - pad_len;
-	// check for event payload type
-	if (rtp_hdr_ptr->payload_type == rtp->event_payload_type) {
-		// check sequence number for monotonic increasing
-		seq_num = ntohs(rtp_hdr_ptr->sequence_number);
-		if ((seq_num) && (seq_num <= rtp->recv_seq_num)) {
-			ast_verb(5, "RTP Channel=\"%s\": sequence number=%u is less then or equal previous received=%u\n", rtp->name, seq_num, rtp->recv_seq_num);
-			ast_mutex_unlock(&rtp->lock);
-			return &ast_null_frame;
-		}
-		// store current sequence number
-		rtp->recv_seq_num = seq_num;
-		// get RTP event payload
-		event_ptr = (struct rfc2833_event_payload *)data_ptr;
-		// check for start event
-		if ((!rtp->event_is_now_recv) && (rtp_hdr_ptr->marker) && (!event_ptr->end)) {
-			// now event start
-			rtp->event_is_now_recv = 1;
-			// check event type
-			if (rtp_is_event_dtmf(event_ptr->event)) {
-				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] begin\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
-				// store DTMF symbol into temporary buffer
-				if ((rtp->dtmfptr - rtp->dtmfbuf) < PG_MAX_DTMF_LEN) {
-					*rtp->dtmfptr++ = rtp_event_dtmf_to_char(event_ptr->event);
-					*rtp->dtmfptr = '\0';
-				}
-				if (strlen(rtp->dtmfbuf) == 1) {
-					// disable asterisk tone
-					ast_playtones_stop(ast_ch);
-					// disable tone generator
-					if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
-						ast_mutex_lock(&vin->lock);
-						if (vin_reset_status(&vin->context) < 0) {
-							while (vin_message_stack_check_line(&vin->context)) {
-								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-							}
-						} else {
-							// disable UTG
-							if (vin_utg_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
-								while (vin_message_stack_check_line(&vin->context)) {
-									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
-								}
-							}
-						}
-						ast_mutex_unlock(&vin->lock);
-					} else {
-						ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
-					}
-				}
-				// send AST_FRAME_DTMF_BEGIN
-				memset(&rtp->frame, 0, sizeof(struct ast_frame));
-				rtp->frame.frametype = AST_FRAME_DTMF_BEGIN;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
-#else
-				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
-#endif
-				rtp->frame.datalen = 0;
-				rtp->frame.samples = 0;
-				rtp->frame.mallocd = 0;
-				rtp->frame.src = "Polygator";
-				rtp->frame.len = 0;
-				ast_mutex_unlock(&rtp->lock);
-				return &rtp->frame;
-			} else {
-				// unsupported event
-				ast_log(LOG_ERROR, "RTP Channel=\"%s\": unsupported event code = [%u]\n", rtp->name, event_ptr->event);
-				rtp->event_is_now_recv = 0;
-				ast_mutex_unlock(&rtp->lock);
-				return &ast_null_frame;
-			}
-		}
-		// check for stop event
-		if ((rtp->event_is_now_recv) && (event_ptr->end)) {
-			// now event end
-			rtp->event_is_now_recv = 0;
-			// check event type
-			if (rtp_is_event_dtmf(event_ptr->event)) {
-				ast_verb(4, "RTP Channel=\"%s\": receiving DTMF [%c] end\n", rtp->name, rtp_event_dtmf_to_char(event_ptr->event));
-				// send AST_FRAME_DTMF_END
-				memset(&rtp->frame, 0, sizeof(struct ast_frame));
-				rtp->frame.frametype = AST_FRAME_DTMF_END;
-#if ASTERISK_VERSION_NUMBER < 10800
-				rtp->frame.subclass = rtp_event_dtmf_to_char(event_ptr->event);
-#else
-				rtp->frame.subclass.integer = rtp_event_dtmf_to_char(event_ptr->event);
-#endif
-				rtp->frame.datalen = 0;
-				rtp->frame.samples = 0;
-				rtp->frame.mallocd = 0;
-				rtp->frame.src = "Polygator";
-				rtp->frame.len = 0;
-				ast_mutex_unlock(&rtp->lock);
-				return &rtp->frame;
-			}
-		}
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	} else if (rtp_hdr_ptr->payload_type != rtp->payload_type) {
-// 		ast_verb(4, "RTP Channel=\"%s\": unknown pt=%u\n", rtp->name, rtp_hdr_ptr->payload_type);
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// check sequence number for monotonic increasing
-	seq_num = ntohs(rtp_hdr_ptr->sequence_number);
-	// if rtp session just started
-	if (!rtp->recv_seq_num && !rtp->recv_frame_count) {
-		// init start sequence number
-		ast_verb(4, "RTP Channel=\"%s\": staring sequence number=%u\n", rtp->name, seq_num);
-		rtp->recv_seq_num = seq_num - 1;
-		
-	}
-	if ((seq_num) && (seq_num <= rtp->recv_seq_num)) {
-		ast_verb(5, "RTP Channel=\"%s\": sequence number=%u is less then or equal previous received=%u\n", rtp->name, seq_num, rtp->recv_seq_num);
-		ast_mutex_unlock(&rtp->lock);
-		return &ast_null_frame;
-	}
-	// check timestamp value
-	timestamp = ntohl(rtp_hdr_ptr->timestamp);
-	// if rtp session just started
-	if (!rtp->recv_timestamp && !rtp->recv_frame_count) {
-		// init start timestamp
-		ast_verb(4, "RTP Channel=\"%s\": starting timestamp=%u\n", rtp->name, timestamp);
-// 		rtp->recv_timestamp = timestamp - 160;
-	}
-	// check ssrc value
-	ssrc = ntohl(rtp_hdr_ptr->ssrc);
-	// if rtp session just started
-	if (!rtp->recv_ssrc && !rtp->recv_frame_count) {
-		// store SSRC
-		ast_verb(4, "RTP Channel=\"%s\": SSRC=0x%08x\n", rtp->name, ssrc);
-		rtp->recv_ssrc = ssrc;
-		
-	}
-	if (rtp->recv_ssrc != ssrc) {
-		ast_verb(4, "RTP Channel=\"%s\": SSRC 0x%08x changed to 0x%08x \n", rtp->name, rtp->recv_ssrc, ssrc);
-	}
-	// store SSRC
-	rtp->recv_ssrc = ssrc;
-	// store sequence number and timestamp
-	rtp->recv_seq_num = seq_num;
-	// calc smaples count
-	samples = timestamp - rtp->recv_timestamp;
-	rtp->recv_timestamp  = timestamp;
-	// fill asterisk frame
-	rtp->frame.frametype = AST_FRAME_VOICE;
-#if ASTERISK_VERSION_NUMBER >= 100000
-	ast_format_copy(&rtp->frame.subclass.format, &rtp->format);
-#elif ASTERISK_VERSION_NUMBER >= 10800
-	rtp->frame.subclass.codec = rtp->format;
-#else
-	rtp->frame.subclass = rtp->format;
-#endif
-	rtp->frame.datalen = data_len;
-	rtp->frame.samples = samples;
-	rtp->frame.src = "Polygator";
-	rtp->frame.offset = AST_FRIENDLY_OFFSET + hdr_len;
-	rtp->frame.mallocd = 0;
-	rtp->frame.delivery.tv_sec = 0;
-	rtp->frame.delivery.tv_usec = 0;
-#if ASTERISK_VERSION_NUMBER == 10600
-	rtp->frame.data = data_ptr;
-#else
-	rtp->frame.data.ptr = data_ptr;
-#endif
-
-	// increment statistic counter
-	rtp->recv_frame_count++;
-
-	ast_mutex_unlock(&rtp->lock);
-	return &rtp->frame;
-}
-//------------------------------------------------------------------------------
-// end of pg_fxs_read()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -23210,6 +23017,7 @@ static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, st
 
 	int is_ussd_send;
 	int pipe_flags;
+	int first;
 
 	struct timeval tv;
 #ifdef HAVE_ASTERISK_SELECT_H
@@ -23219,8 +23027,7 @@ static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, st
 #endif
 	int res;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			ast_cli(a->fd, "is ch_act_ussd subhandler -- CLI_INIT unsupported in this context\n");
@@ -23268,19 +23075,20 @@ static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, st
 				if (!str_bin_to_hex(&in_ptr, &in_len, &buf_ptr, &buf_len)) {
 					ch_gsm->ussd_sub_cmd = PG_AT_SUBCMD_CUSD_USER;
 					pg_atcommand_queue_append(ch_gsm, AT_CUSD, AT_OPER_WRITE, PG_AT_SUBCMD_CUSD_USER, 60, 0, "%d,\"%s\"", 1, buf);
-					ast_cli(a->fd, "  GSM channel=\"%s\": send USSD \"%s\"...\n", ch_gsm->alias, a->argv[5]);
+					ast_cli(a->fd, "send USSD \"%s\"...\n", a->argv[5]);
 					is_ussd_send = 1;
 					ch_gsm->state = PG_CHANNEL_GSM_STATE_SERVICE;
-				} else
-					ast_cli(a->fd, "  GSM channel=\"%s\": send USSD \"%s\" - fail convert to hex\n", ch_gsm->alias, a->argv[5]);
+				} else {
+					ast_cli(a->fd, "send USSD \"%s\" - fail convert to hex\n", a->argv[5]);
+				}
 			} else {
 				// end USSD session
 				ch_gsm->ussd_sub_cmd = PG_AT_SUBCMD_CUSD_USER;
 				pg_atcommand_queue_append(ch_gsm, AT_CUSD, AT_OPER_WRITE, PG_AT_SUBCMD_CUSD_USER, pg_at_response_timeout, 0, "2");
-				ast_cli(a->fd, "  GSM channel=\"%s\": end USSD session\n", ch_gsm->alias);
+				ast_cli(a->fd, "USSD session closed\n");
 			}
 		} else {
-			ast_cli(a->fd, "  GSM channel=\"%s\": unable to send USSD \"%s\":", ch_gsm->alias, a->argv[5]);
+			ast_cli(a->fd, "unable to send USSD \"%s\":", a->argv[5]);
 			// print expected condition
 			if (ch_gsm->state != PG_CHANNEL_GSM_STATE_RUN)
 				ast_cli(a->fd, " \"channel is in %s state\"", pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -23294,30 +23102,31 @@ static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, st
 		}
 		if (is_ussd_send) {
 			if (pipe(ch_gsm->ussd_pipe) < 0) {
-				ast_cli(a->fd, "  GSM channel=\"%s\": fcntl(ch_gsm->ussd_pipe): %s\n", ch_gsm->alias, strerror(errno));
+				ast_cli(a->fd, "fcntl(ch_gsm->ussd_pipe): %s\n", strerror(errno));
 				goto is_ussd_send_end;
 			}
 			if ((pipe_flags = fcntl(ch_gsm->ussd_pipe[0], F_GETFL)) < 0) {
-				ast_cli(a->fd, "  GSM channel=\"%s\": fcntl(ch_gsm->ussd_pipe[0], F_GETFL): %s\n", ch_gsm->alias, strerror(errno));
+				ast_cli(a->fd, "fcntl(ch_gsm->ussd_pipe[0], F_GETFL): %s\n", strerror(errno));
 				goto is_ussd_send_end;
 			}
 			if (fcntl(ch_gsm->ussd_pipe[0], F_SETFL, pipe_flags|O_NONBLOCK) < 0) {
-				ast_cli(a->fd, "  GSM channel=\"%s\": fcntl(ch_gsm->ussd_pipe[0], F_SETFL): %s\n", ch_gsm->alias, strerror(errno));
+				ast_cli(a->fd, "fcntl(ch_gsm->ussd_pipe[0], F_SETFL): %s\n", strerror(errno));
 				goto is_ussd_send_end;
 			}
 			if ((pipe_flags = fcntl(ch_gsm->ussd_pipe[1], F_GETFL)) < 0) {
-				ast_cli(a->fd, "  GSM channel=\"%s\": fcntl(ch_gsm->ussd_pipe[1], F_GETFL): %s\n", ch_gsm->alias, strerror(errno));
+				ast_cli(a->fd, "fcntl(ch_gsm->ussd_pipe[1], F_GETFL): %s\n", strerror(errno));
 				goto is_ussd_send_end;
 			}
 			if (fcntl(ch_gsm->ussd_pipe[1], F_SETFL, pipe_flags|O_NONBLOCK) < 0) {
-				ast_cli(a->fd, "  GSM channel=\"%s\": fcntl(ch_gsm->ussd_pipe[1], F_SETFL): %s\n", ch_gsm->alias, strerror(errno));
+				ast_cli(a->fd, "fcntl(ch_gsm->ussd_pipe[1], F_SETFL): %s\n", strerror(errno));
 				goto is_ussd_send_end;
 			}
-			while (1)
-			{
+			// prepare first timeout
+			first = 1;
+			tv.tv_sec = 60;
+			tv.tv_usec = 0;
+			while (1) {
 				// prepare select
-				tv.tv_sec = 60;
-				tv.tv_usec = 0;
 				FD_ZERO(&rfds);
 				FD_SET(ch_gsm->ussd_pipe[0], &rfds);
 				ast_mutex_unlock(&ch_gsm->lock);
@@ -23329,18 +23138,23 @@ static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, st
 						resp_datalen = read(ch_gsm->ussd_pipe[0], resp_databuf, sizeof(resp_databuf));
 						if (resp_datalen > 0) {
 							ast_cli(a->fd, "%.*s\n", resp_datalen, resp_databuf);
+							// prepare next timeout
+							first = 0;
+							tv.tv_sec = 5;
+							tv.tv_usec = 0;
 						} else if (resp_datalen < 0) {
-							ast_cli(a->fd, "  GSM channel=\"%s\": read(): %s\n", ch_gsm->alias, strerror(errno));
+							ast_cli(a->fd, "read(ch_gsm->ussd_pipe[0]): %s\n", strerror(errno));
+							break;
 						} else {
 							ast_cli(a->fd, "done.\n");
 							break;
 						}
 					}
 				} else if (res < 0) {
-					ast_cli(a->fd, "  GSM channel=\"%s\": select(): %s\n", ch_gsm->alias, strerror(errno));
+					ast_cli(a->fd, "select(): %s\n", strerror(errno));
 					break;
 				} else {
-					ast_cli(a->fd, "  GSM channel=\"%s\": wait for USSD response - time is out\n", ch_gsm->alias);
+					ast_cli(a->fd, first?"time is out.\n":"done.\n");
 					break;
 				}
 			}
@@ -23353,8 +23167,9 @@ is_ussd_send_end:
 			ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 		}
 		ast_mutex_unlock(&ch_gsm->lock);
-	} else
+	} else {
 		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
+	}
 
 	return CLI_SUCCESS;
 }
@@ -23423,8 +23238,7 @@ static char *pg_cli_channel_gsm_action_at(struct ast_cli_entry *e, int cmd, stru
 		if ((ch_gsm->flags.enable) && ((ch_gsm->at_pipe[0] == -1) && (ch_gsm->at_pipe[1] == -1))) {
 			// fix asterisk CLI restrictions "!" -> "?"
 			cp = (char *)a->argv[5];
-			while (*cp)
-			{
+			while (*cp) {
 				if(*cp == '!') *cp = '?';
 				cp++;
 			}
