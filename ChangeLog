@@ -99,3 +99,5 @@ Fix polygator show vinetic CLI command.
 28.02.13
 FXS support rc1.
 FLASH HOOK detection, and CID Sender still under working.
+04.03.13
+Improved USSD response analyzer.
