@@ -328,6 +328,14 @@ enum {
 };
 
 enum {
+	PG_CALL_GSM_INCOMING_TYPE_UNKNOWN = -1,
+	PG_CALL_GSM_INCOMING_TYPE_DENY = 0,
+	PG_CALL_GSM_INCOMING_TYPE_DTMF = 1,
+	PG_CALL_GSM_INCOMING_TYPE_SPEC = 2,
+	PG_CALL_GSM_INCOMING_TYPE_DYN = 3,
+};
+
+enum {
 	PG_CALL_GSM_STATE_UNKNOWN = 0,
 	PG_CALL_GSM_STATE_NULL,
 	PG_CALL_GSM_STATE_OUTGOING_CALL_PROCEEDING,
@@ -359,38 +367,6 @@ enum {
 };
 
 enum {
-	PG_CALL_GSM_INCOMING_TYPE_UNKNOWN = -1,
-	PG_CALL_GSM_INCOMING_TYPE_DENY = 0,
-	PG_CALL_GSM_INCOMING_TYPE_DTMF = 1,
-	PG_CALL_GSM_INCOMING_TYPE_SPEC = 2,
-	PG_CALL_GSM_INCOMING_TYPE_DYN = 3,
-};
-
-struct pg_call_gsm {
-	int line;
-	u_int32_t hash;
-	int clcc_stat;
-	int clcc_mpty;
-	int state;
-	int direction;
-	int contest;
-	struct address called_name;
-	struct address calling_name;
-	struct pg_channel_gsm *channel_gsm;
-	struct pg_channel_rtp *channel_rtp;
-	struct ast_channel *owner;
-	struct pg_call_gsm_timers {
-		struct x_timer dial;
-		struct x_timer proceeding;
-	} timers;
-	struct timeval start_time;
-	struct timeval answer_time;
-	int hangup_side;
-	int hangup_cause;
-	AST_LIST_ENTRY(pg_call_gsm) entry;
-};
-
-enum {
 	PG_CALL_FXS_STATE_UNKNOWN = 0,
 	PG_CALL_FXS_STATE_NULL,
 	PG_CALL_FXS_STATE_OUTGOING_CALL_PROCEEDING,
@@ -415,17 +391,23 @@ enum {
 	PG_CALL_FXS_MSG_SETUP_RESPONSE,
 };
 
-struct pg_call_fxs {
+struct pg_call {
 	int line;
 	u_int32_t hash;
+	int clcc_stat;
+	int clcc_mpty;
 	int state;
 	int direction;
+	int contest;
 	struct address called_name;
 	struct address calling_name;
-	struct pg_channel_fxs *channel_fxs;
+	union {
+		struct pg_channel_gsm *gsm;
+		struct pg_channel_fxs *fxs;
+	} channel;
 	struct pg_channel_rtp *channel_rtp;
 	struct ast_channel *owner;
-	struct pg_call_fxs_timers {
+	struct pg_call_timers {
 		struct x_timer dial;
 		struct x_timer proceeding;
 	} timers;
@@ -433,7 +415,7 @@ struct pg_call_fxs {
 	struct timeval answer_time;
 	int hangup_side;
 	int hangup_cause;
-	AST_LIST_ENTRY(pg_call_fxs) entry;
+	AST_LIST_ENTRY(pg_call) entry;
 };
 
 enum {
@@ -654,7 +636,7 @@ struct pg_channel_gsm {
 	time_t acd;
 	int asr;
 
-	AST_LIST_HEAD_NOLOCK(gsm_call_list, pg_call_gsm) call_list;
+	AST_LIST_HEAD_NOLOCK(gsm_call_list, pg_call) call_list;
 	struct pg_channel_rtp *channel_rtp;
 	size_t channel_rtp_usage;
 
@@ -775,7 +757,7 @@ struct pg_channel_fxs {
 	time_t total_call_time_incoming;
 	time_t total_call_time_outgoing;
 
-	AST_LIST_HEAD_NOLOCK(fxs_call_list, pg_call_fxs) call_list;
+	AST_LIST_HEAD_NOLOCK(fxs_call_list, pg_call) call_list;
 	struct pg_channel_rtp *channel_rtp;
 	size_t channel_rtp_usage;
 
@@ -2779,7 +2761,7 @@ static void pg_cdr_table_create(ast_mutex_t *lock)
 //------------------------------------------------------------------------------
 // pg_cdr_table_insert_record()
 //------------------------------------------------------------------------------
-static void pg_cdr_table_insert_record(const char *channel, const char *imsi, struct pg_call_gsm *call, ast_mutex_t *lock)
+static void pg_cdr_table_insert_record(const char *channel, const char *imsi, struct pg_call *call, ast_mutex_t *lock)
 {
 	char *str;
 	int res;
@@ -4127,9 +4109,9 @@ static char *pg_call_fxs_message_to_string(int message)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_cal_direction_to_string()
+// pg_call_direction_to_string()
 //------------------------------------------------------------------------------
-static char *pg_cal_direction_to_string(int direction)
+static char *pg_call_direction_to_string(int direction)
 {
 	switch (direction) {
 		case PG_CALL_DIRECTION_OUTGOING: return "outgoing";
@@ -4138,7 +4120,7 @@ static char *pg_cal_direction_to_string(int direction)
 	}
 }
 //------------------------------------------------------------------------------
-// end of pg_cal_direction_to_string()
+// end of pg_call_direction_to_string()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -4165,7 +4147,7 @@ static inline int pg_is_channel_gsm_has_calls(struct pg_channel_gsm *ch_gsm)
 static inline int pg_is_channel_gsm_has_active_calls(struct pg_channel_gsm *ch_gsm)
 {
 	int res = 0;
-	struct pg_call_gsm *call;
+	struct pg_call *call;
 
 	if (ch_gsm) {
 		ast_mutex_lock(&ch_gsm->lock);
@@ -4189,7 +4171,7 @@ static inline int pg_is_channel_gsm_has_active_calls(struct pg_channel_gsm *ch_g
 static inline int pg_is_channel_gsm_has_same_requestor(struct pg_channel_gsm *ch_gsm, char *requestor)
 {
 	int res = 0;
-	struct pg_call_gsm *call;
+	struct pg_call *call;
 	struct address addr;
 
 	if (ch_gsm && requestor && strlen(requestor)) {
@@ -4223,7 +4205,7 @@ static inline int pg_is_channel_gsm_has_same_requestor(struct pg_channel_gsm *ch
 static inline int pg_is_channel_gsm_has_unconfirmed_calls(struct pg_channel_gsm *ch_gsm)
 {
 	int res = 0;
-	struct pg_call_gsm *call;
+	struct pg_call *call;
 
 	if (ch_gsm) {
 		ast_mutex_lock(&ch_gsm->lock);
@@ -4247,7 +4229,7 @@ static inline int pg_is_channel_gsm_has_unconfirmed_calls(struct pg_channel_gsm 
 static inline int pg_channel_gsm_get_calls_count(struct pg_channel_gsm *ch_gsm)
 {
 	int count = 0;
-	struct pg_call_gsm *call;
+	struct pg_call *call;
 
 	if (ch_gsm) {
 		ast_mutex_lock(&ch_gsm->lock);
@@ -4267,13 +4249,13 @@ static inline int pg_channel_gsm_get_calls_count(struct pg_channel_gsm *ch_gsm)
 //------------------------------------------------------------------------------
 // pg_channel_gsm_get_new_call()
 //------------------------------------------------------------------------------
-static inline struct pg_call_gsm *pg_channel_gsm_get_new_call(struct pg_channel_gsm *ch_gsm)
+static inline struct pg_call *pg_channel_gsm_get_new_call(struct pg_channel_gsm *ch_gsm)
 {
-	struct pg_call_gsm *call = NULL;
+	struct pg_call *call = NULL;
 	if (ch_gsm) {
 		ast_mutex_lock(&ch_gsm->lock);
-		if ((call = ast_calloc(1, sizeof(struct pg_call_gsm)))) {
-			call->channel_gsm = ch_gsm;
+		if ((call = ast_calloc(1, sizeof(struct pg_call)))) {
+			call->channel.gsm = ch_gsm;
 			call->state = PG_CALL_GSM_STATE_NULL;
 			gettimeofday(&call->start_time, NULL);
 			call->hash = ast_random();
@@ -4290,7 +4272,7 @@ static inline struct pg_call_gsm *pg_channel_gsm_get_new_call(struct pg_channel_
 //------------------------------------------------------------------------------
 // pg_channel_gsm_put_call()
 //------------------------------------------------------------------------------
-static inline void pg_channel_gsm_put_call(struct pg_channel_gsm *ch_gsm, struct pg_call_gsm *call)
+static inline void pg_channel_gsm_put_call(struct pg_channel_gsm *ch_gsm, struct pg_call *call)
 {
 	if (ch_gsm && call) {
 		ast_mutex_lock(&ch_gsm->lock);
@@ -4306,9 +4288,9 @@ static inline void pg_channel_gsm_put_call(struct pg_channel_gsm *ch_gsm, struct
 //------------------------------------------------------------------------------
 // pg_channel_gsm_get_call()
 //------------------------------------------------------------------------------
-static inline struct pg_call_gsm *pg_channel_gsm_get_call(struct pg_channel_gsm *ch_gsm, int line)
+static inline struct pg_call *pg_channel_gsm_get_call(struct pg_channel_gsm *ch_gsm, int line)
 {
-	struct pg_call_gsm *call = NULL;
+	struct pg_call *call = NULL;
 	if (ch_gsm) {
 		ast_mutex_lock(&ch_gsm->lock);
 		AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
@@ -4327,9 +4309,9 @@ static inline struct pg_call_gsm *pg_channel_gsm_get_call(struct pg_channel_gsm 
 //------------------------------------------------------------------------------
 // pg_channel_gsm_get_call_by_hash()
 //------------------------------------------------------------------------------
-static inline struct pg_call_gsm *pg_channel_gsm_get_call_by_hash(struct pg_channel_gsm *ch_gsm, u_int32_t hash)
+static inline struct pg_call *pg_channel_gsm_get_call_by_hash(struct pg_channel_gsm *ch_gsm, u_int32_t hash)
 {
-	struct pg_call_gsm *call = NULL;
+	struct pg_call *call = NULL;
 	if (ch_gsm) {
 		ast_mutex_lock(&ch_gsm->lock);
 		AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
@@ -4351,7 +4333,7 @@ static inline struct pg_call_gsm *pg_channel_gsm_get_call_by_hash(struct pg_chan
 static inline int pg_channel_fxs_get_calls_count(struct pg_channel_fxs *ch_fxs)
 {
 	int count = 0;
-	struct pg_call_fxs *call;
+	struct pg_call *call;
 
 	if (ch_fxs) {
 		ast_mutex_lock(&ch_fxs->lock);
@@ -4389,13 +4371,13 @@ static inline int pg_is_channel_fxs_has_calls(struct pg_channel_fxs *ch_fxs)
 //------------------------------------------------------------------------------
 // pg_channel_fxs_get_new_call()
 //------------------------------------------------------------------------------
-static inline struct pg_call_fxs *pg_channel_fxs_get_new_call(struct pg_channel_fxs *ch_fxs, int direction)
+static inline struct pg_call *pg_channel_fxs_get_new_call(struct pg_channel_fxs *ch_fxs, int direction)
 {
-	struct pg_call_fxs *call = NULL;
+	struct pg_call *call = NULL;
 	if (ch_fxs) {
 		ast_mutex_lock(&ch_fxs->lock);
-		if ((call = ast_calloc(1, sizeof(struct pg_call_fxs)))) {
-			call->channel_fxs = ch_fxs;
+		if ((call = ast_calloc(1, sizeof(struct pg_call)))) {
+			call->channel.fxs = ch_fxs;
 			call->state = PG_CALL_FXS_STATE_NULL;
 			call->direction = direction;
 			gettimeofday(&call->start_time, NULL);
@@ -4413,7 +4395,7 @@ static inline struct pg_call_fxs *pg_channel_fxs_get_new_call(struct pg_channel_
 //------------------------------------------------------------------------------
 // pg_channel_fxs_put_call()
 //------------------------------------------------------------------------------
-static inline void pg_channel_fxs_put_call(struct pg_channel_fxs *ch_fxs, struct pg_call_fxs *call)
+static inline void pg_channel_fxs_put_call(struct pg_channel_fxs *ch_fxs, struct pg_call *call)
 {
 	if (ch_fxs && call) {
 		ast_mutex_lock(&ch_fxs->lock);
@@ -4429,9 +4411,9 @@ static inline void pg_channel_fxs_put_call(struct pg_channel_fxs *ch_fxs, struct
 //------------------------------------------------------------------------------
 // pg_channel_fxs_get_call()
 //------------------------------------------------------------------------------
-static inline struct pg_call_fxs *pg_channel_fxs_get_call(struct pg_channel_fxs *ch_fxs, int line)
+static inline struct pg_call *pg_channel_fxs_get_call(struct pg_channel_fxs *ch_fxs, int line)
 {
-	struct pg_call_fxs *call = NULL;
+	struct pg_call *call = NULL;
 	if (ch_fxs) {
 		ast_mutex_lock(&ch_fxs->lock);
 		AST_LIST_TRAVERSE(&ch_fxs->call_list, call, entry) {
@@ -4450,9 +4432,9 @@ static inline struct pg_call_fxs *pg_channel_fxs_get_call(struct pg_channel_fxs 
 //------------------------------------------------------------------------------
 // pg_channel_fxs_get_call_by_hash()
 //------------------------------------------------------------------------------
-static inline struct pg_call_fxs *pg_channel_fxs_get_call_by_hash(struct pg_channel_fxs *ch_fxs, u_int32_t hash)
+static inline struct pg_call *pg_channel_fxs_get_call_by_hash(struct pg_channel_fxs *ch_fxs, u_int32_t hash)
 {
-	struct pg_call_fxs *call = NULL;
+	struct pg_call *call = NULL;
 	if (ch_fxs) {
 		ast_mutex_lock(&ch_fxs->lock);
 		AST_LIST_TRAVERSE(&ch_fxs->call_list, call, entry) {
@@ -6390,7 +6372,7 @@ static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
 //------------------------------------------------------------------------------
 // pg_channel_gsm_call_incoming()
 //------------------------------------------------------------------------------
-static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg_call_gsm* call)
+static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg_call* call)
 {
 	int res;
 	u_int32_t ch_id;
@@ -6785,10 +6767,10 @@ pg_channel_gsm_call_incoming_end:
 //------------------------------------------------------------------------------
 // pg_call_gsm_sm()
 //------------------------------------------------------------------------------
-static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
+static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 {
 	struct timeval curr_tv;
-	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
+	struct pg_channel_gsm *ch_gsm = call->channel.gsm;
 	int res = -1;
 	
 	ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s, message=%s\n",
@@ -7165,7 +7147,7 @@ static int pg_call_gsm_sm(struct pg_call_gsm* call, int message, int cause)
 //------------------------------------------------------------------------------
 // pg_channel_fxs_call_outgoing()
 //------------------------------------------------------------------------------
-static int pg_channel_fxs_call_outgoing(struct pg_channel_fxs *ch_fxs, struct pg_call_fxs *call)
+static int pg_channel_fxs_call_outgoing(struct pg_channel_fxs *ch_fxs, struct pg_call *call)
 {
 	int res;
 	u_int32_t ch_id;
@@ -7503,14 +7485,14 @@ pg_channel_fxs_call_outgoing_end:
 //------------------------------------------------------------------------------
 // pg_call_fxs_sm()
 //------------------------------------------------------------------------------
-static int pg_call_fxs_sm(struct pg_call_fxs* call, int message, int cause)
+static int pg_call_fxs_sm(struct pg_call* call, int message, int cause)
 {
 	char *tone;
 	struct ast_tone_zone *tone_zone;
 	struct ast_tone_zone_sound *tone_zone_sound;
 	struct pg_vinetic *vin;
 	struct timeval curr_tv;
-	struct pg_channel_fxs *ch_fxs = call->channel_fxs;
+	struct pg_channel_fxs *ch_fxs = call->channel.fxs;
 	int res = -1;
 
 	ast_debug(3, "FXS channel=\"%s\": call line=%d, state=%s, message=%s\n",
@@ -7889,7 +7871,7 @@ static void *pg_channel_gsm_workthread(void *data)
 	char tmpbuf[512];
 	struct pdu *pdu, *curr;
 
-	struct pg_call_gsm *call = NULL;
+	struct pg_call *call = NULL;
 
 	struct ast_channel *ast_ch_tmp = NULL;
 	
@@ -14109,7 +14091,7 @@ static void *pg_channel_fxs_workthread(void *data)
 	struct ast_frame frame;
 	struct ast_tone_zone *tone_zone;
 	struct ast_tone_zone_sound *tone_zone_sound;
-	struct pg_call_fxs *call;
+	struct pg_call *call;
 	struct pg_channel_fxs *ch_fxs = (struct pg_channel_fxs *)data;
 
 	ast_mutex_lock(&ch_fxs->lock);
@@ -15082,7 +15064,7 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 	struct pg_trunk_gsm *tr_gsm;
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold, *ch_gsm_fold_start;
 	struct pg_channel_gsm *ch_gsm, *ch_gsm_start;
-	struct pg_call_gsm *call;
+	struct pg_call *call;
 	struct pg_vinetic *vin;
 	struct pg_channel_rtp *rtp;
 	u_int32_t ch_id;
@@ -15877,11 +15859,11 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *dest, int timeout)
 	char called_name[MAX_ADDRESS_LENGTH];
 	time_t dial_timeout;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
+	struct pg_channel_gsm *ch_gsm = call->channel.gsm;
 
 	// parse destination
 	cpd = ast_strdupa(dest);
@@ -15964,14 +15946,14 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 	int res = 0;
 
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
 
 	if (!call) return res;
 
-	ch_gsm = call->channel_gsm;
+	ch_gsm = call->channel.gsm;
 	
 	ast_mutex_lock(&ch_gsm->lock);
 
@@ -16083,11 +16065,11 @@ static int pg_gsm_answer(struct ast_channel *ast_ch)
 {
 	int res;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
+	struct pg_channel_gsm *ch_gsm = call->channel.gsm;
 
 	ast_verb(4, "GSM channel=\"%s\": call line=%d answer\n", ch_gsm->alias, call->line);
 
@@ -16120,11 +16102,11 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 	struct ast_channel *bridge;
 	int res = -1;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
+	struct pg_channel_gsm *ch_gsm = call->channel.gsm;
 
 	ast_mutex_lock(&ch_gsm->lock);
 
@@ -16407,9 +16389,9 @@ static int pg_gsm_write(struct ast_channel *ast_ch, struct ast_frame *frame)
 	int rc;
 	int send_len;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
 	struct pg_channel_rtp *rtp = call->channel_rtp;
 
@@ -16521,9 +16503,9 @@ static struct ast_frame *pg_gsm_read(struct ast_channel *ast_ch)
 	unsigned int ssrc;
 
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
 	struct pg_channel_rtp *rtp = call->channel_rtp;
 
@@ -16741,11 +16723,11 @@ static int pg_gsm_fixup(struct ast_channel *old_ast_ch, struct ast_channel *new_
 		return 0;
 	}
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(old_ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(old_ast_ch);
 #else
-	struct pg_call_gsm *call = old_ast_ch->tech_pvt;
+	struct pg_call *call = old_ast_ch->tech_pvt;
 #endif
-	ch_gsm = call->channel_gsm;
+	ch_gsm = call->channel.gsm;
 
 	ast_mutex_lock(&ch_gsm->lock);
 
@@ -16774,11 +16756,11 @@ static int pg_gsm_fixup(struct ast_channel *old_ast_ch, struct ast_channel *new_
 static int pg_gsm_dtmf_start(struct ast_channel *ast_ch, char digit)
 {
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
+	struct pg_channel_gsm *ch_gsm = call->channel.gsm;
 
 	ast_mutex_lock(&ch_gsm->lock);
 
@@ -16823,11 +16805,11 @@ static int pg_gsm_dtmf_start(struct ast_channel *ast_ch, char digit)
 static int pg_gsm_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int duration)
 {
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_gsm *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_gsm *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_gsm *ch_gsm = call->channel_gsm;
+	struct pg_channel_gsm *ch_gsm = call->channel.gsm;
 
 	ast_mutex_lock(&ch_gsm->lock);
 
@@ -16869,7 +16851,7 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 	ssize_t res;
 	struct ast_channel *ast_ch;
 	struct pg_channel_fxs *ch_fxs;
-	struct pg_call_fxs *call;
+	struct pg_call *call;
 	struct pg_vinetic *vin;
 	struct pg_channel_rtp *rtp;
 	u_int32_t ch_id;
@@ -17326,12 +17308,11 @@ static int pg_fxs_call(struct ast_channel *ast_ch, char *dest, int timeout)
 {
 	time_t dial_timeout;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_fxs *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_fxs *ch_fxs = call->channel_fxs;
-
+	struct pg_channel_fxs *ch_fxs = call->channel.fxs;
 
 	ast_mutex_lock(&ch_fxs->lock);
 
@@ -17388,14 +17369,14 @@ static int pg_fxs_hangup(struct ast_channel *ast_ch)
 	int res = 0;
 
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_fxs *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
 
 	if (!call) return res;
 
-	ch_fxs = call->channel_fxs;
+	ch_fxs = call->channel.fxs;
 	
 	ast_mutex_lock(&ch_fxs->lock);
 
@@ -17591,11 +17572,11 @@ static int pg_fxs_answer(struct ast_channel *ast_ch)
 {
 	int res;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_fxs *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_fxs *ch_fxs = call->channel_fxs;
+	struct pg_channel_fxs *ch_fxs = call->channel.fxs;
 
 	ast_verb(4, "FXS channel=\"%s\": call line=%d answer\n", ch_fxs->alias, call->line);
 
@@ -17629,11 +17610,11 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 	struct ast_channel *bridge;
 	int res = -1;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_fxs *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_fxs *ch_fxs = call->channel_fxs;
+	struct pg_channel_fxs *ch_fxs = call->channel.fxs;
 
 	ast_mutex_lock(&ch_fxs->lock);
 
@@ -18119,9 +18100,9 @@ static int pg_fxs_write(struct ast_channel *ast_ch, struct ast_frame *frame)
 	int rc;
 	int send_len;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_fxs *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
 	struct pg_channel_rtp *rtp = call->channel_rtp;
 
@@ -18236,12 +18217,12 @@ static struct ast_frame *pg_fxs_read(struct ast_channel *ast_ch)
 
 
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_fxs *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
 	struct pg_channel_rtp *rtp = call->channel_rtp;
-	struct pg_channel_fxs *ch_fxs = call->channel_fxs;
+	struct pg_channel_fxs *ch_fxs = call->channel.fxs;
 
 	ast_mutex_lock(&rtp->lock);
 
@@ -18483,11 +18464,11 @@ static int pg_fxs_fixup(struct ast_channel *old_ast_ch, struct ast_channel *new_
 		return 0;
 	}
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_fxs *call = ast_channel_tech_pvt(old_ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(old_ast_ch);
 #else
-	struct pg_call_fxs *call = old_ast_ch->tech_pvt;
+	struct pg_call *call = old_ast_ch->tech_pvt;
 #endif
-	ch_fxs = call->channel_fxs;
+	ch_fxs = call->channel.fxs;
 
 	ast_mutex_lock(&ch_fxs->lock);
 
@@ -18519,11 +18500,11 @@ static int pg_fxs_dtmf_start(struct ast_channel *ast_ch, char digit)
 	int res = -1;
 	struct pg_vinetic *vin;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_fxs *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_fxs *ch_fxs = call->channel_fxs;
+	struct pg_channel_fxs *ch_fxs = call->channel.fxs;
 
 	ast_mutex_lock(&ch_fxs->lock);
 
@@ -18619,11 +18600,11 @@ static int pg_fxs_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int 
 {
 	struct pg_vinetic *vin;
 #if ASTERISK_VERSION_NUMBER >= 110000
-	struct pg_call_fxs *call = ast_channel_tech_pvt(ast_ch);
+	struct pg_call *call = ast_channel_tech_pvt(ast_ch);
 #else
-	struct pg_call_fxs *call = ast_ch->tech_pvt;
+	struct pg_call *call = ast_ch->tech_pvt;
 #endif
-	struct pg_channel_fxs *ch_fxs = call->channel_fxs;
+	struct pg_channel_fxs *ch_fxs = call->channel.fxs;
 
 	ast_mutex_lock(&ch_fxs->lock);
 
@@ -20188,9 +20169,8 @@ static char *pg_cli_show_trunks(struct ast_cli_entry *e, int cmd, struct ast_cli
 static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	struct pg_channel_gsm *ch_gsm;
-	struct pg_call_gsm *call_gsm;
 	struct pg_channel_fxs *ch_fxs;
-	struct pg_call_fxs *call_fxs;
+	struct pg_call *call;
 	struct timeval tv;
 	char calling[MAX_ADDRESS_LENGTH];
 	char called[MAX_ADDRESS_LENGTH];
@@ -20247,15 +20227,15 @@ static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_
 	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
 		channel_fl = mmax(channel_fl, strlen(ch_gsm->alias));
-		AST_LIST_TRAVERSE(&ch_gsm->call_list, call_gsm, entry) {
+		AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
 			number_fl = mmax(number_fl, snprintf(numbuf, sizeof(numbuf), "%lu", (unsigned long int)total));
-			line_fl = mmax(line_fl, snprintf(linbuf, sizeof(linbuf), "%d", call_gsm->line));
-			state_fl = mmax(state_fl, strlen(pg_call_gsm_state_to_string(call_gsm->state)));
-			direction_fl = mmax(direction_fl, strlen(pg_cal_direction_to_string(call_gsm->direction)));
-			calling_fl = mmax(calling_fl, snprintf(calling, sizeof(calling), "%s%s", (call_gsm->calling_name.type.full == 145)?("+"):(""), call_gsm->calling_name.value));
-			called_fl = mmax(called_fl, snprintf(called, sizeof(called), "%s%s", (call_gsm->called_name.type.full == 145)?("+"):(""), call_gsm->called_name.value));
-			duration_fl = mmax(duration_fl, snprintf(durbuf, sizeof(durbuf), "%ld", (long int)(tv.tv_sec - call_gsm->start_time.tv_sec)));
-			billing_fl = mmax(billing_fl, snprintf(bilbuf, sizeof(bilbuf), "%ld", (long int)((call_gsm->answer_time.tv_sec)?(tv.tv_sec - call_gsm->answer_time.tv_sec):(0))));
+			line_fl = mmax(line_fl, snprintf(linbuf, sizeof(linbuf), "%d", call->line));
+			state_fl = mmax(state_fl, strlen(pg_call_gsm_state_to_string(call->state)));
+			direction_fl = mmax(direction_fl, strlen(pg_call_direction_to_string(call->direction)));
+			calling_fl = mmax(calling_fl, snprintf(calling, sizeof(calling), "%s%s", (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value));
+			called_fl = mmax(called_fl, snprintf(called, sizeof(called), "%s%s", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value));
+			duration_fl = mmax(duration_fl, snprintf(durbuf, sizeof(durbuf), "%ld", (long int)(tv.tv_sec - call->start_time.tv_sec)));
+			billing_fl = mmax(billing_fl, snprintf(bilbuf, sizeof(bilbuf), "%ld", (long int)((call->answer_time.tv_sec)?(tv.tv_sec - call->answer_time.tv_sec):(0))));
 			total++;
 			count_gsm++;
 		}
@@ -20265,15 +20245,15 @@ static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_
 	AST_LIST_TRAVERSE(&pg_general_channel_fxs_list, ch_fxs, pg_general_channel_fxs_list_entry) {
 		ast_mutex_lock(&ch_fxs->lock);
 		channel_fl = mmax(channel_fl, strlen(ch_fxs->alias));
-		AST_LIST_TRAVERSE(&ch_fxs->call_list, call_fxs, entry) {
+		AST_LIST_TRAVERSE(&ch_fxs->call_list, call, entry) {
 			number_fl = mmax(number_fl, snprintf(numbuf, sizeof(numbuf), "%lu", (unsigned long int)total));
-			line_fl = mmax(line_fl, snprintf(linbuf, sizeof(linbuf), "%d", call_fxs->line));
-			state_fl = mmax(state_fl, strlen(pg_call_fxs_state_to_string(call_fxs->state)));
-			direction_fl = mmax(direction_fl, strlen(pg_cal_direction_to_string(call_fxs->direction)));
-			calling_fl = mmax(calling_fl, snprintf(calling, sizeof(calling), "%s%s", (call_fxs->calling_name.type.full == 145)?("+"):(""), call_fxs->calling_name.value));
-			called_fl = mmax(called_fl, snprintf(called, sizeof(called), "%s%s", (call_fxs->called_name.type.full == 145)?("+"):(""), call_fxs->called_name.value));
-			duration_fl = mmax(duration_fl, snprintf(durbuf, sizeof(durbuf), "%ld", (long int)(tv.tv_sec - call_fxs->start_time.tv_sec)));
-			billing_fl = mmax(billing_fl, snprintf(bilbuf, sizeof(bilbuf), "%ld", (long int)((call_fxs->answer_time.tv_sec)?(tv.tv_sec - call_fxs->answer_time.tv_sec):(0))));
+			line_fl = mmax(line_fl, snprintf(linbuf, sizeof(linbuf), "%d", call->line));
+			state_fl = mmax(state_fl, strlen(pg_call_fxs_state_to_string(call->state)));
+			direction_fl = mmax(direction_fl, strlen(pg_call_direction_to_string(call->direction)));
+			calling_fl = mmax(calling_fl, snprintf(calling, sizeof(calling), "%s%s", (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value));
+			called_fl = mmax(called_fl, snprintf(called, sizeof(called), "%s%s", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value));
+			duration_fl = mmax(duration_fl, snprintf(durbuf, sizeof(durbuf), "%ld", (long int)(tv.tv_sec - call->start_time.tv_sec)));
+			billing_fl = mmax(billing_fl, snprintf(bilbuf, sizeof(bilbuf), "%ld", (long int)((call->answer_time.tv_sec)?(tv.tv_sec - call->answer_time.tv_sec):(0))));
 			total++;
 			count_fxs++;
 		}
@@ -20296,19 +20276,19 @@ static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_
 				billing_fl, "Billing");
 		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 			ast_mutex_lock(&ch_gsm->lock);
-			AST_LIST_TRAVERSE(&ch_gsm->call_list, call_gsm, entry) {
+			AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
 				snprintf(numbuf, sizeof(numbuf), "%lu", (unsigned long int)total);
-				snprintf(linbuf, sizeof(linbuf), "%d", call_gsm->line);
-				snprintf(calling, sizeof(calling), "%s%s", (call_gsm->calling_name.type.full == 145)?("+"):(""), call_gsm->calling_name.value);
-				snprintf(called, sizeof(called), "%s%s", (call_gsm->called_name.type.full == 145)?("+"):(""), call_gsm->called_name.value);
-				snprintf(durbuf, sizeof(durbuf), "%ld", (long int)(tv.tv_sec - call_gsm->start_time.tv_sec));
-				snprintf(bilbuf, sizeof(bilbuf), "%ld", (long int)((call_gsm->answer_time.tv_sec)?(tv.tv_sec - call_gsm->answer_time.tv_sec):(0)));
+				snprintf(linbuf, sizeof(linbuf), "%d", call->line);
+				snprintf(calling, sizeof(calling), "%s%s", (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
+				snprintf(called, sizeof(called), "%s%s", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
+				snprintf(durbuf, sizeof(durbuf), "%ld", (long int)(tv.tv_sec - call->start_time.tv_sec));
+				snprintf(bilbuf, sizeof(bilbuf), "%ld", (long int)((call->answer_time.tv_sec)?(tv.tv_sec - call->answer_time.tv_sec):(0)));
 				ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %*s | %*s |\n",
 						number_fl, numbuf,
 						channel_fl, ch_gsm->alias,
 						line_fl, linbuf,
-						state_fl, pg_call_gsm_state_to_string(call_gsm->state),
-						direction_fl, pg_cal_direction_to_string(call_gsm->direction),
+						state_fl, pg_call_gsm_state_to_string(call->state),
+						direction_fl, pg_call_direction_to_string(call->direction),
 						calling_fl, calling,
 						called_fl, called,
 						duration_fl, durbuf,
@@ -20334,19 +20314,19 @@ static char *pg_cli_show_calls(struct ast_cli_entry *e, int cmd, struct ast_cli_
 				billing_fl, "Billing");
 		AST_LIST_TRAVERSE(&pg_general_channel_fxs_list, ch_fxs, pg_general_channel_fxs_list_entry) {
 			ast_mutex_lock(&ch_fxs->lock);
-			AST_LIST_TRAVERSE(&ch_fxs->call_list, call_fxs, entry) {
+			AST_LIST_TRAVERSE(&ch_fxs->call_list, call, entry) {
 				snprintf(numbuf, sizeof(numbuf), "%lu", (unsigned long int)total);
-				snprintf(linbuf, sizeof(linbuf), "%d", call_fxs->line);
-				snprintf(calling, sizeof(calling), "%s%s", (call_fxs->calling_name.type.full == 145)?("+"):(""), call_fxs->calling_name.value);
-				snprintf(called, sizeof(called), "%s%s", (call_fxs->called_name.type.full == 145)?("+"):(""), call_fxs->called_name.value);
-				snprintf(durbuf, sizeof(durbuf), "%ld", (long int)(tv.tv_sec - call_fxs->start_time.tv_sec));
-				snprintf(bilbuf, sizeof(bilbuf), "%ld", (long int)((call_fxs->answer_time.tv_sec)?(tv.tv_sec - call_fxs->answer_time.tv_sec):(0)));
+				snprintf(linbuf, sizeof(linbuf), "%d", call->line);
+				snprintf(calling, sizeof(calling), "%s%s", (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
+				snprintf(called, sizeof(called), "%s%s", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
+				snprintf(durbuf, sizeof(durbuf), "%ld", (long int)(tv.tv_sec - call->start_time.tv_sec));
+				snprintf(bilbuf, sizeof(bilbuf), "%ld", (long int)((call->answer_time.tv_sec)?(tv.tv_sec - call->answer_time.tv_sec):(0)));
 				ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %*s | %*s |\n",
 						number_fl, numbuf,
 						channel_fl, ch_fxs->alias,
 						line_fl, linbuf,
-						state_fl, pg_call_fxs_state_to_string(call_fxs->state),
-						direction_fl, pg_cal_direction_to_string(call_fxs->direction),
+						state_fl, pg_call_fxs_state_to_string(call->state),
+						direction_fl, pg_call_direction_to_string(call->direction),
 						calling_fl, calling,
 						called_fl, called,
 						duration_fl, durbuf,
