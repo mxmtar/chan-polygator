@@ -186,12 +186,6 @@ struct pg_at_cmd {
 	AST_LIST_ENTRY(pg_at_cmd) entry;
 };
 
-enum {
-	PG_VINETIC_STATE_INIT = 1,
-	PG_VINETIC_STATE_IDLE,
-	PG_VINETIC_STATE_RUN,
-};
-
 struct pg_channel_gsm;
 struct pg_channel_fxs;
 struct pg_vinetic;
@@ -217,6 +211,13 @@ struct pg_board {
 	AST_LIST_ENTRY(pg_board) pg_general_board_list_entry;
 };
 
+enum {
+	PG_VINETIC_STATE_INIT = 1,
+	PG_VINETIC_STATE_IDLE,
+	PG_VINETIC_STATE_RUN,
+	PG_VINETIC_STATE_SUSPEND,
+};
+
 struct pg_vinetic {
 	// vinetic private lock
 	ast_mutex_t lock;
@@ -236,6 +237,11 @@ struct pg_vinetic {
 
 	int run;
 	int state;
+	int attempt;
+	
+	struct pg_vinetic_timers {
+		struct x_timer suspend;
+	} timers;
 
 	int patch_alm_gsm[4];
 
@@ -3915,8 +3921,9 @@ static inline int pg_is_vinetic_run(struct pg_vinetic *vin)
 
 	if (vin) {
 		ast_mutex_lock(&vin->lock);
-		if (vin->state == PG_VINETIC_STATE_RUN)
+		if (vin->state == PG_VINETIC_STATE_RUN) {
 			res = 1;
+		}
 		ast_mutex_unlock(&vin->lock);
 	}
 
@@ -5706,8 +5713,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	t_size = sim900_cmd_erase_mem_reg_size();
 	t_pos = 0;
 	x_timer_set_second(timer, t_size/1000 + 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = (t_size - t_pos) * 1000;
 		FD_ZERO(&fds);
@@ -5740,8 +5746,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for success indication 0x09
 	state = "wait for success indication (0x09)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5776,8 +5781,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// write command
 	state = "write command";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 1000;
 		FD_ZERO(&fds);
@@ -5808,8 +5812,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// read marker 0x03
 	state = "read marker (0x03)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5841,8 +5844,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for erase 0x30
 	state = "wait for erase (0x30)";
 	x_timer_set_second(timer, 300);
-	while(is_x_timer_active(timer))
-	{
+	while(is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5881,8 +5883,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	t_size = sim900_cmd_sel_mem_reg_size();
 	t_pos = 0;
 	x_timer_set_second(timer, t_size/1000 + 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = (t_size - t_pos) * 1000;
 		FD_ZERO(&fds);
@@ -5947,8 +5948,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	}
 
 	// Write code page with IMEI
-	for (i=0; i<32; i++)
-	{
+	for (i=0; i<32; i++) {
 		// Set downloaded code section
 		action = "Set downloaded code section";
 		// write command
@@ -5957,8 +5957,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 		t_size = sim900_cmd_set_code_section_size();
 		t_pos = 0;
 		x_timer_set_second(timer, t_size/1000 + 1);
-		while (is_x_timer_active(timer))
-		{
+		while (is_x_timer_active(timer)) {
 			timeout.tv_sec = 0;
 			timeout.tv_usec = (t_size - t_pos) * 1000;
 			FD_ZERO(&fds);
@@ -5991,8 +5990,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 		// read marker 0x01
 		state = "read marker (0x01)";
 		x_timer_set_second(timer, 1);
-		while (is_x_timer_active(timer))
-		{
+		while (is_x_timer_active(timer)) {
 			timeout.tv_sec = 1;
 			timeout.tv_usec = 0;
 			FD_ZERO(&fds);
@@ -6009,7 +6007,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 							goto pg_channel_gsm_write_imei_sim900_end;
 						}
 					} else if (res == 1) {
-						if (t_char == 0x01) break;
+						if (t_char == 0x01) {
+							break;
+						}
 					}
 				}
 			} else if (res < 0) {
@@ -6030,8 +6030,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 		t_size = 0x800;
 		t_pos = 0;
 		x_timer_set_second(timer, t_size/1000 + 1);
-		while (is_x_timer_active(timer))
-		{
+		while (is_x_timer_active(timer)) {
 			timeout.tv_sec = 0;
 			timeout.tv_usec = (t_size - t_pos) * 1000;
 			FD_ZERO(&fds);
@@ -6049,7 +6048,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						}
 					} else if (res > 0) {
 						t_pos += res;
-						if (t_size == t_pos) break;
+						if (t_size == t_pos) {
+							break;
+						}
 					}
 				}
 			} else if (res < 0) {
@@ -6064,8 +6065,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 		// read marker 0x2e
 		state = "read marker (0x2e)";
 		x_timer_set_second(timer, 1);
-		while (is_x_timer_active(timer))
-		{
+		while (is_x_timer_active(timer)) {
 			timeout.tv_sec = 1;
 			timeout.tv_usec = 0;
 			FD_ZERO(&fds);
@@ -6082,7 +6082,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 							goto pg_channel_gsm_write_imei_sim900_end;
 						}
 					} else if (res == 1) {
-						if (t_char == 0x2e) break;
+						if (t_char == 0x2e) {
+							break;
+						}
 					}
 				}
 			} else if (res < 0) {
@@ -6097,8 +6099,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 		// read marker 0x30
 		state = "read marker (0x30)";
 		x_timer_set_second(timer, 1);
-		while (is_x_timer_active(timer))
-		{
+		while (is_x_timer_active(timer)) {
 			timeout.tv_sec = 1;
 			timeout.tv_usec = 0;
 			FD_ZERO(&fds);
@@ -6115,7 +6116,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 							goto pg_channel_gsm_write_imei_sim900_end;
 						}
 					} else if (res == 1) {
-						if (t_char == 0x30) break;
+						if (t_char == 0x30) {
+							break;
+						}
 					}
 				}
 			} else if (res < 0) {
@@ -6137,8 +6140,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	t_size = sim900_cmd_erase_mem_reg_size();
 	t_pos = 0;
 	x_timer_set_second(timer, t_size/1000 + 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = (t_size - t_pos) * 1000;
 		FD_ZERO(&fds);
@@ -6156,7 +6158,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 					}
 				} else if (res > 0) {
 					t_pos += res;
-					if (t_size == t_pos) break;
+					if (t_size == t_pos) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6171,8 +6175,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for success indication 0x09
 	state = "wait for success indication (0x09)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -6189,7 +6192,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x09) break;
+					if (t_char == 0x09) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6207,8 +6212,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// write command
 	state = "write command";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 1000;
 		FD_ZERO(&fds);
@@ -6225,7 +6229,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
-				} if (res == 1) break;
+				} if (res == 1) {
+					break;
+				}
 			}
 		} if (res < 0) {
 			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
@@ -6239,8 +6245,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// read marker 0x03
 	state = "read marker (0x03)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -6257,7 +6262,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x03) break;
+					if (t_char == 0x03) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6272,8 +6279,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for erase 0x30
 	state = "wait for erase (0x30)";
 	x_timer_set_second(timer, 300);
-	while(is_x_timer_active(timer))
-	{
+	while(is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -6290,7 +6296,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x30) break;
+					if (t_char == 0x30) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -13723,10 +13731,26 @@ static void *pg_vinetic_workthread(void *data)
 					ast_mutex_unlock(&vin->lock);
 					goto pg_vinetic_workthread_end;
 				}
+				vin->attempt = 0;
 				vin->state = PG_VINETIC_STATE_IDLE;
+				break;
+			case PG_VINETIC_STATE_SUSPEND:
+				ast_debug(3, "vinetic=\"%s\": suspend\n", vin->name);
+				usleep(1000);
+				// timer suspend
+				if (is_x_timer_enable(vin->timers.suspend) && is_x_timer_fired(vin->timers.suspend)) {
+					x_timer_stop(vin->timers.suspend);
+					vin->attempt = 0;
+					vin->state = PG_VINETIC_STATE_IDLE;
+				}
 				break;
 			case PG_VINETIC_STATE_IDLE:
 				ast_debug(3, "vinetic=\"%s\": idle\n", vin->name);
+				if (vin->attempt++ == 4) {
+					x_timer_set_second(vin->timers.suspend, 5);
+					vin->state = PG_VINETIC_STATE_SUSPEND;
+					break;
+				}
 				ast_verb(3, "vinetic=\"%s\": start downloading firmware\n", vin->name);
 				// disable polling
 				if (vin_poll_disable(&vin->context) < 0) {
@@ -14046,6 +14070,7 @@ static void *pg_vinetic_workthread(void *data)
 				}
 				ast_verb(3, "vinetic=\"%s\": firmware downloading succeeded\n", vin->name);
 				vin->state = PG_VINETIC_STATE_RUN;
+				vin->attempt = 0;
 				ast_debug(3, "vinetic=\"%s\": run\n", vin->name);
 				// set vinetic's module state to previous state - for fallback purpose after reset
 				// set SLIC's operation mode
