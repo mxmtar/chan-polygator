@@ -188,6 +188,7 @@ struct pg_at_cmd {
 
 struct pg_channel_gsm;
 struct pg_channel_fxs;
+struct pg_channel_fxo;
 struct pg_vinetic;
 struct pg_channel_rtp;
 
@@ -342,11 +343,10 @@ enum {
 };
 
 enum {
-	PG_CALL_GSM_INCOMING_TYPE_UNKNOWN = -1,
-	PG_CALL_GSM_INCOMING_TYPE_DENY = 0,
-	PG_CALL_GSM_INCOMING_TYPE_DTMF = 1,
-	PG_CALL_GSM_INCOMING_TYPE_SPEC = 2,
-	PG_CALL_GSM_INCOMING_TYPE_DYN = 3,
+	PG_CALL_INCOMING_TYPE_UNKNOWN = -1,
+	PG_CALL_INCOMING_TYPE_DENY = 0,
+	PG_CALL_INCOMING_TYPE_SPEC = 1,
+	PG_CALL_INCOMING_TYPE_DYN = 2,
 };
 
 enum {
@@ -684,7 +684,7 @@ enum {
 };
 
 struct pg_channel_fxs {
-	// FXS channel private lock
+
 	ast_mutex_t lock;
 	pthread_t thread;
 
@@ -779,6 +779,82 @@ struct pg_channel_fxs {
 	AST_LIST_ENTRY(pg_channel_fxs) pg_board_channel_fxs_list_entry;
 	// entry for general channel list
 	AST_LIST_ENTRY(pg_channel_fxs) pg_general_channel_fxs_list_entry;
+};
+
+struct pg_channel_fxo {
+
+	ast_mutex_t lock;
+	pthread_t thread;
+
+	char *device;
+
+	unsigned int position_on_board;
+	struct pg_board *board;
+
+	unsigned int vinetic_number;
+	int vinetic_alm_slot;
+	int vinetic_sig_slot;
+
+	char *alias;
+
+	// configuration
+	struct pg_channel_fxo_config {
+		int enable;
+		int incoming_perm;
+		int outgoing_perm;
+		char context[AST_MAX_CONTEXT];
+		char extension[AST_MAX_EXTENSION];
+		char language[MAX_LANGUAGE];
+		char tonezone[16];
+		char mohinterpret[MAX_MUSICCLASS];
+		unsigned int gain1;
+		unsigned int gain2;
+		unsigned int gainx;
+		unsigned int gainr;
+		int ali_nelec;
+		int ali_nelec_tm;
+		int ali_nelec_oldc;
+		int ali_nelec_as;
+		int ali_nelec_nlp;
+		int ali_nelec_nlpm;
+		int offhook_min;
+		int onhook_min;
+		int flashhook_min;
+		int flashhook_max;
+		int digit_pulse_min;
+		int digit_pulse_max;
+		int digit_pause_min;
+		int digit_pause_max;
+		int digit_inter_min;
+	} config;
+
+	// runtime flags
+	struct pg_channel_fxo_flags {
+		unsigned int enable:1;
+		unsigned int shutdown:1;
+		unsigned int shutdown_now:1;
+	} flags;
+
+	// timers
+	struct pg_channel_fxo_timers {
+		struct x_timer ringing;
+	} timers;
+
+	// Runtime data
+
+	time_t last_call_time_incoming;
+	time_t last_call_time_outgoing;
+	time_t total_call_time_incoming;
+	time_t total_call_time_outgoing;
+
+	AST_LIST_HEAD_NOLOCK(fxo_call_list, pg_call) call_list;
+	struct pg_channel_rtp *channel_rtp;
+	size_t channel_rtp_usage;
+
+	// entry for board channel list
+	AST_LIST_ENTRY(pg_channel_fxo) pg_board_channel_fxo_list_entry;
+	// entry for general channel list
+	AST_LIST_ENTRY(pg_channel_fxo) pg_general_channel_fxo_list_entry;
 };
 
 //------------------------------------------------------------------------------
@@ -1152,12 +1228,11 @@ static struct pg_generic_param pg_channel_gsm_debugs[] = {
 	PG_GENERIC_PARAM("receiver", PG_CHANNEL_GSM_DEBUG_RECEIVER),
 };
 
-// polygator gsm incoming call types
-static struct pg_generic_param pg_call_gsm_incoming_types[] = {
-	PG_GENERIC_PARAM("deny", PG_CALL_GSM_INCOMING_TYPE_DENY),
-	PG_GENERIC_PARAM("dtmf", PG_CALL_GSM_INCOMING_TYPE_DTMF),
-	PG_GENERIC_PARAM("spec", PG_CALL_GSM_INCOMING_TYPE_SPEC),
-	PG_GENERIC_PARAM("dyn", PG_CALL_GSM_INCOMING_TYPE_DYN),
+// polygator call incoming  types
+static struct pg_generic_param pg_call_incoming_types[] = {
+	PG_GENERIC_PARAM("deny", PG_CALL_INCOMING_TYPE_DENY),
+	PG_GENERIC_PARAM("spec", PG_CALL_INCOMING_TYPE_SPEC),
+	PG_GENERIC_PARAM("dyn", PG_CALL_INCOMING_TYPE_DYN),
 };
 // polygator call permissions
 static struct pg_generic_param pg_call_permissions[] = {
@@ -3634,16 +3709,16 @@ static char *pg_call_gsm_progress_to_string(int progress)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_get_call_gsm_incoming_type()
+// pg_call_get_incoming_type()
 //------------------------------------------------------------------------------
-static int pg_get_call_gsm_incoming_type(const char *incoming)
+static int pg_call_get_incoming_type(const char *incoming)
 {
 	size_t i;
-	int inc = PG_CALL_GSM_INCOMING_TYPE_UNKNOWN;
+	int inc = PG_CALL_INCOMING_TYPE_UNKNOWN;
 	if (incoming) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_incoming_types); i++) {
-			if (!strcmp(incoming, pg_call_gsm_incoming_types[i].name)) {
-				inc = pg_call_gsm_incoming_types[i].id;
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); i++) {
+			if (!strcmp(incoming, pg_call_incoming_types[i].name)) {
+				inc = pg_call_incoming_types[i].id;
 				break;
 			}
 		}
@@ -3651,7 +3726,7 @@ static int pg_get_call_gsm_incoming_type(const char *incoming)
 	return inc;
 }
 //------------------------------------------------------------------------------
-// end of pg_get_call_gsm_incoming_type()
+// end of pg_call_get_incoming_type()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -3660,9 +3735,9 @@ static int pg_get_call_gsm_incoming_type(const char *incoming)
 static char *pg_call_gsm_incoming_type_to_string(int incoming)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_incoming_types); i++) {
-		if (incoming == pg_call_gsm_incoming_types[i].id)
-			return pg_call_gsm_incoming_types[i].name;
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); i++) {
+		if (incoming == pg_call_incoming_types[i].id)
+			return pg_call_incoming_types[i].name;
 	}
 	return "unknown";
 }
@@ -4546,10 +4621,11 @@ static int pg_atcommand_queue_prepend(struct pg_channel_gsm* ch_gsm,
 	cmd->oper = oper;
 	cmd->at = at;
 	cmd->show = show;
-	if (cmd->timeout >= 60)
+	if (cmd->timeout >= 60) {
 		cmd->attempt = 0;
-	else
+	} else {
 		cmd->attempt = 5;
+	}
 	// build command
 	if (fmt) {
 		cmd->cmd_len = 0;
@@ -4624,10 +4700,11 @@ static int pg_atcommand_queue_append(struct pg_channel_gsm* ch_gsm,
 	cmd->oper = oper;
 	cmd->at = at;
 	cmd->show = show;
-	if (cmd->timeout >= 60)
+	if (cmd->timeout >= 60) {
 		cmd->attempt = 0;
-	else
+	} else {
 		cmd->attempt = 5;
+	}
 	// build command
 	if (fmt) {
 		cmd->cmd_len = 0;
@@ -4636,9 +4713,9 @@ static int pg_atcommand_queue_append(struct pg_channel_gsm* ch_gsm,
 		cmd->cmd_len += vsprintf(cmd->cmd_buf + cmd->cmd_len, fmt, vargs);
 		va_end(vargs);
 		cmd->cmd_len += sprintf(cmd->cmd_buf + cmd->cmd_len, "\r");
-	} else
+	} else {
 		cmd->cmd_len = sprintf(cmd->cmd_buf, "%s%s\r", cmd->at->name, opstr);
-
+	}
 	// append to tail of queue
 	AST_LIST_INSERT_TAIL(&ch_gsm->cmd_queue, cmd, entry);
 
@@ -6376,10 +6453,11 @@ static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
 	ch_gsm->ber = 99;
 
 	if (strlen(ch_gsm->imei_new)) {
-		if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300)
+		if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
 			pg_channel_gsm_write_imei_sim300(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
-		else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10)
+		} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 			pg_channel_gsm_write_imei_m10(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
+		}
 		ch_gsm->imei_new[0] = '\0';
 	}
 
@@ -6737,8 +6815,6 @@ pg_channel_gsm_call_incoming_end:
 	// init asterisk channel tag's
 #if ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
-	ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
-	ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -6746,15 +6822,13 @@ pg_channel_gsm_call_incoming_end:
 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
-	ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
-	ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = rtp->format;
+	ast_ch->nativeformats = vin->capabilities;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -6939,27 +7013,22 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 			ast_channel_unlock(call->owner);
 			gettimeofday(&call->answer_time, NULL);
 			call->state = PG_CALL_GSM_STATE_ACTIVE;
-			ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n",
-								ch_gsm->alias, call->line,
-								pg_call_gsm_state_to_string(call->state));
+			ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n", ch_gsm->alias, call->line, pg_call_gsm_state_to_string(call->state));
 			res = 0;
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_CALL_GSM_MSG_INFO_IND:
 			if (call->state == PG_CALL_GSM_STATE_OVERLAP_RECEIVING) {
 				// check incoming type
-				if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_SPEC) {
+				if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_SPEC) {
 					// route incoming call to specified extension
 					address_classify(ch_gsm->config.call_extension, &call->called_name);
-				} else if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_DTMF) {
-					// route incoming call to default extension
-					address_classify("s", &call->called_name);
-				} else if(ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_DYN) {
+				} else if(ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_DYN) {
 					// incoming call dynamic routed
 					if (!pg_dcr_table_get_match_record(ch_gsm->imsi, &call->calling_name, ch_gsm->config.dcrttl, &call->called_name, &ch_gsm->lock)) {
 						address_classify("s", &call->called_name);
 					}
-				} else if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_DENY) {
+				} else if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_DENY) {
 					// incoming call denied
 					ast_verb(2, "GSM channel=\"%s\": call line=%d: call from \"%s%s\" denied\n", ch_gsm->alias, call->line, (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
 					// hangup
@@ -7022,9 +7091,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 				}
 				// set new state
 				call->state = PG_CALL_GSM_STATE_CALL_RECEIVED;
-				ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n",
-									ch_gsm->alias, call->line,
-									pg_call_gsm_state_to_string(call->state));
+				ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n", ch_gsm->alias, call->line, pg_call_gsm_state_to_string(call->state));
 				res = 0;
 			} else {
 				ast_log(LOG_WARNING, "GSM channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
@@ -7044,9 +7111,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 				ast_setstate(call->owner, AST_STATE_UP);
 				gettimeofday(&call->answer_time, NULL);
 				call->state = PG_CALL_GSM_STATE_ACTIVE;
-				ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n",
-									ch_gsm->alias, call->line,
-									pg_call_gsm_state_to_string(call->state));
+				ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n", ch_gsm->alias, call->line, pg_call_gsm_state_to_string(call->state));
 				res = 0;
 			} else {
 				ast_log(LOG_WARNING, "GSM channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
@@ -7062,9 +7127,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 				pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "2");
 				// set new state
 				call->state = PG_CALL_GSM_STATE_LOCAL_HOLD;
-				ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n",
-									ch_gsm->alias, call->line,
-									pg_call_gsm_state_to_string(call->state));
+				ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n", ch_gsm->alias, call->line, pg_call_gsm_state_to_string(call->state));
 				res = 0;
 			} else if (call->state != PG_CALL_GSM_STATE_REMOTE_HOLD) {
 				ast_log(LOG_WARNING, "GSM channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
@@ -7078,9 +7141,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 			if (call->state == PG_CALL_GSM_STATE_LOCAL_HOLD) {
 				// set new state
 				call->state = PG_CALL_GSM_STATE_ACTIVE;
-				ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n",
-									ch_gsm->alias, call->line,
-									pg_call_gsm_state_to_string(call->state));
+				ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n", ch_gsm->alias, call->line, pg_call_gsm_state_to_string(call->state));
 				res = 0;
 			} else if (call->state != PG_CALL_GSM_STATE_REMOTE_HOLD) {
 				ast_log(LOG_WARNING, "GSM channel=\"%s\": call line=%d, message %s unexpected in state %s\n",
@@ -7494,8 +7555,6 @@ pg_channel_fxs_call_outgoing_end:
 	// init asterisk channel tag's
 #if ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
-	ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
-	ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -7503,15 +7562,13 @@ pg_channel_fxs_call_outgoing_end:
 	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
-	ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
-	ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = rtp->format;
+	ast_ch->nativeformats = vin->capabilities;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -7533,6 +7590,8 @@ pg_channel_fxs_call_outgoing_end:
 
 	call->owner = ast_ch;
 	call->channel_rtp = rtp;
+
+	ast_verb(2, "FXS channel=\"%s\": outgoing call \"%s\" -> \"%s\"\n", ch_fxs->alias, calling, called);
 
 	return 0;
 }
@@ -14965,10 +15024,10 @@ static int pg_config_file_build(char *filename)
 			len += fprintf(fp, "outgoing=%s\n", pg_call_permission_to_string(ch_gsm->config.outgoing_perm));
 			// incoming
 			len += fprintf(fp, "incoming=%s\n", pg_call_gsm_incoming_type_to_string(ch_gsm->config.incoming_type));
-			if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_SPEC) {
+			if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_SPEC) {
 				// incomingto
 				len += fprintf(fp, "incomingto=%s\n", ch_gsm->config.call_extension);
-			} else if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_DYN) {
+			} else if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_DYN) {
 				// dcrttl
 				len += fprintf(fp, "dcrttl=%ld\n", (long int)ch_gsm->config.dcrttl);
 			}
@@ -16311,8 +16370,6 @@ pg_gsm_requester_vinetic_end:
 	// init asterisk channel tag's
 #if ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
-	ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
-	ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -16320,15 +16377,13 @@ pg_gsm_requester_vinetic_end:
 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
-	ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
-	ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = rtp->format;
+	ast_ch->nativeformats = vin->capabilities;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -16831,8 +16886,6 @@ pg_gsm_indicate_srcupdate_end:
 				ast_mutex_unlock(&vin->lock);
 #if ASTERISK_VERSION_NUMBER >= 110000
 				ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
-				ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
-				ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -16840,16 +16893,13 @@ pg_gsm_indicate_srcupdate_end:
 				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
-				ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
-				ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
-				ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
 				ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 				ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 				ast_format_copy(&ast_ch->writeformat, &rtp->format);
 				ast_format_copy(&ast_ch->readformat, &rtp->format);
 				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
-				ast_ch->nativeformats = rtp->format;
+				ast_ch->nativeformats = vin->capabilities;
 				ast_ch->rawreadformat = rtp->format;
 				ast_ch->rawwriteformat = rtp->format;
 				ast_ch->writeformat = rtp->format;
@@ -17429,8 +17479,6 @@ pg_fxs_requester_vinetic_end:
 	// init asterisk channel tag's
 #if ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
-	ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
-	ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -17438,15 +17486,13 @@ pg_fxs_requester_vinetic_end:
 	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
-	ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
-	ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 	ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 	ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 	ast_format_copy(&ast_ch->writeformat, &rtp->format);
 	ast_format_copy(&ast_ch->readformat, &rtp->format);
 	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #else
-	ast_ch->nativeformats = rtp->format;
+	ast_ch->nativeformats = vin->capabilities;
 	ast_ch->rawreadformat = rtp->format;
 	ast_ch->rawwriteformat = rtp->format;
 	ast_ch->writeformat = rtp->format;
@@ -18208,8 +18254,6 @@ pg_fxs_indicate_srcupdate_end:
 				ast_mutex_unlock(&vin->lock);
 #if ASTERISK_VERSION_NUMBER >= 110000
 				ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
-				ast_format_cap_remove_bytype(ast_channel_nativeformats(ast_ch), AST_FORMAT_TYPE_AUDIO);
-				ast_format_cap_add(ast_channel_nativeformats(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_writeformat(ast_ch), &rtp->format);
@@ -18217,15 +18261,13 @@ pg_fxs_indicate_srcupdate_end:
 				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_format_cap_copy(ast_ch->nativeformats, vin->capabilities);
-				ast_format_cap_remove_bytype(ast_ch->nativeformats, AST_FORMAT_TYPE_AUDIO);
-				ast_format_cap_add(ast_ch->nativeformats, &rtp->format);
 				ast_format_copy(&ast_ch->rawreadformat, &rtp->format);
 				ast_format_copy(&ast_ch->rawwriteformat, &rtp->format);
 				ast_format_copy(&ast_ch->writeformat, &rtp->format);
 				ast_format_copy(&ast_ch->readformat, &rtp->format);
 				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #else
-				ast_ch->nativeformats = rtp->format;
+				ast_ch->nativeformats = vin->capabilities;
 				ast_ch->rawreadformat = rtp->format;
 				ast_ch->rawwriteformat = rtp->format;
 				ast_ch->writeformat = rtp->format;
@@ -18875,13 +18917,11 @@ static char *pg_cli_generate_complete_channel_gsm_incoming(const char *begin, in
 
 	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
 		ast_mutex_lock(&ch_gsm->lock);
-
-		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_call_gsm_incoming_types); i++)
-		{
-			if ((pg_call_gsm_incoming_types[i].id != ch_gsm->config.incoming_type) &&
-				(!strncmp(begin, pg_call_gsm_incoming_types[i].name, beginlen)) &&
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); i++) {
+			if ((pg_call_incoming_types[i].id != ch_gsm->config.incoming_type) &&
+				(!strncmp(begin, pg_call_incoming_types[i].name, beginlen)) &&
 					(++which > count)) {
-				res = ast_strdup(pg_call_gsm_incoming_types[i].name);
+				res = ast_strdup(pg_call_incoming_types[i].name);
 				break;
 			}
 		}
@@ -20923,7 +20963,7 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 // 			ast_cli(a->fd, "  -- balance = [%s]\n", ch_gsm->balance?ch_gsm->balance:"unknown");
 			ast_cli(a->fd, "  -- outgoing = %s\n", pg_call_permission_to_string(ch_gsm->config.outgoing_perm));
 			ast_cli(a->fd, "  -- incoming = %s\n", pg_call_gsm_incoming_type_to_string(ch_gsm->config.incoming_type));
-			if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_SPEC)
+			if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_SPEC)
 			  ast_cli(a->fd, "  -- incomingto = %s\n", ch_gsm->config.call_extension);
 			ast_cli(a->fd, "  -- context = %s\n", ch_gsm->config.call_context);
 #if 0
@@ -21894,8 +21934,8 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_INCOMING:
-							tmpi = pg_get_call_gsm_incoming_type(a->argv[6]);
-							if (tmpi != PG_CALL_GSM_INCOMING_TYPE_UNKNOWN) {
+							tmpi = pg_call_get_incoming_type(a->argv[6]);
+							if (tmpi != PG_CALL_INCOMING_TYPE_UNKNOWN) {
 								ch_gsm->config.incoming_type = tmpi;
 								ast_cli(a->fd, " - ok\n");
 							} else {
@@ -21940,7 +21980,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						case PG_CHANNEL_GSM_PARAM_CALLWAIT:
 							tmpi = pg_get_callwait_state(a->argv[6]);
 							if ((tmpi != PG_CALLWAIT_STATE_UNKNOWN) && (tmpi != PG_CALLWAIT_STATE_QUERY)) {
-								if ((tmpi == PG_CALLWAIT_STATE_ENABLE) && (ch_gsm->config.incoming_type != PG_CALL_GSM_INCOMING_TYPE_SPEC)) {
+								if ((tmpi == PG_CALLWAIT_STATE_ENABLE) && (ch_gsm->config.incoming_type != PG_CALL_INCOMING_TYPE_SPEC)) {
 									ast_cli(a->fd, " - fail - callwait valid for call incoming type spec only\n");
 								} else {
 									ch_gsm->config.callwait = tmpi;
@@ -23372,7 +23412,7 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 
 	if ((ch_gsm = pg_get_channel_gsm_by_name(a->argv[3]))) {
 		ast_mutex_lock(&ch_gsm->lock);
-		if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_DYN) {
+		if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_DYN) {
 			if (ch_gsm->iccid) {
 				// get dynamic clip routing table
 				gettimeofday(&tv, NULL);
@@ -26269,13 +26309,13 @@ static int pg_load(void)
 				}
 				// incoming
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "incoming"))) {
-					ch_gsm->config.incoming_type = pg_get_call_gsm_incoming_type(cvar);
+					ch_gsm->config.incoming_type = pg_call_get_incoming_type(cvar);
 				}
-				if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_UNKNOWN) {
-					ch_gsm->config.incoming_type = PG_CALL_GSM_INCOMING_TYPE_DENY;
+				if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_UNKNOWN) {
+					ch_gsm->config.incoming_type = PG_CALL_INCOMING_TYPE_DENY;
 				}
 				// incomingto
-				if (ch_gsm->config.incoming_type == PG_CALL_GSM_INCOMING_TYPE_SPEC) {
+				if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_SPEC) {
 					ast_copy_string(ch_gsm->config.call_extension, "s", sizeof(ch_gsm->config.call_extension));
 					if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "incomingto"))) {
 						ast_copy_string(ch_gsm->config.call_extension, cvar, sizeof(ch_gsm->config.call_extension));

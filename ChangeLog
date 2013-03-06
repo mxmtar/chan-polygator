@@ -101,3 +101,5 @@ FXS support rc1.
 FLASH HOOK detection, and CID Sender still under working.
 04.03.13
 Improved USSD response analyzer.
+06.03.13
+Add all supported VINETIC formats to channel native format list.
