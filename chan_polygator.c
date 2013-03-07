@@ -15568,6 +15568,7 @@ static struct ast_frame *pg_xxx_read(struct ast_channel *ast_ch)
 	rtp->recv_seq_num = seq_num;
 	// calc smaples count
 	samples = timestamp - rtp->recv_timestamp;
+	rtp->recv_timestamp = timestamp;
 	if (samples < 0) {
 		ast_mutex_unlock(&rtp->lock);
 		return &ast_null_frame;
@@ -15575,7 +15576,6 @@ static struct ast_frame *pg_xxx_read(struct ast_channel *ast_ch)
 	if (samples > 240) {
 		samples = 240;
 	}
-	rtp->recv_timestamp = timestamp;
 	// fill asterisk frame
 	rtp->frame.frametype = AST_FRAME_VOICE;
 #if ASTERISK_VERSION_NUMBER >= 100000
