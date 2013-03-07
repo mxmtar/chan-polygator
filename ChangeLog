@@ -103,3 +103,5 @@ FLASH HOOK detection, and CID Sender still under working.
 Improved USSD response analyzer.
 06.03.13
 Add all supported VINETIC formats to channel native format list.
+07.03.13
+Fix crash in translation path on pf_xxx_read() out to big samples count.
