@@ -83,10 +83,10 @@ AC_ARG_WITH([asterisk], AC_HELP_STRING([--with-asterisk=PATH],[use asterisk file
 
 # Checks for packages.
 # Checks for required polygator-linux version.
-PG_POLYGATOR_LINUX_VERSION_PREREQ([1.1.3])
+PG_POLYGATOR_LINUX_VERSION_PREREQ([1.1.5])
 
 # Checks for required libvinetic version.
-PG_LIBVINETIC_VERSION_PREREQ([1.1.2])
+PG_LIBVINETIC_VERSION_PREREQ([1.1.3])
 
 # Checks for required asterisk version.
 PG_ASTERISK_VERSION_PREREQ([1.6.0], [${ASTERISK_SRC_PATH}])

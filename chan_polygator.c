@@ -414,7 +414,9 @@ struct pg_call {
 	int direction;
 	int contest;
 	struct address called_name;
+	char called[80];
 	struct address calling_name;
+	char calling[80];
 	union {
 		struct pg_channel_gsm *gsm;
 		struct pg_channel_fxs *fxs;
@@ -750,6 +752,7 @@ struct pg_channel_fxs {
 		struct x_timer ring_pause0;
 		struct x_timer ringing1;
 		struct x_timer ring_pause1;
+		struct x_timer callerid;
 		struct x_timer digit_pulse;
 		struct x_timer digit_pause;
 		struct x_timer digit_inter;
@@ -7527,6 +7530,104 @@ pg_channel_fxs_call_outgoing_end:
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_call_fxs_cis_buf_handler()
+//------------------------------------------------------------------------------
+void pg_call_fxs_cis_buf_handler(void *data, int state)
+{
+	struct pg_channel_fxs *ch_fxs = data;
+	struct pg_vinetic *vin;
+
+	ast_verbose(" !!!!!!!!!!!!!!!!!!!! pg_call_fxs_cis_buf_handler() STATE=%d  !!!!!!!!!!!!!!!!!!!!\n", state);
+
+	if (state) {
+		if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number))) {
+			ast_verbose("len=%u, pos=%u\n", vin->context.vin_cid_sender_data[ch_fxs->vinetic_sig_slot].len, vin->context.vin_cid_sender_data[ch_fxs->vinetic_sig_slot].pos);
+		}
+	}
+}
+//------------------------------------------------------------------------------
+// end of pg_call_fxs_cis_buf_handler()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_call_fxs_build_cid()
+//------------------------------------------------------------------------------
+unsigned int pg_call_fxs_build_cid(unsigned char *msg)
+{
+	size_t i;
+	unsigned char sum = 0;
+
+	msg[0] = 0x80;
+	msg[1] = 22;
+
+	msg[2] = 0x01;
+	msg[3] = 0x08;
+	msg[4] = '0';
+	msg[5] = '3';
+	msg[6] = '1';
+	msg[7] = '3';
+	msg[8] = '1';
+	msg[9] = '8';
+	msg[10] = '0';
+	msg[11] = '0';
+
+	msg[12] = 0x02;
+	msg[13] = 10;
+	msg[14] = '0';
+	msg[15] = '5';
+	msg[16] = '0';
+	msg[17] = '1';
+	msg[18] = '2';
+	msg[19] = '3';
+	msg[20] = '4';
+	msg[21] = '5';
+	msg[22] = '6';
+	msg[23] = '7';
+
+	for (i = 0; i < 24; i++) {
+		sum += msg[i];
+	}
+
+	msg[24] = 256 - (sum & 255);
+
+	return 25;
+}
+//------------------------------------------------------------------------------
+// end of pg_call_fxs_build_cid()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_call_fxs_cis_req_handler()
+//------------------------------------------------------------------------------
+void pg_call_fxs_cis_req_handler(void *data, int state)
+{
+	struct pg_channel_fxs *ch_fxs = data;
+	struct pg_vinetic *vin;
+
+	ast_verbose(" !!!!!!!!!!!!!!!!!!!! pg_call_fxs_cis_req_handler() STATE=%d  !!!!!!!!!!!!!!!!!!!!\n", state);
+
+	if (state) {
+		if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number))) {
+			ast_verbose("len=%u, pos=%u\n", vin->context.vin_cid_sender_data[ch_fxs->vinetic_sig_slot].len, vin->context.vin_cid_sender_data[ch_fxs->vinetic_sig_slot].pos);
+		}
+	}
+}
+//------------------------------------------------------------------------------
+// end of pg_call_fxs_cis_req_handler()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_call_fxs_cis_act_handler()
+//------------------------------------------------------------------------------
+void pg_call_fxs_cis_act_handler(void *data, int state)
+{
+	ast_verbose(" !!!!!!!!!!!!!!!!!!!! pg_call_fxs_cis_act_handler() STATE=%d  !!!!!!!!!!!!!!!!!!!!\n", state);
+}
+//------------------------------------------------------------------------------
+// end of pg_call_fxs_cis_act_handler()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_call_fxs_sm()
 //------------------------------------------------------------------------------
 static int pg_call_fxs_sm(struct pg_call* call, int message, int cause)
@@ -7569,11 +7670,71 @@ static int pg_call_fxs_sm(struct pg_call* call, int message, int cause)
 							ch_fxs->ring_pause1 = 0;
 						}
 						// start ringing
-						x_timer_set_ms(ch_fxs->timers.ring_pause1, 0);
+						if (ch_fxs->ring_pause1) {
+							x_timer_set_ms(ch_fxs->timers.ring_pause1, 0);
+						} else {
+							x_timer_set_ms(ch_fxs->timers.ring_pause0, 0);
+						}
 						ast_tone_zone_unref(tone_zone);
 					} else {
 						ast_log(LOG_ERROR, "FXS channel=\"%s\" tone zone for country \"%s\" not found\n", ch_fxs->alias, ch_fxs->config.tonezone);
 					}
+#if 1
+					ch_fxs->ring_pause0 = 10000;
+					// start caller ID sender timer
+					x_timer_set_ms(ch_fxs->timers.callerid, 1100);
+#else
+					// get vinetic
+					if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+						ast_mutex_lock(&vin->lock);
+						if (vin_reset_status(&vin->context) < 0) {
+							while (vin_message_stack_check_line(&vin->context)) {
+								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+							}
+						} else {
+							// register CID Send handlers
+							vin_set_cis_buf_handler(&vin->context, ch_fxs->vinetic_sig_slot, pg_call_fxs_cis_buf_handler, ch_fxs);
+							vin_set_cis_req_handler(&vin->context, ch_fxs->vinetic_sig_slot, pg_call_fxs_cis_req_handler, ch_fxs);
+							vin_set_cis_act_handler(&vin->context, ch_fxs->vinetic_sig_slot, pg_call_fxs_cis_act_handler, ch_fxs);
+							// set CID data
+							unsigned char buff[256];
+							pg_call_fxs_build_cid(buff);
+							vin_cid_sender_data_set(&vin->context, ch_fxs->vinetic_sig_slot, buff, 25);
+							// write CID sender coefficients
+							vin_cid_sender_coefficients_set_level(&vin->context, ch_fxs->vinetic_sig_slot, 0x7fff);
+							vin_cid_sender_coefficients_set_seizure(&vin->context, ch_fxs->vinetic_sig_slot, 300);
+							vin_cid_sender_coefficients_set_mark(&vin->context, ch_fxs->vinetic_sig_slot, 180);
+							vin_cid_sender_coefficients_set_brs(&vin->context, ch_fxs->vinetic_sig_slot, 10);
+							if (vin_cid_sender_coefficients_write(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+								while (vin_message_stack_check_line(&vin->context)) {
+									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+								}
+							}
+							// enable CID sender
+							vin_cid_sender_ad(&vin->context, ch_fxs->vinetic_sig_slot, /*VIN_ON*/0);
+							vin_cid_sender_hlev(&vin->context, ch_fxs->vinetic_sig_slot, VIN_HLEV_HIGH);
+							vin_cid_sender_v23(&vin->context, ch_fxs->vinetic_sig_slot, /*VIN_V23_ITU_T*/0);
+							vin_cid_sender_ar(&vin->context, ch_fxs->vinetic_sig_slot, /*VIN_ON*/0);
+							vin_cid_sender_add_a(&vin->context, ch_fxs->vinetic_sig_slot, VIN_ADD_A_CID);
+							vin_cid_sender_add_b(&vin->context, ch_fxs->vinetic_sig_slot, VIN_ADD_B_CID);
+							if (vin_cid_sender_enable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+								while (vin_message_stack_check_line(&vin->context)) {
+									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+								}
+							}
+#if 0
+							if (vin_cid_sender_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+								while (vin_message_stack_check_line(&vin->context)) {
+									ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+								}
+							}
+#endif
+						}
+						ast_mutex_unlock(&vin->lock);
+					} else {
+						ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+					}
+#endif
 				}
 				// indicate ringing
 				while (ast_channel_trylock(call->owner)) {
@@ -14321,6 +14482,7 @@ static void *pg_channel_fxs_workthread(void *data)
 				x_timer_stop(ch_fxs->timers.ring_pause0);
 				x_timer_stop(ch_fxs->timers.ringing1);
 				x_timer_stop(ch_fxs->timers.ring_pause1);
+				x_timer_stop(ch_fxs->timers.callerid);
 				// disable ringing -- switch to active mode
 				if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
 					ast_mutex_lock(&vin->lock);
@@ -14585,6 +14747,7 @@ pg_channel_fxs_onhook_action_end:
 		}
 		// ringing0
 		if (is_x_timer_enable(ch_fxs->timers.ringing0) && is_x_timer_fired(ch_fxs->timers.ringing0)) {
+			ast_verbose("ringing0\n");
 			x_timer_stop(ch_fxs->timers.ringing0);
 			// set ring pause
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
@@ -14610,6 +14773,7 @@ pg_channel_fxs_onhook_action_end:
 		}
 		// ring_pause0
 		if (is_x_timer_enable(ch_fxs->timers.ring_pause0) && is_x_timer_fired(ch_fxs->timers.ring_pause0)) {
+			ast_verbose("ring_pause0\n");
 			x_timer_stop(ch_fxs->timers.ring_pause0);
 			// set ringing
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
@@ -14619,6 +14783,12 @@ pg_channel_fxs_onhook_action_end:
 						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 					}
 				} else {
+					// disable CID sender
+					if (vin_cid_sender_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
 					// set SLIC operation mode "Ringing"
 					if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_RINGING) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
@@ -14630,11 +14800,16 @@ pg_channel_fxs_onhook_action_end:
 			} else {
 				ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
 			}
-			// start ringing1 timer
-			x_timer_set_ms(ch_fxs->timers.ringing1, ch_fxs->ringing1);
+			// start ringingx timer
+			if (ch_fxs->ringing1) {
+				x_timer_set_ms(ch_fxs->timers.ringing1, ch_fxs->ringing1);
+			} else {
+				x_timer_set_ms(ch_fxs->timers.ringing0, ch_fxs->ringing0);
+			}
 		}
 		// ringing1
 		if (is_x_timer_enable(ch_fxs->timers.ringing1) && is_x_timer_fired(ch_fxs->timers.ringing1)) {
+			ast_verbose("ringing1\n");
 			x_timer_stop(ch_fxs->timers.ringing1);
 			// set ring pause
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
@@ -14660,6 +14835,7 @@ pg_channel_fxs_onhook_action_end:
 		}
 		// ring_pause1
 		if (is_x_timer_enable(ch_fxs->timers.ring_pause1) && is_x_timer_fired(ch_fxs->timers.ring_pause1)) {
+			ast_verbose("ring_pause1\n");
 			x_timer_stop(ch_fxs->timers.ring_pause1);
 			// set ringing
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
@@ -14669,6 +14845,12 @@ pg_channel_fxs_onhook_action_end:
 						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 					}
 				} else {
+					// disable CID sender
+					if (vin_cid_sender_disable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
 					// set SLIC operation mode "Ringing"
 					if (vin_set_opmode(&vin->context, ch_fxs->vinetic_alm_slot, VIN_OP_MODE_RINGING) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
@@ -14682,6 +14864,56 @@ pg_channel_fxs_onhook_action_end:
 			}
 			// start ringing0 timer
 			x_timer_set_ms(ch_fxs->timers.ringing0, ch_fxs->ringing0);
+		}
+		// callerid
+		if (is_x_timer_enable(ch_fxs->timers.callerid) && is_x_timer_fired(ch_fxs->timers.callerid)) {
+			ast_verbose("callerid\n");
+			x_timer_stop(ch_fxs->timers.callerid);
+#if 1
+			// get vinetic
+			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+				ast_mutex_lock(&vin->lock);
+				if (vin_reset_status(&vin->context) < 0) {
+					while (vin_message_stack_check_line(&vin->context)) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+					}
+				} else {
+					// register CID Send handlers
+					vin_set_cis_buf_handler(&vin->context, ch_fxs->vinetic_sig_slot, pg_call_fxs_cis_buf_handler, ch_fxs);
+					vin_set_cis_req_handler(&vin->context, ch_fxs->vinetic_sig_slot, pg_call_fxs_cis_req_handler, ch_fxs);
+					vin_set_cis_act_handler(&vin->context, ch_fxs->vinetic_sig_slot, pg_call_fxs_cis_act_handler, ch_fxs);
+					// set CID data
+					unsigned char buff[256];
+					pg_call_fxs_build_cid(buff);
+					vin_cid_sender_data_set(&vin->context, ch_fxs->vinetic_sig_slot, buff, 25);
+					// write CID sender coefficients
+					vin_cid_sender_coefficients_set_level(&vin->context, ch_fxs->vinetic_sig_slot, 0x7fff);
+					vin_cid_sender_coefficients_set_seizure(&vin->context, ch_fxs->vinetic_sig_slot, 0);
+					vin_cid_sender_coefficients_set_mark(&vin->context, ch_fxs->vinetic_sig_slot, 0);
+					vin_cid_sender_coefficients_set_brs(&vin->context, ch_fxs->vinetic_sig_slot, 20);
+					if (vin_cid_sender_coefficients_write(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+					// enable CID sender
+					vin_cid_sender_ad(&vin->context, ch_fxs->vinetic_sig_slot, /*VIN_ON*/0);
+					vin_cid_sender_hlev(&vin->context, ch_fxs->vinetic_sig_slot, VIN_HLEV_HIGH);
+					vin_cid_sender_v23(&vin->context, ch_fxs->vinetic_sig_slot, /*VIN_V23_ITU_T*/0);
+					vin_cid_sender_ar(&vin->context, ch_fxs->vinetic_sig_slot, /*VIN_ON*/0);
+					vin_cid_sender_add_a(&vin->context, ch_fxs->vinetic_sig_slot, VIN_ADD_A_CID);
+					vin_cid_sender_add_b(&vin->context, ch_fxs->vinetic_sig_slot, VIN_ADD_B_CID);
+					if (vin_cid_sender_enable(&vin->context, ch_fxs->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+				}
+				ast_mutex_unlock(&vin->lock);
+			} else {
+				ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
+			}
+#endif
 		}
 		// digit_inter
 		if (is_x_timer_enable(ch_fxs->timers.digit_inter) && is_x_timer_fired(ch_fxs->timers.digit_inter)) {
@@ -16489,8 +16721,6 @@ static int pg_gsm_hangup(struct ast_channel *ast_ch)
 			}
 		}
 		// coder module
-		// reset decoder status change handler
-		vin_reset_dsc_handler(&vin->context, ch_gsm->channel_rtp->position_on_vinetic);
 		// disable coder channel
 		if ((res = vin_coder_channel_disable(&vin->context, ch_gsm->channel_rtp->position_on_vinetic)) < 0) {
 				while (vin_message_stack_check_line(&vin->context)) {
@@ -17437,6 +17667,7 @@ static int pg_fxs_hangup(struct ast_channel *ast_ch)
 	x_timer_stop(ch_fxs->timers.ring_pause0);
 	x_timer_stop(ch_fxs->timers.ringing1);
 	x_timer_stop(ch_fxs->timers.ring_pause1);
+	x_timer_stop(ch_fxs->timers.callerid);
 
 // 	ast_setstate(ast_ch, AST_STATE_DOWN);
 	res = pg_call_fxs_sm(call, PG_CALL_FXS_MSG_RELEASE_REQ, 0);
