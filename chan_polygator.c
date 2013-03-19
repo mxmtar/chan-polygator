@@ -7679,6 +7679,7 @@ static int pg_call_fxs_sm(struct pg_call* call, int message, int cause)
 					} else {
 						ast_log(LOG_ERROR, "FXS channel=\"%s\" tone zone for country \"%s\" not found\n", ch_fxs->alias, ch_fxs->config.tonezone);
 					}
+#if 0
 #if 1
 					ch_fxs->ring_pause0 = 10000;
 					// start caller ID sender timer
@@ -7734,6 +7735,7 @@ static int pg_call_fxs_sm(struct pg_call* call, int message, int cause)
 					} else {
 						ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
 					}
+#endif
 #endif
 				}
 				// indicate ringing
@@ -14747,7 +14749,7 @@ pg_channel_fxs_onhook_action_end:
 		}
 		// ringing0
 		if (is_x_timer_enable(ch_fxs->timers.ringing0) && is_x_timer_fired(ch_fxs->timers.ringing0)) {
-			ast_verbose("ringing0\n");
+// 			ast_verbose("ringing0\n");
 			x_timer_stop(ch_fxs->timers.ringing0);
 			// set ring pause
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
@@ -14773,7 +14775,7 @@ pg_channel_fxs_onhook_action_end:
 		}
 		// ring_pause0
 		if (is_x_timer_enable(ch_fxs->timers.ring_pause0) && is_x_timer_fired(ch_fxs->timers.ring_pause0)) {
-			ast_verbose("ring_pause0\n");
+// 			ast_verbose("ring_pause0\n");
 			x_timer_stop(ch_fxs->timers.ring_pause0);
 			// set ringing
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
@@ -14809,7 +14811,7 @@ pg_channel_fxs_onhook_action_end:
 		}
 		// ringing1
 		if (is_x_timer_enable(ch_fxs->timers.ringing1) && is_x_timer_fired(ch_fxs->timers.ringing1)) {
-			ast_verbose("ringing1\n");
+// 			ast_verbose("ringing1\n");
 			x_timer_stop(ch_fxs->timers.ringing1);
 			// set ring pause
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
@@ -14835,7 +14837,7 @@ pg_channel_fxs_onhook_action_end:
 		}
 		// ring_pause1
 		if (is_x_timer_enable(ch_fxs->timers.ring_pause1) && is_x_timer_fired(ch_fxs->timers.ring_pause1)) {
-			ast_verbose("ring_pause1\n");
+// 			ast_verbose("ring_pause1\n");
 			x_timer_stop(ch_fxs->timers.ring_pause1);
 			// set ringing
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
@@ -14869,7 +14871,7 @@ pg_channel_fxs_onhook_action_end:
 		if (is_x_timer_enable(ch_fxs->timers.callerid) && is_x_timer_fired(ch_fxs->timers.callerid)) {
 			ast_verbose("callerid\n");
 			x_timer_stop(ch_fxs->timers.callerid);
-#if 1
+#if 0
 			// get vinetic
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
 				ast_mutex_lock(&vin->lock);
