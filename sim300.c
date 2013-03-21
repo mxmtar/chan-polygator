@@ -11,10 +11,9 @@
 #include "at.h"
 #include "sim300.h"
 #include "strutil.h"
-//------------------------------------------------------------------------------
 
-const struct at_command sim300_at_com_list[AT_SIM300_MAXNUM] = {
-	// int id; u_int32_t operations; char name[16]; char response[MAX_AT_CMD_RESP][16]; char description[256]; add_check_at_resp_fun_t *check_fun;
+const struct at_command sim300_at_com_list[] = {
+	// int id; u_int32_t operations; char name[32]; char response[MAX_AT_CMD_RESP][32]; char description[256]; add_check_at_resp_fun_t *check_fun;
 	{AT_SIM300_UNKNOWN, AT_OPER_EXEC, "", {"", ""}, "", is_str_printable},
 	// SIM300 V.25TER V1.06
 	{AT_SIM300_A_SLASH, AT_OPER_EXEC, "A/", {"", ""}, "Re-issues last AT command given", NULL},
@@ -182,8 +181,12 @@ const struct at_command sim300_at_com_list[AT_SIM300_MAXNUM] = {
 	{AT_SIM300_CGMSCLASS, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT+CGMSCLASS",  {"MULTISLOT CLASS:", ""}, "Change GPRS multislot class", NULL},
 	{AT_SIM300_CMGHEX, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT+CMGHEX",  {"CMGHEX:", ""}, "Enable to send non-ASCII character SMS", NULL},
 	{AT_SIM300_EXUNSOL, AT_OPER_TEST|AT_OPER_WRITE, "AT+EXUNSOL",  {"+EXUNSOL:", ""}, "Extra unsolicited indications", NULL},
-	};
-//------------------------------------------------------------------------------
+};
+
+size_t sim300_at_com_list_length()
+{
+	return sizeof(sim300_at_com_list)/sizeof(sim300_at_com_list[0]);
+}
 
 static const
 char imei_data1[13] = {	0x02,0x09,0xD5,0xFF,0x00,0x05,0x02,

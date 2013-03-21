@@ -12,39 +12,6 @@
 #include "sim900.h"
 #include "strutil.h"
 
-#if 0
-unsigned char sim900_code_page[0x10000];
-
-const unsigned char sim900_set_storage_equipment_s0[9] = {
-	0x04,
-	0x00, 0x00, 0x00, 0x90,
-	0x00, 0x00, 0x00, 0x00};
-
-const unsigned char sim900_set_storage_equipment_s1[9] = {
-	0x04,
-	0x00, 0x00, 0x23, 0x90,
-	0x00, 0x00, 0x01, 0x00};
-
-const unsigned char sim900_configuration_for_erased_area_s0[9] = {
-	0x09,
-	0x00, 0x00, 0x23, 0x90,
-	0x00, 0x00, 0x01, 0x00};
-
-const unsigned char sim900_configuration_for_erased_area_s1[9] = {
-	0x09,
-	0x00, 0x00, 0x51, 0x90,
-	0x00, 0x00, 0x2e, 0x00};
-
-const unsigned char sim900_set_for_downloaded_code_information[9] = {
-	0x04,
-	0x00, 0x00, 0x23, 0x90,
-	0x00, 0x00, 0x01, 0x00};
-
-const unsigned char sim900_set_for_downloaded_code_section[5] = {
-	0x01,
-	0x00, 0x08, 0x00, 0x00};
-#endif
-
 struct sim900_cmd_sel_mem_reg {
 	u_int8_t command;
 	u_int32_t start;
@@ -133,8 +100,8 @@ size_t sim900_cmd_calc_checksum_size(void)
 	return sizeof(struct sim900_cmd_calc_checksum);
 }
 
-const struct at_command sim900_at_com_list[/*AT_SIM900_MAXNUM*/] = {
-	// int id; u_int32_t operations; char name[16]; char response[MAX_AT_CMD_RESP][16]; char description[256]; add_check_at_resp_fun_t *check_fun;
+const struct at_command sim900_at_com_list[] = {
+	// int id; u_int32_t operations; char name[32]; char response[MAX_AT_CMD_RESP][32]; char description[256]; add_check_at_resp_fun_t *check_fun;
 	{AT_SIM900_UNKNOWN, AT_OPER_EXEC, "", {"", ""}, "", is_str_printable},
 	// SIM900 V.25TER V1.04
 	{AT_SIM900_A_SLASH, AT_OPER_EXEC, "A/", {"", ""}, "Re-issues last AT command given", NULL},
@@ -315,8 +282,11 @@ const struct at_command sim900_at_com_list[/*AT_SIM900_MAXNUM*/] = {
 	{AT_SIM900_CELLLOCK, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT*CELLLOCK",  {"*CELLLOCK:", ""}, "Set the list of arfcn which needs to be locked", NULL},
 	{AT_SIM900_SLEDS, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT+SLEDS",  {"+SLEDS:", ""}, "Set the timer period of net light", NULL},
 };
-//------------------------------------------------------------------------------
 
+size_t sim900_at_com_list_length()
+{
+	return sizeof(sim900_at_com_list)/sizeof(sim900_at_com_list[0]);
+}
 
 //==============================================================================
 // begin parser response function section

@@ -22,19 +22,16 @@ const struct at_command_operation at_com_oper_list[AT_OPER_COUNT] = {
 //------------------------------------------------------------------------------
 // get_at_com_by_id()
 //------------------------------------------------------------------------------
-struct at_command *get_at_com_by_id(int id, const struct at_command *list, int maxnum)
+const struct at_command *get_at_com_by_id(int id, const struct at_command *list, size_t maxnum)
 {
-	int i;
-	struct at_command *cmd = (struct at_command *)list;
+	size_t i;
 
-	for (i=0; i<maxnum; i++)
-	{
-		if (cmd) {
-			if (cmd->id == id)
-				return cmd;
-			cmd++;
+	for (i = 0; i < maxnum; i++) {
+		if (list[i].id == id) {
+			return &list[i];
 		}
 	}
+
 	return NULL;
 }
 //------------------------------------------------------------------------------
@@ -46,10 +43,11 @@ struct at_command *get_at_com_by_id(int id, const struct at_command *list, int m
 //------------------------------------------------------------------------------
 int is_at_com_done(const char *response)
 {
-	if ((response) && (strlen(response)) && (!strcmp(response, "OK") || strstr(response, "ERROR")))
+	if ((response) && (strlen(response)) && (!strcmp(response, "OK") || strstr(response, "ERROR"))) {
 		return 1;
-	else
+	} else {
 		return 0;
+	}
 }
 //------------------------------------------------------------------------------
 // end of is_at_com_done()
@@ -58,28 +56,35 @@ int is_at_com_done(const char *response)
 //------------------------------------------------------------------------------
 // is_at_com_response()
 //------------------------------------------------------------------------------
-int is_at_com_response(struct at_command *at, const char *response)
+int is_at_com_response(const struct at_command *at, const char *response)
 {
 	int i;
 
-	if (!at) return 0;
-	if (!response) return 0;
+	if (!at) {
+		return 0;
+	}
+	if (!response) {
+		return 0;
+	}
 	// ok
-	if (strstr(response, "OK"))
+	if (strstr(response, "OK")) {
 		return 1;
+	}
 	// error
-	if (strstr(response, "ERROR"))
+	if (strstr(response, "ERROR")) {
 		return 1;
+	}
 	// specific
-	for (i=0;i<MAX_AT_CMD_RESP;i++)
-	{
+	for (i = 0; i < MAX_AT_CMD_RESP; i++) {
 		if (strlen(at->response[i])) {
-			if (strstr(response, at->response[i]))
+			if (strstr(response, at->response[i])) {
 				return 1;
+			}
 		}
 	}
-	if ((at->check_fun) && (at->check_fun(response)))
+	if ((at->check_fun) && (at->check_fun(response))) {
 		return 1;
+	}
 	// is not AT command response
 	return 0;
 }
@@ -94,10 +99,10 @@ char *get_at_com_oper_by_id(u_int32_t oper)
 {
 	int i;
 
-	for (i=0; i<AT_OPER_COUNT; i++)
-	{
-		if (at_com_oper_list[i].id == oper)
+	for (i = 0; i < AT_OPER_COUNT; i++) {
+		if (at_com_oper_list[i].id == oper) {
 			return (char *)at_com_oper_list[i].str;
+		}
 	}
 
 	return NULL;
@@ -111,8 +116,7 @@ char *get_at_com_oper_by_id(u_int32_t oper)
 //------------------------------------------------------------------------------
 char *reg_status_print(int stat)
 {
-	switch (stat)
-	{
+	switch (stat) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case REG_STAT_NOTREG_NOSEARCH:
 			return "not registered, ME is not searching operator to register";
@@ -152,8 +156,7 @@ char *reg_status_print(int stat)
 //------------------------------------------------------------------------------
 char *reg_status_print_short(int stat)
 {
-	switch (stat)
-	{
+	switch (stat) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case REG_STAT_NOTREG_NOSEARCH:
 			return "not search";
@@ -193,8 +196,9 @@ char *reg_status_print_short(int stat)
 //------------------------------------------------------------------------------
 char *rssi_print(char *obuf, int rssi)
 {
-	if (!obuf)
+	if (!obuf) {
 		return "obuf error";
+	}
 
 	if (rssi == 0) {
 		sprintf(obuf, "-113 dBm or less");
@@ -1714,8 +1718,8 @@ int at_gen_creg_read_parse(const char *fld, int fld_len, struct at_gen_creg_read
 //------------------------------------------------------------------------------
 // at_gen_clir_read_parse()
 //------------------------------------------------------------------------------
-int at_gen_clir_read_parse(const char *fld, int fld_len, struct at_gen_clir_read *clir){
-
+int at_gen_clir_read_parse(const char *fld, int fld_len, struct at_gen_clir_read *clir)
+{
 	char *sp;
 	char *tp;
 	char *ep;
@@ -1725,90 +1729,89 @@ int at_gen_clir_read_parse(const char *fld, int fld_len, struct at_gen_clir_read
 	int param_cnt;
 
 	// check params
-	if(!fld) return -1;
-
-	if((fld_len <= 0) || (fld_len > 256)) return -1;
-
-	if(!clir) return -1;
-
-	// init ptr
-	if(!(sp = strchr(fld, ' ')))
+	if (!fld) {
 		return -1;
+	}
+	if ((fld_len <= 0) || (fld_len > 256)) {
+		return -1;
+	}
+	if (!clir) {
+		return -1;
+	}
+	// init ptr
+	if (!(sp = strchr(fld, ' '))) {
+		return -1;
+	}
 	tp = ++sp;
 	ep = (char *)fld + fld_len;
 
 	// init params
-	for(param_cnt=0; param_cnt<MAX_CLIR_READ_PARAM; param_cnt++){
+	for (param_cnt = 0; param_cnt < MAX_CLIR_READ_PARAM; param_cnt++) {
 		params[param_cnt].type = PRM_TYPE_UNKNOWN;
 		params[param_cnt].buf = NULL;
 		params[param_cnt].len = -1;
-		}
-
+	}
 	// init at_gen_clir_read
 	clir->n = -1;
 	clir->m = -1;
-
 	// search params delimiters
 	param_cnt = 0;
-	while((tp < ep) && (param_cnt < MAX_CLIR_READ_PARAM)){
+	while ((tp < ep) && (param_cnt < MAX_CLIR_READ_PARAM)) {
 		// get param type
-		if(*tp == '"'){
+		if (*tp == '"') {
 			params[param_cnt].type = PRM_TYPE_STRING;
 			params[param_cnt].buf = ++tp;
-			}
-		else if(isdigit(*tp)){
+		} else if (isdigit(*tp)) {
 			params[param_cnt].type = PRM_TYPE_INTEGER;
 			params[param_cnt].buf = tp;
-			}
-		else{
+		} else {
 			params[param_cnt].type = PRM_TYPE_UNKNOWN;
 			params[param_cnt].buf = tp;
-			}
+		}
 		sp = tp;
 		// search delimiter and put terminated null-symbol
-		if(!(tp = strchr(sp, ',')))
+		if (!(tp = strchr(sp, ','))) {
 			tp = ep;
+		}
 		*tp = '\0';
 		// set param len
-		if(params[param_cnt].type == PRM_TYPE_STRING){
+		if (params[param_cnt].type == PRM_TYPE_STRING) {
 			params[param_cnt].len = tp - sp - 1;
 			*(tp-1) = '\0';
-			}
-		else{
+		} else {
 			params[param_cnt].len = tp - sp;
-			}
-		//
+		}
 		param_cnt++;
 		tp++;
-		}
-
+	}
 	// processing integer params
 	// n
-	if(params[0].len > 0){
+	if (params[0].len > 0) {
 		tp = params[0].buf;
-		while(params[0].len--){
-			if(!isdigit(*tp++))
+		while (params[0].len--) {
+			if(!isdigit(*tp++)) {
 				return -1;
 			}
+		}
 		clir->n = atoi(params[0].buf);
-		}
-	else
+	} else {
 		return -1;
-
+	}
 	// m
-	if(params[1].len > 0){
+	if (params[1].len > 0) {
 		tp = params[1].buf;
-		while(params[1].len--){
-			if(!isdigit(*tp++))
+		while (params[1].len--) {
+			if (!isdigit(*tp++)) {
 				return -1;
 			}
-		clir->m = atoi(params[1].buf);
 		}
-	else
+		clir->m = atoi(params[1].buf);
+	} else {
 		return -1;
+	}
 
 	return param_cnt;
-	}
+}
 //------------------------------------------------------------------------------
 // end of at_gen_clir_read_parse()
 //------------------------------------------------------------------------------

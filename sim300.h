@@ -177,8 +177,6 @@ enum {
 	AT_SIM300_CGMSCLASS,			// AT+CGMSCLASS - Change GPRS multislot class
 	AT_SIM300_CMGHEX,				// AT+CMGHEX - Enable to send non-ASCII character SMS
 	AT_SIM300_EXUNSOL,				// AT+EXUNSOL - Extra unsolicited indications
-
-	AT_SIM300_MAXNUM,
 };
 //------------------------------------------------------------------------------
 // sim300 AT command parameters
@@ -198,17 +196,17 @@ struct at_sim300_csmins_read {
 	int sim_inserted;	// SIM inserted status
 };
 //------------------------------------------------------------------------------
-// extern
-extern const struct at_command sim300_at_com_list[AT_SIM300_MAXNUM];
-// prototype parse function
-// read
+
+extern const struct at_command sim300_at_com_list[];
+extern size_t sim300_at_com_list_length();
+
 extern int at_sim300_cmic_read_parse(const char *fld, int fld_len, struct at_sim300_cmic_read *cmic);
 extern int at_sim300_csmins_read_parse(const char *fld, int fld_len, struct at_sim300_csmins_read *csmins);
 
 extern int sim300_build_imei_data1(char *data, int *len);
 extern int sim300_build_imei_data2(char *data, int *len);
 extern int sim300_build_imei_data3(const char *imei, char chk, char *data, int *len);
-//------------------------------------------------------------------------------
+
 #endif //__SIM300_H__
 
 /******************************************************************************/

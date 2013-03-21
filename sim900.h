@@ -191,8 +191,6 @@ enum {
 	AT_SIM900_CEMNL,				// AT+CEMNL - Set the list of emergency number
 	AT_SIM900_CELLLOCK,				// AT+CELLLOCK - Set the list of arfcn which needs to be locked
 	AT_SIM900_SLEDS,				// AT+SLEDS - Set the timer period of net light
-
-	AT_SIM900_MAXNUM,
 };
 
 struct at_sim900_cmic_read {
@@ -214,6 +212,7 @@ struct at_sim900_csmins_read {
 };
 
 extern const struct at_command sim900_at_com_list[];
+extern size_t sim900_at_com_list_length();
 
 extern int at_sim900_cmic_read_parse(const char *fld, int fld_len, struct at_sim900_cmic_read *cmic);
 extern int at_sim900_csmins_read_parse(const char *fld, int fld_len, struct at_sim900_csmins_read *csmins);
