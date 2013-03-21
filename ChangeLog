@@ -105,3 +105,5 @@ Improved USSD response analyzer.
 Add all supported VINETIC formats to channel native format list.
 07.03.13
 Fix crash in translation path on pf_xxx_read() out to big samples count.
+21.03.13
+Fix configuration save builder. Removed automatic trunk from configuration.

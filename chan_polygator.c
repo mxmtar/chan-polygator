@@ -14933,6 +14933,7 @@ static int pg_config_file_build(char *filename)
 	struct pg_board *brd;
 	struct pg_channel_gsm *ch_gsm;
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold;
+	struct pg_trunk_gsm *tr_gsm;
 	struct pg_channel_fxs *ch_fxs;
 	struct pg_vinetic *vin;
 
@@ -15047,7 +15048,9 @@ static int pg_config_file_build(char *filename)
 			}
 			// trunk
 			AST_LIST_TRAVERSE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry) {
-				len += fprintf(fp, "trunk=%s\n", ch_gsm_fold->name);
+				if ((tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm_fold->name, PG_TRUNK_GSM_MANUAL))) {
+					len += fprintf(fp, "trunk=%s\n", ch_gsm_fold->name);
+				}
 			}
 			// trunkonly
 			if (ch_gsm->trunk_list.first) {
