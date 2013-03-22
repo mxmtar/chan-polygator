@@ -107,3 +107,10 @@ Add all supported VINETIC formats to channel native format list.
 Fix crash in translation path on pf_xxx_read() out to big samples count.
 21.03.13
 Fix configuration save builder. Removed automatic trunk from configuration.
+22.03.13
+Change default state of GSM channels.
+1) channel enabled.
+2) outgoing calls allowed.
+3) incoming call type set "spec".
+4) incomingto value is "s".
+5) context is "default".
