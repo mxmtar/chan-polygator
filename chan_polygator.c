@@ -204,6 +204,8 @@ struct pg_board {
 	AST_LIST_HEAD_NOLOCK(channel_gsm_list, pg_channel_gsm) channel_gsm_list;
 	// board FXS channel list
 	AST_LIST_HEAD_NOLOCK(channel_fxs_list, pg_channel_fxs) channel_fxs_list;
+	// board FXO channel list
+	AST_LIST_HEAD_NOLOCK(channel_fxo_list, pg_channel_fxo) channel_fxo_list;
 
 	// board vinetic list
 	AST_LIST_HEAD_NOLOCK(vinetic_list, pg_vinetic) vinetic_list;
@@ -820,15 +822,10 @@ struct pg_channel_fxo {
 		int ali_nelec_as;
 		int ali_nelec_nlp;
 		int ali_nelec_nlpm;
-		int offhook_min;
-		int onhook_min;
-		int flashhook_min;
-		int flashhook_max;
-		int digit_pulse_min;
-		int digit_pulse_max;
-		int digit_pause_min;
-		int digit_pause_max;
-		int digit_inter_min;
+		int flashhook;
+		int digit_pulse;
+		int digit_pause;
+		int digit_inter;
 	} config;
 
 	// runtime flags
@@ -840,10 +837,14 @@ struct pg_channel_fxo {
 
 	// timers
 	struct pg_channel_fxo_timers {
-		struct x_timer ringing;
+		struct x_timer ring_poll;
+		struct x_timer ring_burst;
+		struct x_timer ring_watch;
 	} timers;
 
 	// Runtime data
+	int power_delay;
+	int ring_state;
 
 	time_t last_call_time_incoming;
 	time_t last_call_time_outgoing;
@@ -963,6 +964,25 @@ static struct ast_channel_tech pg_fxs_tech = {
 	.send_digit_end = pg_fxs_dtmf_end,
 };
 
+#if ASTERISK_VERSION_NUMBER >= 100000
+static struct ast_channel_tech pg_fxo_tech = {
+#else
+static struct ast_channel_tech pg_fxo_tech = {
+#endif
+	.type = "PGFXO",
+	.description = "Polygator FXO",
+// 	.requester = pg_fxo_requester,
+// 	.call = pg_fxo_call,
+// 	.hangup = pg_fxo_hangup,
+// 	.answer = pg_fxo_answer,
+// 	.indicate = pg_fxo_indicate,
+	.write = pg_xxx_write,
+	.read = pg_xxx_read,
+// 	.fixup = pg_fxo_fixup,
+// 	.send_digit_begin = pg_fxo_dtmf_start,
+// 	.send_digit_end = pg_fxo_dtmf_end,
+};
+
 static void pg_cleanup(void);
 static void pg_atexit(void);
 
@@ -973,6 +993,8 @@ static int pg_gsm_tech_neededed = 0;
 static int pg_gsm_tech_registered = 0;
 static int pg_fxs_tech_neededed = 0;
 static int pg_fxs_tech_registered = 0;
+static int pg_fxo_tech_neededed = 0;
+static int pg_fxo_tech_registered = 0;
 
 struct pg_generic_param {
 	int id;
@@ -1314,6 +1336,8 @@ static struct pg_channel_gsm *pg_channel_gsm_last = NULL;
 static AST_LIST_HEAD_NOLOCK_STATIC(pg_general_trunk_gsm_list, pg_trunk_gsm);
 
 static AST_LIST_HEAD_NOLOCK_STATIC(pg_general_channel_fxs_list, pg_channel_fxs);
+
+static AST_LIST_HEAD_NOLOCK_STATIC(pg_general_channel_fxo_list, pg_channel_fxo);
 
 static u_int32_t channel_id = 0;
 
@@ -3200,6 +3224,31 @@ static struct pg_channel_fxs *pg_get_channel_fxs_by_name(const char *name)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_get_channel_fxo_by_name()
+//------------------------------------------------------------------------------
+static struct pg_channel_fxo *pg_get_channel_fxo_by_name(const char *name)
+{
+	struct pg_channel_fxo *ch_fxo = NULL;
+	// check for name present
+	if (name) {
+		// traverse channel fxo list for matching entry name
+		AST_LIST_TRAVERSE(&pg_general_channel_fxo_list, ch_fxo, pg_general_channel_fxo_list_entry) {
+			ast_mutex_lock(&ch_fxo->lock);
+			// compare name strings
+			if (!ast_strlen_zero(ch_fxo->alias) && !strcmp(name, ch_fxo->alias)) {
+				ast_mutex_unlock(&ch_fxo->lock);
+				break;
+			}
+			ast_mutex_unlock(&ch_fxo->lock);
+		}
+	}
+	return ch_fxo;
+}
+//------------------------------------------------------------------------------
+// end of pg_get_channel_fxo_by_name()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_get_channel_fxs_by_number()
 //------------------------------------------------------------------------------
 static struct pg_channel_fxs *pg_get_channel_fxs_by_number(const char *number)
@@ -3794,8 +3843,7 @@ static int pg_vinetic_get_ali_nelec_nlpm(const char *mode)
 	size_t i;
 	int out = -1;
 	if (mode) {
-		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++)
-		{
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
 			if (!strcmp(mode, pg_vinetic_ali_nelec_nlpms[i].name)) {
 				out = pg_vinetic_ali_nelec_nlpms[i].id;
 				break;
@@ -3814,10 +3862,10 @@ static int pg_vinetic_get_ali_nelec_nlpm(const char *mode)
 static char *pg_vinetic_ali_nelec_nlpm_to_string(int mode)
 {
 	size_t i;
-	for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++)
-	{
-		if (mode == pg_vinetic_ali_nelec_nlpms[i].id)
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
+		if (mode == pg_vinetic_ali_nelec_nlpms[i].id) {
 			return pg_vinetic_ali_nelec_nlpms[i].name;
+		}
 	}
 	return "unknown";
 }
@@ -3844,8 +3892,7 @@ static int pg_channel_gsm_vio_get(struct pg_channel_gsm *ch_gsm)
 
 	if (ch_gsm) {
 		if ((fp = fopen(ch_gsm->board->path, "r"))) {
-			while (fgets(buf, sizeof(buf), fp))
-			{
+			while (fgets(buf, sizeof(buf), fp)) {
 				if (sscanf(buf, "GSM%u %[0-9A-Za-z-] %[0-9A-Za-z/!-] %[0-9A-Za-z/!-] VIN%u%[ACMLP]%u VIO=%u", &pos, type, name, sim, &vin_num, vc_type, &vc_slot, &vio) == 8) {
 					if (pos == ch_gsm->position_on_board) {
 						res = vio;
@@ -3854,15 +3901,54 @@ static int pg_channel_gsm_vio_get(struct pg_channel_gsm *ch_gsm)
 				}
 			}
 			fclose(fp);
-		} else
+		} else {
 			errno = ENODEV;
-	} else
+		}
+	} else {
 		errno = ENODEV;
+	}
 
 	return res;
 }
 //------------------------------------------------------------------------------
 // pg_channel_gsm_vio_get()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_channel_fxo_ring_get()
+//------------------------------------------------------------------------------
+static int pg_channel_fxo_ring_get(struct pg_channel_fxo *ch_fxo)
+{
+	FILE *fp;
+	char buf[256];
+	unsigned int pos;
+	unsigned int vin_num;
+	unsigned int vc_slot;
+	unsigned int ring;
+	int res = -1;
+
+	if (ch_fxo) {
+		if ((fp = fopen(ch_fxo->board->path, "r"))) {
+			while (fgets(buf, sizeof(buf), fp)) {
+				if (sscanf(buf, "FXO%u VIN%uALM%u RING=%u", &pos, &vin_num, &vc_slot, &ring) == 4) {
+					if (pos == ch_fxo->position_on_board) {
+						res = ring;
+						break;
+					}
+				}
+			}
+			fclose(fp);
+		} else {
+			errno = ENODEV;
+		}
+	} else {
+		errno = ENODEV;
+	}
+
+	return res;
+}
+//------------------------------------------------------------------------------
+// pg_channel_fxo_ring_get()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -3878,10 +3964,12 @@ static int pg_channel_gsm_power_set(struct pg_channel_gsm *ch_gsm, int state)
 			fprintf(fp, "GSM%u PWR=%d", ch_gsm->position_on_board, state);
 			fclose(fp);
 			res = 0;
-		} else
+		} else {
 			errno = ENODEV;
-	} else
+		}
+	} else {
 		errno = ENODEV;
+	}
 
 	return res;
 }
@@ -3902,10 +3990,12 @@ static int pg_channel_gsm_serial_set(struct pg_channel_gsm *ch_gsm, int serial)
 			fprintf(fp, "GSM%u SERIAL=%d", ch_gsm->position_on_board, serial);
 			fclose(fp);
 			res = 0;
-		} else
+		} else {
 			errno = ENODEV;
-	} else
+		}
+	} else {
 		errno = ENODEV;
+	}
 
 	return res;
 }
@@ -3926,10 +4016,12 @@ static int pg_channel_gsm_key_press(struct pg_channel_gsm *ch_gsm, int state)
 			fprintf(fp, "GSM%u KEY=%d", ch_gsm->position_on_board, state);
 			fclose(fp);
 			res = 0;
-		} else
+		} else {
 			errno = ENODEV;
-	} else
+		}
+	} else {
 		errno = ENODEV;
+	}
 
 	return res;
 }
@@ -14869,7 +14961,6 @@ pg_channel_fxs_onhook_action_end:
 		}
 		// callerid
 		if (is_x_timer_enable(ch_fxs->timers.callerid) && is_x_timer_fired(ch_fxs->timers.callerid)) {
-			ast_verbose("callerid\n");
 			x_timer_stop(ch_fxs->timers.callerid);
 #if 0
 			// get vinetic
@@ -15065,7 +15156,6 @@ pg_channel_fxs_workthread_end:
 		ast_mutex_unlock(&vin->lock);
 	} else {
 		ast_log(LOG_ERROR, "FXS channel=\"%s\": can't get vinetic\n", ch_fxs->alias);
-		goto pg_channel_fxs_workthread_end;
 	}
 
 	ch_fxs->thread = AST_PTHREADT_NULL;
@@ -15080,6 +15170,136 @@ pg_channel_fxs_workthread_end:
 }
 //------------------------------------------------------------------------------
 // end of pg_channel_fxs_workthread()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_channel_fxo_workthread()
+//------------------------------------------------------------------------------
+static void *pg_channel_fxo_workthread(void *data)
+{
+	int res;
+	struct timeval timeout;
+	struct pg_vinetic *vin;
+	int ring_state;
+// 	char *tone;
+// 	struct ast_frame frame;
+// 	struct ast_tone_zone *tone_zone;
+// 	struct ast_tone_zone_sound *tone_zone_sound;
+// 	struct pg_call *call;
+	struct pg_channel_fxo *ch_fxo = (struct pg_channel_fxo *)data;
+
+	ast_mutex_lock(&ch_fxo->lock);
+	res = ch_fxo->power_delay;
+	ast_mutex_unlock(&ch_fxo->lock);
+	if (res > 0) {
+		sleep(res);
+	}
+	ast_mutex_lock(&ch_fxo->lock);
+	ch_fxo->power_delay = -1;
+
+	ast_debug(4, "FXO channel=\"%s\": thread start\n", ch_fxo->alias);
+	ast_verbose("%s: FXO channel=\"%s\" enabled\n", AST_MODULE, ch_fxo->alias);
+	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelFXOPowerStatus", "Channel: %s\r\nStatus: enabled\r\n", ch_fxo->alias);
+
+	// start ring poll timer
+	x_timer_set_ms(ch_fxo->timers.ring_poll, 1);
+
+	while (ch_fxo->flags.enable) {
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 1000;
+		ast_mutex_unlock(&ch_fxo->lock);
+		res = ast_select(0, NULL, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_fxo->lock);
+
+		// handle timers
+		// shutdown
+		if (ch_fxo->flags.shutdown) {
+			ch_fxo->flags.shutdown = 0;
+			ast_verb(4, "FXO channel=\"%s\" received shutdown signal\n", ch_fxo->alias);
+#if 0
+			// hangup active calls
+			while (pg_channel_fxs_get_calls_count(ch_fxs)) {
+				AST_LIST_TRAVERSE(&ch_fxs->call_list, call, entry) {
+					pg_call_fxs_sm(call, PG_CALL_FXS_MSG_RELEASE_IND, AST_CAUSE_NORMAL_CLEARING);
+				}
+				ast_mutex_unlock(&ch_fxs->lock);
+				usleep(1000);
+				ast_mutex_lock(&ch_fxs->lock);
+			}
+#endif
+			// stop all timers
+			memset(&ch_fxo->timers, 0, sizeof(struct pg_channel_fxo_timers));
+			// reset enable flags
+			ch_fxo->flags.enable = 0;
+		}
+		// ring_poll
+		if (is_x_timer_enable(ch_fxo->timers.ring_poll) && is_x_timer_fired(ch_fxo->timers.ring_poll)) {
+			x_timer_set_ms(ch_fxo->timers.ring_poll, 10);
+			ring_state = pg_channel_fxo_ring_get(ch_fxo);
+			if (ring_state != ch_fxo->ring_state) {
+				ch_fxo->ring_state = ring_state;
+// 				ast_verb(4, "FXO channel=\"%s\" RING=%d\n", ch_fxo->alias, ch_fxo->ring_state);
+				if (ch_fxo->ring_state) {
+					x_timer_set_ms(ch_fxo->timers.ring_burst, 1000);
+					x_timer_stop(ch_fxo->timers.ring_watch);
+				}
+			}
+
+		}
+		// ring_burst
+		if (is_x_timer_enable(ch_fxo->timers.ring_burst) && is_x_timer_fired(ch_fxo->timers.ring_burst)) {
+			x_timer_stop(ch_fxo->timers.ring_burst);
+			ast_verb(4, "FXO channel=\"%s\" ring burst detected\n", ch_fxo->alias);
+			x_timer_set_ms(ch_fxo->timers.ring_watch, 5000);
+		}
+		// ring_watch
+		if (is_x_timer_enable(ch_fxo->timers.ring_watch) && is_x_timer_fired(ch_fxo->timers.ring_watch)) {
+			x_timer_stop(ch_fxo->timers.ring_watch);
+			ast_verb(4, "FXO channel=\"%s\" ring is gone\n", ch_fxo->alias);
+		}
+	}
+
+// pg_channel_fxo_workthread_end:
+
+	if ((vin = pg_get_vinetic_from_board(ch_fxo->board, ch_fxo->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+		ast_mutex_lock(&vin->lock);
+		if (vin_reset_status(&vin->context) < 0) {
+			while (vin_message_stack_check_line(&vin->context)) {
+				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+			}
+		} else {
+			// set channel to power down high impedance
+			if (vin_set_opmode(&vin->context, ch_fxo->vinetic_alm_slot, VIN_OP_MODE_PDHI) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+			// reset hook event handler
+			vin_reset_hook_handler(&vin->context, ch_fxo->vinetic_alm_slot);
+			// set status mask
+			if (vin_set_status_mask(&vin->context) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			}
+		}
+		ast_mutex_unlock(&vin->lock);
+	} else {
+		ast_log(LOG_ERROR, "FXO channel=\"%s\": can't get vinetic\n", ch_fxo->alias);
+	}
+
+	ch_fxo->thread = AST_PTHREADT_NULL;
+	ast_debug(4, "FXO channel=\"%s\": thread stop\n", ch_fxo->alias);
+	ast_verbose("%s: FXO channel=\"%s\" disabled\n", AST_MODULE, ch_fxo->alias);
+	// reset FXO channel flags
+	memset(&ch_fxo->flags, 0, sizeof(struct pg_channel_fxo_flags));
+	manager_event(EVENT_FLAG_SYSTEM, "PolygatorChannelFXOPowerStatus", "Channel: %s\r\nStatus: disabled\r\n", ch_fxo->alias);
+
+	ast_mutex_unlock(&ch_fxo->lock);
+	return NULL;
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_fxo_workthread()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -18202,6 +18422,97 @@ pg_fxs_indicate_ringing_end:
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_PROCEEDING:
 			ast_verb(4, "FXS channel=\"%s\": call line=%d indicate proceeding\n", ch_fxs->alias, call->line);
+			// adjust voice format
+			rtp = ch_fxs->channel_rtp;
+			vin = rtp->vinetic;
+#if ASTERISK_VERSION_NUMBER >= 110000
+			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			ast_format_copy(&rtp->format, &ast_ch->writeformat);
+#else
+			rtp->format = ast_ch->writeformat;
+#endif
+#if ASTERISK_VERSION_NUMBER >= 100000
+			switch (rtp->format.id) {
+#else
+			switch (rtp->format) {
+#endif
+				case AST_FORMAT_G723_1:
+					/*! G.723.1 compression */
+					rtp->payload_type = RTP_PT_G723;
+					rtp->encoder_packet_time = VIN_PTE_30;
+					rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+					break;
+				case AST_FORMAT_ULAW:
+					/*! Raw mu-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMU;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+					break;
+				case AST_FORMAT_ALAW:
+					/*! Raw A-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMA;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+					break;
+				case AST_FORMAT_G729A:
+					/*! G.729A audio */
+					rtp->payload_type = RTP_PT_G729;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+					break;
+				case AST_FORMAT_G726:
+					/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+					rtp->payload_type = 2;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G726_32;
+					break;
+				default:
+					rtp->payload_type = -1;
+#if ASTERISK_VERSION_NUMBER >= 100000
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(&rtp->format));
+#else
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(rtp->format));
+#endif
+					break;
+			}
+			if (rtp->payload_type < 0) {
+#if ASTERISK_VERSION_NUMBER >= 100000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
+#else
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
+#endif
+				break;;
+			}
+			rtp->payload_type &= 0x7f;
+			rtp->event_payload_type = 107;
+
+			ast_mutex_lock(&vin->lock);
+			// unblock vinetic
+			if (vin_reset_status(&vin->context) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_fxs_indicate_proceeding_end;
+			}
+			// enable coder channel speech compression
+			vin_coder_channel_set_pte(&vin->context, rtp->position_on_vinetic, rtp->encoder_packet_time);
+			vin_coder_channel_set_enc(&vin->context, rtp->position_on_vinetic, rtp->encoder_algorithm);
+			if (vin_coder_channel_enable(&vin->context, rtp->position_on_vinetic) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_fxs_indicate_proceeding_end;
+			}
+pg_fxs_indicate_proceeding_end:
+			ast_mutex_unlock(&vin->lock);
+#if ASTERISK_VERSION_NUMBER >= 110000
+				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
+				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
+#else
+				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(rtp->format));
+#endif
 			// disable asterisk tone
 			ast_playtones_stop(ast_ch);
 			// disable tone generator
@@ -19871,6 +20182,7 @@ static char *pg_cli_show_channels(struct ast_cli_entry *e, int cmd, struct ast_c
 	size_t total;
 	struct pg_channel_gsm *ch_gsm;
 	struct pg_channel_fxs *ch_fxs;
+	struct pg_channel_fxo *ch_fxo;
 
 	char buf[20];
 	int number_fl;
@@ -19881,8 +20193,7 @@ static char *pg_cli_show_channels(struct ast_cli_entry *e, int cmd, struct ast_c
 	int sim_fl;
 	int reg_fl;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			e->command = "polygator show channels";
@@ -19985,6 +20296,41 @@ static char *pg_cli_show_channels(struct ast_cli_entry *e, int cmd, struct ast_c
 		}
 		total += count;
 		ast_cli(a->fd, "  Total %lu FXS channel%s\n", (unsigned long int)count, ESS(count));
+	}
+
+	count = 0;
+	number_fl = strlen("#");
+	alias_fl = strlen("Alias");
+	device_fl = strlen("Device");
+	status_fl = strlen("Status");
+	AST_LIST_TRAVERSE(&pg_general_channel_fxo_list, ch_fxo, pg_general_channel_fxo_list_entry) {
+		ast_mutex_lock(&ch_fxo->lock);
+		number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%lu", (unsigned long int)count));
+		alias_fl = mmax(alias_fl, strlen(ch_fxo->alias));
+		device_fl = mmax(device_fl, strlen(ch_fxo->device));
+		status_fl = mmax(status_fl, strlen(ch_fxo->flags.enable?"enabled":"disabled"));
+		count++;
+		ast_mutex_unlock(&ch_fxo->lock);
+	}
+	if (count) {
+		ast_cli(a->fd, "  FXO channel%s:\n", ESS(count));
+		ast_cli(a->fd, "| %-*s | %-*s | %-*s | %-*s |\n",
+				number_fl, "#",
+		  		alias_fl, "Alias",
+				device_fl, "Device",
+				status_fl, "Status");
+		count = 0;
+		AST_LIST_TRAVERSE(&pg_general_channel_fxo_list, ch_fxo, pg_general_channel_fxo_list_entry) {
+			ast_mutex_lock(&ch_fxo->lock);
+			ast_cli(a->fd, "| %-*lu | %-*s | %-*s | %-*s |\n",
+					number_fl, (unsigned long int)count++,
+					alias_fl, ch_fxo->alias,
+					device_fl, ch_fxo->device,
+					status_fl, ch_fxo->flags.enable?"enabled":"disabled");
+			ast_mutex_unlock(&ch_fxo->lock);
+		}
+		total += count;
+		ast_cli(a->fd, "  Total %lu FXO channel%s\n", (unsigned long int)count, ESS(count));
 	}
 
 	if (total) {
@@ -25950,6 +26296,7 @@ static void pg_cleanup(void)
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold;
 	struct pg_trunk_gsm *tr_gsm;
 	struct pg_channel_fxs *ch_fxs;
+	struct pg_channel_fxo *ch_fxo;
 	struct pg_vinetic *vin;
 	struct pg_channel_rtp *rtp;
 
@@ -25972,21 +26319,6 @@ static void pg_cleanup(void)
 		ast_verbose("%s: CLI unregistered\n", AST_MODULE);
 	}
 
-	// unregistering PGGSM channel technology
-	if (pg_gsm_tech_registered) {
-		ast_channel_unregister(&pg_gsm_tech);
-#if ASTERISK_VERSION_NUMBER >= 100000
-		ast_format_cap_destroy(pg_gsm_tech.capabilities);
-#endif
-	}
-
-	// unregistering PGFXS channel technology
-	if (pg_fxs_tech_registered) {
-		ast_channel_unregister(&pg_fxs_tech);
-#if ASTERISK_VERSION_NUMBER >= 100000
-		ast_format_cap_destroy(pg_fxs_tech.capabilities);
-#endif
-	}
 	// destroy trunk gsm list
 	while ((tr_gsm = AST_LIST_REMOVE_HEAD(&pg_general_trunk_gsm_list, pg_general_trunk_gsm_list_entry))) {
 		ast_free(tr_gsm->name);
@@ -26038,6 +26370,53 @@ static void pg_cleanup(void)
 			ast_mutex_unlock(&ch_fxs->lock);
 		}
 	} while(is_wait);
+
+	// wait for all FXO channel shutdown
+	do {
+		is_wait = 0;
+		AST_LIST_TRAVERSE(&pg_general_channel_fxo_list, ch_fxo, pg_general_channel_fxo_list_entry) {
+			ast_mutex_lock(&ch_fxo->lock);
+			// emit shutdown signal
+			if (!ch_fxo->flags.shutdown_now) {
+				ch_fxo->flags.shutdown = 1;
+				ch_fxo->flags.shutdown_now = 1;
+			}
+			// wait for reset enable flag
+			if (ch_fxo->flags.enable) {
+				ast_mutex_unlock(&ch_fxo->lock);
+				ast_mutex_unlock(&pg_lock);
+				usleep(1000);
+				is_wait = 1;
+				ast_mutex_lock(&pg_lock);
+				ast_mutex_lock(&ch_fxo->lock);
+			}
+			ast_mutex_unlock(&ch_fxo->lock);
+		}
+	} while(is_wait);
+
+	// unregistering PGGSM channel technology
+	if (pg_gsm_tech_registered) {
+		ast_channel_unregister(&pg_gsm_tech);
+#if ASTERISK_VERSION_NUMBER >= 100000
+		ast_format_cap_destroy(pg_gsm_tech.capabilities);
+#endif
+	}
+
+	// unregistering PGFXS channel technology
+	if (pg_fxs_tech_registered) {
+		ast_channel_unregister(&pg_fxs_tech);
+#if ASTERISK_VERSION_NUMBER >= 100000
+		ast_format_cap_destroy(pg_fxs_tech.capabilities);
+#endif
+	}
+
+	// unregistering PGFXO channel technology
+	if (pg_fxo_tech_registered) {
+		ast_channel_unregister(&pg_fxo_tech);
+#if ASTERISK_VERSION_NUMBER >= 100000
+		ast_format_cap_destroy(pg_fxo_tech.capabilities);
+#endif
+	}
 
 	// wait for all vinetics shutdown
 	do {
@@ -26108,6 +26487,12 @@ static void pg_cleanup(void)
 			if (ch_fxs->device) ast_free(ch_fxs->device);
 			if (ch_fxs->alias) ast_free(ch_fxs->alias);
 			ast_free(ch_fxs);
+		}
+		// destroy board FXO channel list
+		while ((ch_fxo = AST_LIST_REMOVE_HEAD(&brd->channel_fxo_list, pg_board_channel_fxo_list_entry))) {
+			if (ch_fxo->device) ast_free(ch_fxo->device);
+			if (ch_fxo->alias) ast_free(ch_fxo->alias);
+			ast_free(ch_fxo);
 		}
 		// destroy board vinetic list
 		while ((vin = AST_LIST_REMOVE_HEAD(&brd->vinetic_list, pg_board_vinetic_list_entry))) {
@@ -26204,6 +26589,7 @@ static int pg_load(void)
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold;
 	struct pg_trunk_gsm *tr_gsm;
 	struct pg_channel_fxs *ch_fxs;
+	struct pg_channel_fxo *ch_fxo;
 	struct pg_vinetic *vin;
 	struct pg_channel_rtp *rtp;
 
@@ -26909,6 +27295,268 @@ static int pg_load(void)
 						goto pg_load_error;
 					}
 				}
+#if 1
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+			} else if (sscanf(buf, "FXO%u VIN%uALM%u RING=%u", &pos, &vin_num, &vc_slot, &vio) == 4) {
+				snprintf(buf, sizeof(buf), "%s-fxo%u", brd->name, pos);
+				ast_verbose("%s: found FXO channel=\"%s\"\n", AST_MODULE, buf);
+				if (!(ch_fxo = ast_calloc(1, sizeof(struct pg_channel_fxo)))) {
+					ast_log(LOG_ERROR, "can't get memory for struct pg_channel_fxo\n");
+					goto pg_load_error;
+				}
+				pg_fxo_tech_neededed = 1;
+				// add channel into board channel list
+				AST_LIST_INSERT_TAIL(&brd->channel_fxo_list, ch_fxo, pg_board_channel_fxo_list_entry);
+				// add channel into general channel list
+				AST_LIST_INSERT_TAIL(&pg_general_channel_fxo_list, ch_fxo, pg_general_channel_fxo_list_entry);
+				// init FXO channel
+				ast_mutex_init(&ch_fxo->lock);
+				ch_fxo->thread = AST_PTHREADT_NULL;
+				ch_fxo->position_on_board = pos;
+				ch_fxo->board = brd;
+				ch_fxo->device = ast_strdup(buf);
+				pos = 0;
+				for (;;) {
+					snprintf(buf, sizeof(buf), "fxo-%u%u", brd_num, pos++);
+					if (!pg_get_channel_fxo_by_name(buf)) {
+						break;
+					}
+				}
+				ch_fxo->alias = ast_strdup(buf);
+				ch_fxo->vinetic_number = vin_num;
+				ch_fxo->vinetic_alm_slot = vc_slot;
+				ch_fxo->vinetic_sig_slot = -1;
+				// get config variables
+				// alias
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxo->device, "alias"))) {
+					if (pg_get_channel_fxo_by_name(cvar)) {
+						ast_free(ch_fxo->alias);
+						ch_fxo->alias = NULL;
+						pos = 0;
+						for (;;) {
+							snprintf(buf, sizeof(buf), "fxo-%u%u", brd_num, pos++);
+							if (!pg_get_channel_fxo_by_name(buf)) {
+								break;
+							}
+						}
+						ch_fxo->alias = ast_strdup(buf);
+					} else {
+						ast_free(ch_fxo->alias);
+						ch_fxo->alias = ast_strdup(cvar);
+					}
+				}
+#if 0
+				// enable
+				ch_fxs->config.enable = 0;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "enable"))) {
+					ch_fxs->config.enable = -ast_true(cvar);
+				}
+				// outgoing
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "outgoing"))) {
+					ch_fxs->config.outgoing_perm = pg_get_call_permission(cvar);
+				}
+				if (ch_fxs->config.outgoing_perm == PG_CALL_PERMISSION_UNKNOWN) {
+					ch_fxs->config.outgoing_perm = PG_CALL_PERMISSION_DENY;
+				}
+				// incoming
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "incoming"))) {
+					ch_fxs->config.incoming_perm = pg_get_call_permission(cvar);
+				}
+				if (ch_fxs->config.incoming_perm == PG_CALL_PERMISSION_UNKNOWN) {
+					ch_fxs->config.incoming_perm = PG_CALL_PERMISSION_DENY;
+				}
+				// context
+				ast_copy_string(ch_fxs->config.context, "default", sizeof(ch_fxs->config.context));
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "context"))) {
+					ast_copy_string(ch_fxs->config.context, cvar, sizeof(ch_fxs->config.context));
+				}
+				// extension
+				ast_copy_string(ch_fxs->config.extension, "s", sizeof(ch_fxs->config.extension));
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "extension"))) {
+					ast_copy_string(ch_fxs->config.extension, cvar, sizeof(ch_fxs->config.extension));
+				}
+				// language
+				ast_copy_string(ch_fxs->config.language, "en", sizeof(ch_fxs->config.language));
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "language"))) {
+					ast_copy_string(ch_fxs->config.language, cvar, sizeof(ch_fxs->config.language));
+				}
+				// tonezone
+				ast_copy_string(ch_fxs->config.tonezone, "us", sizeof(ch_fxs->config.tonezone));
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "tonezone"))) {
+					ast_copy_string(ch_fxs->config.tonezone, cvar, sizeof(ch_fxs->config.tonezone));
+				}
+				// mohinterpret
+				ast_copy_string(ch_fxs->config.mohinterpret, "default", sizeof(ch_fxs->config.mohinterpret));
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "mohinterpret"))) {
+					ast_copy_string(ch_fxs->config.mohinterpret, cvar, sizeof(ch_fxs->config.mohinterpret));
+				}
+				// callerid
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "callerid"))) {
+					ast_callerid_split(cvar, ch_fxs->config.cid_name, sizeof(ch_fxs->config.cid_name), ch_fxs->config.cid_num, sizeof(ch_fxs->config.cid_num));
+				}
+				if (ast_strlen_zero(ch_fxs->config.cid_num)) {
+					ast_copy_string(ch_fxs->config.cid_num, "unknown", sizeof(ch_fxs->config.cid_num));
+				}
+				if (ast_strlen_zero(ch_fxs->config.cid_name)) {
+					ast_copy_string(ch_fxs->config.cid_name, ch_fxs->config.cid_num, sizeof(ch_fxs->config.cid_name));
+				}
+				// gain1 - level voice channel CODER: sig -> host
+				ch_fxs->config.gain1 = 0x60;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gain1")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_fxs->config.gain1 = vin_gaindb_to_gainem(tmpf);
+				}
+				// gain2 - level voice channel CODER: host -> sig
+				ch_fxs->config.gain2 = 0x60;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gain2")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_fxs->config.gain2 = vin_gaindb_to_gainem(tmpf);
+				}
+				// gainx - level voice channel ALI: analog -> sig
+				ch_fxs->config.gainx = 0x80;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gainx")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_fxs->config.gainx = vin_gaindb_to_gainem(tmpf);
+				}
+				// gainr - level voice channel ALI: sig -> analog
+				ch_fxs->config.gainr = 0x80;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "gainr")) && (sscanf(cvar, "%f", &tmpf) == 1)) {
+					if (tmpf > VIN_GAINDB_MAX) tmpf = VIN_GAINDB_MAX;
+					if (tmpf < VIN_GAINDB_MIN) tmpf = VIN_GAINDB_MIN;
+					ch_fxs->config.gainr = vin_gaindb_to_gainem(tmpf);
+				}
+				// ali.nelec
+				ch_fxs->config.ali_nelec = VIN_EN;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "ali.nelec"))) {
+					ch_fxs->config.ali_nelec = str_true(cvar)?VIN_EN:VIN_DIS;
+				}
+				// ali.nelec.tm
+				ch_fxs->config.ali_nelec_tm = VIN_DTM_ON;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "ali.nelec.tm"))) {
+					ch_fxs->config.ali_nelec_tm = str_true(cvar)?VIN_DTM_ON:VIN_DTM_OFF;
+				}
+				// ali.nelec.oldc
+				ch_fxs->config.ali_nelec_oldc = VIN_OLDC_ZERO;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "ali.nelec.oldc"))) {
+					if (!strcmp(cvar, "oldc")) {
+						ch_fxs->config.ali_nelec_oldc = VIN_OLDC_NO;
+					} else {
+						ch_fxs->config.ali_nelec_oldc = VIN_OLDC_ZERO;
+					}
+				}
+				// ali.nelec.as
+				ch_fxs->config.ali_nelec_as = VIN_AS_RUN;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "ali.nelec.as"))) {
+					ch_fxs->config.ali_nelec_as = str_true(cvar)?VIN_AS_RUN:VIN_AS_STOP;
+				}
+				// ali.nelec.nlp
+				ch_fxs->config.ali_nelec_nlp = VIN_ON;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "ali.nelec.nlp"))) {
+					ch_fxs->config.ali_nelec_nlp = str_true(cvar)?VIN_ON:VIN_OFF;
+				}
+				// ali.nelec.nlpm
+				ch_fxs->config.ali_nelec_nlpm = VIN_NLPM_SIGN_NOISE;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "ali.nelec.nlpm"))) {
+					ch_fxs->config.ali_nelec_nlpm = pg_vinetic_get_ali_nelec_nlpm(cvar);
+					if (ch_fxs->config.ali_nelec_nlpm < 0) {
+						ch_fxs->config.ali_nelec_nlpm = VIN_NLPM_SIGN_NOISE;
+					}
+				}
+				// offhook.min
+				ch_fxs->config.offhook_min = 50;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "offhook.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.offhook_min = atoi(cvar);
+				}
+				if (ch_fxs->config.offhook_min < 1) {
+					ch_fxs->config.offhook_min = 50;
+				}
+				// onhook.min
+				ch_fxs->config.onhook_min = 1000;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "on.hook.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.onhook_min = atoi(cvar);
+				}
+				if (ch_fxs->config.onhook_min < 1) {
+					ch_fxs->config.onhook_min = 1000;
+				}
+				// flashhook.min
+				ch_fxs->config.flashhook_min = 150;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "flash.hook.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.flashhook_min = atoi(cvar);
+				}
+				if (ch_fxs->config.flashhook_min < 1) {
+					ch_fxs->config.flashhook_min = 150;
+				}
+				// flashhook.max
+				ch_fxs->config.flashhook_max = 900;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "flash.hook.max")) && (is_str_digit(cvar))) {
+					ch_fxs->config.flashhook_max = atoi(cvar);
+				}
+				if (ch_fxs->config.flashhook_max < 1) {
+					ch_fxs->config.flashhook_max = 900;
+				}
+				// digit.pulse.min
+				ch_fxs->config.digit_pulse_min = 39;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.pulse.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.digit_pulse_min = atoi(cvar);
+				}
+				if (ch_fxs->config.digit_pulse_min < 1) {
+					ch_fxs->config.digit_pulse_min = 39;
+				}
+				// digit.pulse.max
+				ch_fxs->config.digit_pulse_max = 75;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.pulse.max")) && (is_str_digit(cvar))) {
+					ch_fxs->config.digit_pulse_max = atoi(cvar);
+				}
+				if (ch_fxs->config.digit_pulse_max < 1) {
+					ch_fxs->config.digit_pulse_max = 75;
+				}
+				// digit.pause.min
+				ch_fxs->config.digit_pause_min = 30;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.pause.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.digit_pause_min = atoi(cvar);
+				}
+				if (ch_fxs->config.digit_pause_min < 1) {
+					ch_fxs->config.digit_pause_min = 30;
+				}
+				// digit.pause.max
+				ch_fxs->config.digit_pause_max = 50;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.pause.max")) && (is_str_digit(cvar))) {
+					ch_fxs->config.digit_pause_max = atoi(cvar);
+				}
+				if (ch_fxs->config.digit_pause_max < 1) {
+					ch_fxs->config.digit_pause_max = 50;
+				}
+				// digit.inter.min
+				ch_fxs->config.digit_inter_min = 200;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "digit.inter.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.digit_inter_min = atoi(cvar);
+				}
+				if (ch_fxs->config.digit_inter_min < 1) {
+					ch_fxs->config.digit_inter_min = 200;
+				}
+#endif
+				// start channel
+				if (/*ch_fxo->config.enable*/1) {
+					// start FXS channel workthread
+					ch_fxo->flags.enable = 1;
+					ch_fxo->power_delay = 5;
+					if (ast_pthread_create_detached(&ch_fxo->thread, NULL, pg_channel_fxo_workthread, ch_fxo) < 0) {
+						ast_log(LOG_ERROR, "can't start workthread for FXO channel=\"%s\"\n", ch_fxo->alias);
+						ch_fxo->flags.enable = 0;
+						ch_fxo->thread = AST_PTHREADT_NULL;
+						goto pg_load_error;
+					}
+				}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#endif
 			} else if (sscanf(buf, "VIN%uRTP%u %[0-9A-Za-z/!-]", &index, &pos, name) == 3) {
 				str_xchg(name, '!', '/');
 				cp =  strrchr(name, '/');
@@ -27023,6 +27671,19 @@ static int pg_load(void)
 
 #if ASTERISK_VERSION_NUMBER >= 100000
 		pg_fxs_tech.capabilities = ast_format_cap_alloc();
+#endif
+	}
+
+	if (pg_fxo_tech_neededed) {
+		// registering channel class PGFXO in asterisk PBX
+		if (ast_channel_register(&pg_fxo_tech)) {
+			ast_log(LOG_ERROR, "unable to register channel class 'PGFXO'\n");
+			goto pg_load_error;
+		}
+		pg_fxo_tech_registered = 1;
+
+#if ASTERISK_VERSION_NUMBER >= 100000
+		pg_fxo_tech.capabilities = ast_format_cap_alloc();
 #endif
 	}
 
