@@ -1,0 +1,5 @@
+gsm.enable=no
+gsm.context=default
+gsm.incoming=deny
+gsm.incomingto=s
+gsm.outgoing=deny

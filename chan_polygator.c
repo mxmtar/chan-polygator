@@ -26253,7 +26253,7 @@ static int pg_load(void)
 					}
 				}
 				// enable
-				ch_gsm->config.enable = 1;
+				ch_gsm->config.enable = PG_GSM_ENABLE_DEFAULT;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "enable"))) {
 					ch_gsm->config.enable = -ast_true(cvar);
 				}
@@ -26294,7 +26294,7 @@ static int pg_load(void)
 					ch_gsm->config.clir = PG_CLIR_STATE_SUBSCRIPTION;
 				}
 				// outgoing
-				ch_gsm->config.outgoing_perm = PG_CALL_PERMISSION_ALLOW;
+				ch_gsm->config.outgoing_perm = PG_GSM_OUT_CALL_PERMISSION_DEFAULT;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "outgoing"))) {
 					ch_gsm->config.outgoing_perm = pg_get_call_permission(cvar);
 				}
@@ -26302,7 +26302,7 @@ static int pg_load(void)
 					ch_gsm->config.outgoing_perm = PG_CALL_PERMISSION_DENY;
 				}
 				// incoming
-				ch_gsm->config.incoming_type = PG_CALL_INCOMING_TYPE_SPEC;
+				ch_gsm->config.incoming_type = PG_GSM_INCOMING_DEFAULT;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "incoming"))) {
 					ch_gsm->config.incoming_type = pg_call_get_incoming_type(cvar);
 				}
@@ -26311,7 +26311,7 @@ static int pg_load(void)
 				}
 				// incomingto
 				if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_SPEC) {
-					ast_copy_string(ch_gsm->config.call_extension, "s", sizeof(ch_gsm->config.call_extension));
+					ast_copy_string(ch_gsm->config.call_extension, PG_GSM_INCOMINGTO_DEFAULT, sizeof(ch_gsm->config.call_extension));
 					if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "incomingto"))) {
 						ast_copy_string(ch_gsm->config.call_extension, cvar, sizeof(ch_gsm->config.call_extension));
 					}
@@ -26327,7 +26327,7 @@ static int pg_load(void)
 					ch_gsm->config.dcrttl = 60;
 				}
 				// context
-				ast_copy_string(ch_gsm->config.call_context, "default", sizeof(ch_gsm->config.call_context));
+				ast_copy_string(ch_gsm->config.call_context, PG_GSM_CONTEXT_DEFAULT, sizeof(ch_gsm->config.call_context));
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "context"))) {
 					ast_copy_string(ch_gsm->config.call_context, cvar, sizeof(ch_gsm->config.call_context));
 				}

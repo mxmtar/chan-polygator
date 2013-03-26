@@ -29,6 +29,9 @@ noinst_HEADERS = \
 		strutil.h \
 		x_timer.h
 
+dist_noinst_DATA = \
+		defaults
+
 firmwaredir = $(astdatadir)/polygator
 dist_firmware_DATA = \
 	firmware/edspPRAMfw_RTP_782_14.bin \

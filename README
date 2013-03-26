@@ -42,7 +42,9 @@ or on some system
 # make install
 
 NOTE:
-1. chan-polygator try to discover asterisk data directory for installing firmware files.
+1. Before run configuration script you may customize some default options by editing
+"defaults" file. Key and values has same reason as in CLI or configuration file.
+2. chan-polygator try to discover asterisk data directory for installing firmware files.
 
 # ./configure --prefix=/path/to/asterisk/prefix
 ...........
@@ -68,14 +70,6 @@ astdatadir => /path/to/asterisk/datadir
 Remove if exist exclamation mark (!) after [directories] to enable directories
 configuration sections.
 
-2. If asterisk run by user:group rather than root:root you must change
-ownership for polygator-linux device files.
-
-# chown -R user:group /dev/polygator
-
-and if exist
-
-# chown user:group /dev/ttyPG*
 
 
 Dialplan configuration with chan-polygator.

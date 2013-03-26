@@ -4,7 +4,7 @@
 AC_PREREQ([2.60])
 
 # set project attribute
-AC_INIT([chan-polygator], [1.5.5])
+AC_INIT([chan-polygator], [1.5.6])
 
 # init automake
 AM_INIT_AUTOMAKE([-Wall -Werror])
@@ -27,7 +27,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([chan_polygator.c])
 
 AC_COPYRIGHT("Polygator")
-AC_REVISION(1.5.5)
+AC_REVISION(1.5.6)
 
 # prepare autoconfig header data
 AC_CONFIG_HEADER([autoconfig.h])
@@ -173,6 +173,12 @@ PG_ASTERISK_GET_DIRECTORY([astmoddir])
 PG_ASTERISK_GET_DIRECTORY([astdatadir])
 
 AC_DEFINE_UNQUOTED([ASTERISK_DATA_DEFAULT_PATH], ["${astdatadir}"], [Define default path to asterisk data directory.])
+
+PG_ASTERISK_GET_DEFAULTS([gsm.enable], ["no"])
+PG_ASTERISK_GET_DEFAULTS([gsm.context], ["default"])
+PG_ASTERISK_GET_DEFAULTS([gsm.incoming], ["deny"])
+PG_ASTERISK_GET_DEFAULTS([gsm.incomingto], ["s"])
+PG_ASTERISK_GET_DEFAULTS([gsm.outgoing], ["deny"])
 
 AC_CONFIG_FILES([Makefile])
 
