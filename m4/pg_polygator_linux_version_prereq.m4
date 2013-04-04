@@ -31,7 +31,7 @@ if test -f "$lt_sysroot/usr/include/polygator/version.h" ; then
 	done`
 
 
-	[TST_POLYGATOR_LINUX_VERSION=`cat $lt_sysroot/usr/include/polygator/version.h | ${GREP} -e '[[:space:]]*#define[[:space:]]*POLYGATOR_LINUX_VERSION[[:space:]]*\"\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\".*' | ${SED} -e '{s:[[:space:]]*#define[[:space:]]*POLYGATOR_LINUX_VERSION[[:space:]]*\"\(\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\)\".*:\1:}'`]
+	[TST_POLYGATOR_LINUX_VERSION=`cat $lt_sysroot/usr/include/polygator/version.h | ${GREP} -e '[[:space:]]*#define[[:space:]]*POLYGATOR_LINUX_VERSION[[:space:]]*\"\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}.*\".*' | ${SED} -e '{s:[[:space:]]*#define[[:space:]]*POLYGATOR_LINUX_VERSION[[:space:]]*\"\(\([0-9]\{1,2\}\.\)\{2,3\}[0-9]\{1,2\}\).*\".*:\1:}'`]
 	if test "$TST_POLYGATOR_LINUX_VERSION" = ""; then
 		AC_MSG_RESULT(fail)
 		AC_MSG_RESULT([Cannot find POLYGATOR_LINUX_VERSION in polygator/version.h header to retrieve polygator-linux version!])
