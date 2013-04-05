@@ -432,7 +432,7 @@ enum {
 	PG_CALL_FXO_MSG_SETUP_REQ,
 // 	PG_CALL_FXO_MSG_PROCEEDING_IND,
 // 	PG_CALL_FXO_MSG_ALERTING_IND,
-// 	PG_CALL_FXO_MSG_SETUP_CONFIRM,
+	PG_CALL_FXO_MSG_SETUP_CONFIRM,
 	PG_CALL_FXO_MSG_RELEASE_REQ,
 	PG_CALL_FXO_MSG_RELEASE_IND,
 	PG_CALL_FXO_MSG_SETUP_IND,
@@ -802,7 +802,7 @@ struct pg_channel_fxs {
 	int power_delay;
 	int hook_state;
 	int off_hook;
-	int digit;
+	unsigned int digit;
 	u_int32_t ringing0;
 	u_int32_t ring_pause0;
 	u_int32_t ringing1;
@@ -846,6 +846,7 @@ struct pg_channel_fxo {
 		int incoming_type;
 		int outgoing_perm;
 		int dialing_type;
+		int overlap;
 		char context[AST_MAX_CONTEXT];
 		char extension[AST_MAX_EXTENSION];
 		char language[MAX_LANGUAGE];
@@ -872,6 +873,7 @@ struct pg_channel_fxo {
 		unsigned int enable:1;
 		unsigned int shutdown:1;
 		unsigned int shutdown_now:1;
+		unsigned int overlap:1;
 	} flags;
 
 	// timers
@@ -882,12 +884,19 @@ struct pg_channel_fxo {
 		struct x_timer digit_pulse;
 		struct x_timer digit_pause;
 		struct x_timer digit_inter;
+		struct x_timer overlap_pause;
+		struct x_timer tone_active;
+		struct x_timer tone_pause;
 	} timers;
 
 	// Runtime data
 	int power_delay;
 	int dtmf_is_started;
 	int digit;
+	int overlap;
+	char overlap_buf[MAX_ADDRESS_LENGTH];
+	size_t overlap_pos;
+	int overlap_dialing_type;
 
 	time_t last_call_time_incoming;
 	time_t last_call_time_outgoing;
@@ -1327,6 +1336,7 @@ enum {
 	PG_CHANNEL_FXO_PARAM_CONTEXT,
 	PG_CHANNEL_FXO_PARAM_EXTENSION,
 	PG_CHANNEL_FXO_PARAM_DIALING,
+	PG_CHANNEL_FXO_PARAM_OVERLAP,
 	PG_CHANNEL_FXO_PARAM_LANGUAGE,
 	PG_CHANNEL_FXO_PARAM_MOHINTERPRET,
 	PG_CHANNEL_FXO_PARAM_TONEZONE,
@@ -1349,6 +1359,7 @@ static struct pg_channel_param pg_channel_fxo_params[] = {
 	PG_CHANNEL_PARAM("context", PG_CHANNEL_FXO_PARAM_CONTEXT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 	PG_CHANNEL_PARAM("extension", PG_CHANNEL_FXO_PARAM_EXTENSION, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 	PG_CHANNEL_PARAM("dialing", PG_CHANNEL_FXO_PARAM_DIALING, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("overlap", PG_CHANNEL_FXO_PARAM_OVERLAP, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 	PG_CHANNEL_PARAM("language", PG_CHANNEL_FXO_PARAM_LANGUAGE, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 	PG_CHANNEL_PARAM("mohinterpret", PG_CHANNEL_FXO_PARAM_MOHINTERPRET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 	PG_CHANNEL_PARAM("tonezone", PG_CHANNEL_FXO_PARAM_TONEZONE, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
@@ -4572,7 +4583,7 @@ static char *pg_call_fxo_message_to_string(int message)
 		case PG_CALL_FXO_MSG_SETUP_REQ: return "SETUP_REQ";
 // 		case PG_CALL_FXO_MSG_PROCEEDING_IND: return "PROCEEDING_IND";
 // 		case PG_CALL_FXO_MSG_ALERTING_IND: return "ALERTING_IND";
-// 		case PG_CALL_FXO_MSG_SETUP_CONFIRM: return "SETUP_CONFIRM";
+		case PG_CALL_FXO_MSG_SETUP_CONFIRM: return "SETUP_CONFIRM";
 		case PG_CALL_FXO_MSG_RELEASE_REQ: return "RELEASE_REQ";
 // 		case PG_CALL_FXO_MSG_RELEASE_IND: return "RELEASE_IND";
 		case PG_CALL_FXO_MSG_SETUP_IND: return "SETUP_IND";
@@ -8925,24 +8936,26 @@ static int pg_call_fxo_sm(struct pg_call* call, int message, int cause)
 								pg_call_gsm_state_to_string(call->state));
 			res = 0;
 			break;
+#endif
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-		case PG_CALL_GSM_MSG_SETUP_CONFIRM:
+		case PG_CALL_FXO_MSG_SETUP_CONFIRM:
 			while (ast_channel_trylock(call->owner)) {
-				ast_mutex_unlock(&ch_gsm->lock);
+				ast_mutex_unlock(&ch_fxo->lock);
 				usleep(1000);
-				ast_mutex_lock(&ch_gsm->lock);
+				ast_mutex_lock(&ch_fxo->lock);
 			}
-			ast_mutex_unlock(&ch_gsm->lock);
+			ast_mutex_unlock(&ch_fxo->lock);
 			ast_queue_control(call->owner, AST_CONTROL_ANSWER);
-			ast_channel_set_fd(call->owner, 0, ch_gsm->channel_rtp->fd);
-			ast_mutex_lock(&ch_gsm->lock);
+			ast_channel_set_fd(call->owner, 0, ch_fxo->channel_rtp->fd);
+			ast_mutex_lock(&ch_fxo->lock);
 			ast_channel_unlock(call->owner);
+			// stop proceeding timer
+			x_timer_stop(call->timers.proceeding);
 			gettimeofday(&call->answer_time, NULL);
-			call->state = PG_CALL_GSM_STATE_ACTIVE;
-			ast_debug(3, "GSM channel=\"%s\": call line=%d, state=%s\n", ch_gsm->alias, call->line, pg_call_gsm_state_to_string(call->state));
+			call->state = PG_CALL_FXO_STATE_ACTIVE;
+			ast_debug(3, "FXO channel=\"%s\": call line=%d, state=%s\n", ch_fxo->alias, call->line, pg_call_fxo_state_to_string(call->state));
 			res = 0;
 			break;
-#endif
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case PG_CALL_FXO_MSG_INFO_IND:
 			if (call->state == PG_CALL_FXO_STATE_OVERLAP_RECEIVING) {
@@ -9041,6 +9054,54 @@ static int pg_call_fxo_sm(struct pg_call* call, int message, int cause)
 }
 //------------------------------------------------------------------------------
 // end of pg_call_fxo_sm()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_call_fxo_dial_handler()
+//------------------------------------------------------------------------------
+void pg_call_fxo_dial_handler(void *data, int state)
+{
+	struct pg_vinetic *vin;
+	struct pg_call *call = data;
+	struct pg_channel_fxo *ch_fxo = call->channel.fxo;
+
+	if (state) {
+		ast_mutex_lock(&ch_fxo->lock);
+		// threat this status as answer supervision
+		pg_call_fxo_sm(call, PG_CALL_FXO_MSG_SETUP_CONFIRM, 0);
+		// check for overlap sending called number
+		if ((ch_fxo->config.overlap) && (!ast_strlen_zero(ch_fxo->overlap_buf))) {
+			ch_fxo->overlap = 1;
+			ch_fxo->overlap_pos = 0;
+			ch_fxo->overlap_dialing_type = ch_fxo->config.dialing_type;
+			ch_fxo->flags.overlap = 1;
+		}
+		// disable dial tone detection
+		if ((vin = pg_get_vinetic_from_board(ch_fxo->board, ch_fxo->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+			ast_mutex_lock(&vin->lock);
+			if (vin_reset_status(&vin->context) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+			} else {
+				// reset UTD1 handler
+				vin_reset_utd_1_handler(&vin->context, ch_fxo->vinetic_sig_slot);
+				// disable UTD1
+				if (vin_utd_1_disable(&vin->context, ch_fxo->vinetic_sig_slot) < 0) {
+					while (vin_message_stack_check_line(&vin->context)) {
+						ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+					}
+				}
+			}
+			ast_mutex_unlock(&vin->lock);
+		} else {
+			ast_log(LOG_ERROR, "FXO channel=\"%s\": can't get vinetic\n", ch_fxo->alias);
+		}
+		ast_mutex_unlock(&ch_fxo->lock);
+	}
+}
+//------------------------------------------------------------------------------
+// end of pg_call_fxo_dial_handler()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -13688,7 +13749,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					// stop dial timer
 					x_timer_stop(call->timers.dial);
 					// dial timer fired
-					ast_verb(4, "GSM channel=\"%s\":  call line=%d dialing timeout=%ld.%09ld expired\n",
+					ast_verb(4, "GSM channel=\"%s\": call line=%d dialing timeout=%ld.%09ld expired\n",
 								ch_gsm->alias,
 			  					call->line,
 								call->timers.dial.timeout.tv_sec,
@@ -13714,7 +13775,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					// stop proceeding timer
 					x_timer_stop(call->timers.proceeding);
 					// proceeding timer fired
-					ast_verb(4, "GSM channel=\"%s\":  call line=%d proceeding timeout expired\n", ch_gsm->alias, call->line);
+					ast_verb(4, "GSM channel=\"%s\": call line=%d proceeding timeout expired\n", ch_gsm->alias, call->line);
 					// hangup gsm channel
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
@@ -15729,7 +15790,6 @@ pg_channel_fxs_offhook_action_end:
 				usleep(1000);
 				ast_mutex_lock(&ch_fxs->lock);
 			}
-
 			if ((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number)) && (pg_is_vinetic_run(vin))) {
 				ast_mutex_lock(&vin->lock);
 				if (vin_reset_status(&vin->context) < 0) {
@@ -16144,6 +16204,7 @@ static void *pg_channel_fxo_workthread(void *data)
 	struct timeval timeout;
 	struct pg_vinetic *vin;
 	struct pg_call *call;
+	int overlap_break;
 	int ring_state = 0;
 	struct pg_channel_fxo *ch_fxo = (struct pg_channel_fxo *)data;
 
@@ -16173,7 +16234,72 @@ static void *pg_channel_fxo_workthread(void *data)
 		res = ast_select(0, NULL, NULL, NULL, &timeout);
 		ast_mutex_lock(&ch_fxo->lock);
 
-		// handle timers
+		// handle signals
+		if (ch_fxo->flags.overlap) {
+			ch_fxo->flags.overlap = 0;
+			ast_verb(4, "FXO channel=\"%s\" received overlap signal\n", ch_fxo->alias);
+			// check overlap buffer
+			if (!ch_fxo->overlap_buf[ch_fxo->overlap_pos]) {
+				ast_verb(4, "FXO channel=\"%s\" processing overlap done\n", ch_fxo->alias);
+				ch_fxo->overlap = 0;
+			}
+			overlap_break = 0;
+			while (ch_fxo->overlap_buf[ch_fxo->overlap_pos]) {
+				ast_verb(4, "FXO channel=\"%s\" processing overlap symbol=[%c]\n", ch_fxo->alias, ch_fxo->overlap_buf[ch_fxo->overlap_pos]);
+				// processing symbol
+				switch (ch_fxo->overlap_buf[ch_fxo->overlap_pos]) {
+					case 'p':
+						ch_fxo->overlap_dialing_type = PG_CALL_DIALING_TYPE_PULSE;
+						break;
+					case 'w':
+						x_timer_set_ms(ch_fxo->timers.overlap_pause, 1000);
+						overlap_break = 1;
+						break;
+					case '*': ch_fxo->digit = 10; goto processing_letters;
+					case '#': ch_fxo->digit = 11; goto processing_letters;
+					case 'A': case 'a': ch_fxo->digit = 12; goto processing_letters;
+					case 'B': case 'b': ch_fxo->digit = 13; goto processing_letters;
+					case 'C': case 'c': ch_fxo->digit = 14; goto processing_letters;
+					case 'D': case 'd': ch_fxo->digit = 15; goto processing_letters;
+					processing_letters:
+						if (ch_fxo->overlap_dialing_type == PG_CALL_DIALING_TYPE_TONE) {
+							x_timer_set_ms(ch_fxo->timers.tone_pause, 0);
+							overlap_break = 1;
+						}
+						break;
+					case '0': ch_fxo->digit = 0; goto processing_digits;
+					case '1': ch_fxo->digit = 1; goto processing_digits;
+					case '2': ch_fxo->digit = 2; goto processing_digits;
+					case '3': ch_fxo->digit = 3; goto processing_digits;
+					case '4': ch_fxo->digit = 4; goto processing_digits;
+					case '5': ch_fxo->digit = 5; goto processing_digits;
+					case '6': ch_fxo->digit = 6; goto processing_digits;
+					case '7': ch_fxo->digit = 7; goto processing_digits;
+					case '8': ch_fxo->digit = 8; goto processing_digits;
+					case '9': ch_fxo->digit = 9; goto processing_digits;
+					processing_digits:
+						if (ch_fxo->overlap_dialing_type == PG_CALL_DIALING_TYPE_PULSE) {
+							if (!ch_fxo->digit) {
+								ch_fxo->digit = 10;
+							}
+							x_timer_set_ms(ch_fxo->timers.digit_pause, 0);
+							overlap_break = 1;
+						} else if (ch_fxo->overlap_dialing_type == PG_CALL_DIALING_TYPE_TONE) {
+							x_timer_set_ms(ch_fxo->timers.tone_pause, 0);
+							overlap_break = 1;
+						}
+						break;
+					default:
+						break;
+				}
+				// set next symbol
+				++ch_fxo->overlap_pos;
+				// check for symbol need postprocessing
+				if (overlap_break) {
+					break;
+				}
+			}
+		}
 		// shutdown
 		if (ch_fxo->flags.shutdown) {
 			ch_fxo->flags.shutdown = 0;
@@ -16193,6 +16319,8 @@ static void *pg_channel_fxo_workthread(void *data)
 			// reset enable flags
 			ch_fxo->flags.enable = 0;
 		}
+
+		// handle timers
 		// ring_poll
 		if (is_x_timer_enable(ch_fxo->timers.ring_poll) && is_x_timer_fired(ch_fxo->timers.ring_poll)) {
 			x_timer_set_ms(ch_fxo->timers.ring_poll, 10);
@@ -16251,6 +16379,37 @@ static void *pg_channel_fxo_workthread(void *data)
 				ast_mutex_lock(&ch_fxo->lock);
 			}
 		}
+		// call timers
+		AST_LIST_TRAVERSE(&ch_fxo->call_list, call, entry) {
+			// dial
+			if (is_x_timer_enable(call->timers.dial)) {
+				if (is_x_timer_fired(call->timers.dial)) {
+					// stop dial timer
+					x_timer_stop(call->timers.dial);
+					// dial timer fired
+					ast_verb(4, "FXO channel=\"%s\": call line=%d dialing timeout=%ld.%09ld expired\n",
+								ch_fxo->alias,
+			  					call->line,
+								call->timers.dial.timeout.tv_sec,
+								call->timers.dial.timeout.tv_nsec);
+					// run call sm
+					pg_call_fxo_sm(call, PG_CALL_FXO_MSG_RELEASE_IND, AST_CAUSE_NO_ANSWER);
+					break;
+				}
+			}
+			// proceeding
+			if (is_x_timer_enable(call->timers.proceeding)) {
+				if (is_x_timer_fired(call->timers.proceeding)) {
+					// stop proceeding timer
+					x_timer_stop(call->timers.proceeding);
+					// proceeding timer fired
+					ast_verb(4, "FXO channel=\"%s\": call line=%d proceeding timeout expired\n", ch_fxo->alias, call->line);
+					// run call sm
+					pg_call_fxo_sm(call, PG_CALL_FXO_MSG_RELEASE_IND, AST_CAUSE_NORMAL_TEMPORARY_FAILURE);
+					break;
+				}
+			}
+		}
 		// digit_pulse
 		if (is_x_timer_enable(ch_fxo->timers.digit_pulse) && is_x_timer_fired(ch_fxo->timers.digit_pulse)) {
 			x_timer_stop(ch_fxo->timers.digit_pulse);
@@ -16270,6 +16429,93 @@ static void *pg_channel_fxo_workthread(void *data)
 		// digit_inter
 		if (is_x_timer_enable(ch_fxo->timers.digit_inter) && is_x_timer_fired(ch_fxo->timers.digit_inter)) {
 			x_timer_stop(ch_fxo->timers.digit_inter);
+			// check for re-init overlap processing
+			if (ch_fxo->overlap) {
+				ch_fxo->flags.overlap = 1;
+			}
+		}
+		// overlap_pause
+		if (is_x_timer_enable(ch_fxo->timers.overlap_pause) && is_x_timer_fired(ch_fxo->timers.overlap_pause)) {
+			x_timer_stop(ch_fxo->timers.overlap_pause);
+			// check for re-init overlap processing
+			if (ch_fxo->overlap) {
+				ch_fxo->flags.overlap = 1;
+			}
+		}
+		// tone_active
+		if (is_x_timer_enable(ch_fxo->timers.tone_active) && is_x_timer_fired(ch_fxo->timers.tone_active)) {
+			x_timer_stop(ch_fxo->timers.tone_active);
+			// disable tone generator
+			if ((vin = pg_get_vinetic_from_board(ch_fxo->board, ch_fxo->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+				ast_mutex_lock(&vin->lock);
+				if (vin_reset_status(&vin->context) < 0) {
+					while (vin_message_stack_check_line(&vin->context)) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+					}
+				} else {
+					// disable DTMF/AT generator
+					if (vin_dtmfat_generator_disable(&vin->context, ch_fxo->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+				}
+				ast_mutex_unlock(&vin->lock);
+			} else {
+				ast_log(LOG_ERROR, "FXO channel=\"%s\": can't get vinetic\n", ch_fxo->alias);
+			}
+			// wait for guard interval
+			x_timer_set_ms(ch_fxo->timers.overlap_pause, 100);
+		}
+		// tone_pause
+		if (is_x_timer_enable(ch_fxo->timers.tone_pause) && is_x_timer_fired(ch_fxo->timers.tone_pause)) {
+			x_timer_stop(ch_fxo->timers.tone_pause);
+			// enable tone generator
+			if ((vin = pg_get_vinetic_from_board(ch_fxo->board, ch_fxo->vinetic_number)) && (pg_is_vinetic_run(vin))) {
+				ast_mutex_lock(&vin->lock);
+				if (vin_reset_status(&vin->context) < 0) {
+					while (vin_message_stack_check_line(&vin->context)) {
+						ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+					}
+				} else {
+					// disable UTG
+					if (vin_utg_disable(&vin->context, ch_fxo->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+					// disable DTMF/AT generator
+					if (vin_dtmfat_generator_disable(&vin->context, ch_fxo->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+					// set tone code into DTMF/AT generator
+					vin_dtmfat_generator_data_set_dtc(&vin->context, ch_fxo->vinetic_sig_slot, ch_fxo->digit);
+					if (vin_dtmfat_generator_data_write(&vin->context, ch_fxo->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+					// enable UTG
+					vin_dtmfat_generator_set_et(&vin->context, ch_fxo->vinetic_sig_slot, VIN_INACTIVE);
+					vin_dtmfat_generator_set_ad(&vin->context, ch_fxo->vinetic_sig_slot, VIN_OFF);
+					vin_dtmfat_generator_set_md(&vin->context, ch_fxo->vinetic_sig_slot, VIN_OFF);
+					vin_dtmfat_generator_set_fg(&vin->context, ch_fxo->vinetic_sig_slot, 1);
+					vin_dtmfat_generator_set_add_1(&vin->context, ch_fxo->vinetic_sig_slot, VIN_ADD_A_NONE);
+					vin_dtmfat_generator_set_add_2(&vin->context, ch_fxo->vinetic_sig_slot, VIN_ADD_B_DTMFAT);
+					if (vin_dtmfat_generator_enable(&vin->context, ch_fxo->vinetic_sig_slot) < 0) {
+						while (vin_message_stack_check_line(&vin->context)) {
+							ast_log(LOG_WARNING, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+						}
+					}
+				}
+				ast_mutex_unlock(&vin->lock);
+			} else {
+				ast_log(LOG_ERROR, "FXO channel=\"%s\": can't get vinetic\n", ch_fxo->alias);
+			}
+			// wait for tone generation end
+			x_timer_set_ms(ch_fxo->timers.tone_active, 100);
 		}
 	}
 
@@ -16589,7 +16835,7 @@ static int pg_config_file_build(char *filename)
 
 			ast_mutex_lock(&ch_fxo->lock);
 
-			// FXS channel category
+			// FXO channel category
 			len += fprintf(fp, "[%s-fxo%u]\n", ch_fxo->board->name, ch_fxo->position_on_board);
 			// alias
 			len += fprintf(fp, "alias=%s\n", ch_fxo->alias);
@@ -16597,6 +16843,8 @@ static int pg_config_file_build(char *filename)
 			len += fprintf(fp, "enable=%s\n", ch_fxo->flags.enable ? "yes" : "no");
 			// dialing
 			len += fprintf(fp, "dialing=%s\n", pg_call_dialing_type_to_string(ch_fxo->config.dialing_type));
+			// overlap
+			len += fprintf(fp, "overlap=%s\n", ch_fxo->config.overlap ? "yes" : "no");
 			// incoming
 			len += fprintf(fp, "incoming=%s\n", pg_call_incoming_type_to_string(ch_fxo->config.incoming_type));
 			// outgoing
@@ -19225,6 +19473,8 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_RINGING:
 			ast_verb(4, "FXS channel=\"%s\": call line=%d indicate ringing\n", ch_fxs->alias, call->line);
+			// reset billing time
+			call->answer_time.tv_sec = 0;
 			// state
 			ast_setstate(ast_ch, AST_STATE_RING);
 			// adjust voice format
@@ -19521,6 +19771,8 @@ pg_fxs_indicate_ringing_end:
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_PROCEEDING:
 			ast_verb(4, "FXS channel=\"%s\": call line=%d indicate proceeding\n", ch_fxs->alias, call->line);
+			// reset billing time
+			call->answer_time.tv_sec = 0;
 			// adjust voice format
 			rtp = ch_fxs->channel_rtp;
 			vin = rtp->vinetic;
@@ -20026,15 +20278,6 @@ static int pg_fxs_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int 
 // end of pg_fxs_dtmf_end()
 //------------------------------------------------------------------------------
 
-void test_dial_handler(void *data, int state)
-{
-	int ch;
-
-	memcpy(&ch, data, sizeof(ch));
-
-	ast_verbose("\n%d: DIAL=%d\n\n", ch, state);
-}
-
 //------------------------------------------------------------------------------
 // pg_fxo_requester()
 //------------------------------------------------------------------------------
@@ -20453,7 +20696,6 @@ static struct ast_channel *pg_fxo_requester(const char *type, int format, void *
 			}
 			goto pg_fxo_requester_vinetic_end;
 		}
-
 		// enable UTD1
 		vin_utd_1_set_is(&vin->context, ch_fxo->vinetic_sig_slot, VIN_IS_SIGNINA);
 		vin_utd_1_set_md(&vin->context, ch_fxo->vinetic_sig_slot, VIN_MD_UTD);
@@ -20464,8 +20706,7 @@ static struct ast_channel *pg_fxo_requester(const char *type, int format, void *
 			goto pg_fxo_requester_vinetic_end;
 		}
 		// set UTD1 handler
-		vin_set_utd_1_handler(&vin->context, ch_fxo->vinetic_sig_slot, test_dial_handler, &ch_fxo->vinetic_sig_slot);
-
+		vin_set_utd_1_handler(&vin->context, ch_fxo->vinetic_sig_slot, pg_call_fxo_dial_handler, call);
 		// set status mask
 		if ((res = vin_set_status_mask(&vin->context)) < 0) {
 			while (vin_message_stack_check_line(&vin->context)) {
@@ -20666,7 +20907,12 @@ static int pg_fxo_call(struct ast_channel *ast_ch, char *dest, int timeout)
 	ast_mutex_lock(&ch_fxo->lock);
 
 	// get called name
-	address_classify(dest, &call->called_name);
+	if (ast_strlen_zero(dest)) {
+		address_classify("s", &call->called_name);
+	} else {
+		address_classify(dest, &call->called_name);
+		ast_copy_string(ch_fxo->overlap_buf, dest, sizeof(ch_fxo->overlap_buf));
+	}
 	// get calling name
 #if ASTERISK_VERSION_NUMBER >= 110000
 	if (ast_channel_connected(ast_ch)->id.number.str) {
@@ -20686,7 +20932,7 @@ static int pg_fxo_call(struct ast_channel *ast_ch, char *dest, int timeout)
 		ast_mutex_unlock(&ch_fxo->lock);
 		return -1;
 	}
-	ast_verb(2, "FXO channel=\"%s\": incoming call \"%s%s\" -> \"%s%s\"\n",
+	ast_verb(2, "FXO channel=\"%s\": outgoing call \"%s%s\" -> \"%s%s\"\n",
 			 					ch_fxo->alias,
 								(call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value,
 								(call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
@@ -23096,6 +23342,47 @@ static char *pg_cli_generate_complete_channel_fxo_dialing(const char *begin, int
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_generate_complete_channel_fxo_overlap()
+//------------------------------------------------------------------------------
+static char *pg_cli_generate_complete_channel_fxo_overlap(const char *begin, int count, const char *channel_fxo)
+{
+	char *res;
+	int beginlen;
+	int which;
+	struct pg_channel_fxo *ch_fxo;
+
+	res = NULL;
+	which = 0;
+	beginlen = strlen(begin);
+
+	if ((ch_fxo = pg_get_channel_fxo_by_name(channel_fxo))) {
+		ast_mutex_lock(&ch_fxo->lock);
+		if (ch_fxo->config.overlap) {
+			if ((!strncmp(begin, "no", beginlen)) && (++which > count)) {
+				res = ast_strdup("no");
+			}
+		} else {
+			if ((!strncmp(begin, "yes", beginlen)) && (++which > count)) {
+				res = ast_strdup("yes");
+			}
+		}
+		ast_mutex_unlock(&ch_fxo->lock);
+	} else {
+		if ((!res) && (!strncmp(begin, "yes", beginlen)) && (++which > count)) {
+			res = ast_strdup("yes");
+		}
+		if ((!res) && (!strncmp(begin, "no", beginlen)) && (++which > count)) {
+			res = ast_strdup("no");
+		}
+	}
+
+	return res;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_generate_complete_channel_fxo_overlap()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_generate_complete_channel_fxo_ali_nelec()
 //------------------------------------------------------------------------------
 static char *pg_cli_generate_complete_channel_fxo_ali_nelec(const char *begin, int count, const char *channel_fxo)
@@ -25287,7 +25574,7 @@ static char *pg_cli_channel_gsm_action_power(struct ast_cli_entry *e, int cmd, s
 		if (!strcmp(a->argv[3], "all") || !strcmp(a->argv[3], ch_gsm->alias)) {
 			total++;
 			ast_cli(a->fd, "  GSM channel=\"%s\": ", ch_gsm->alias);
-			if (ast_true(a->argv[5])) {
+			if (str_true(a->argv[5])) {
 				// on 
 				if (!ch_gsm->flags.power) {
 					if (!pg_channel_gsm_power_set(ch_gsm, 1)) {
@@ -26270,7 +26557,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_ENABLE:
-							ch_gsm->config.sms_notify_enable = -ast_true(a->argv[6]);
+							ch_gsm->config.sms_notify_enable = -str_true(a->argv[6]);
 							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -26322,12 +26609,12 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNKONLY:
-							ch_gsm->config.trunkonly = -ast_true(a->argv[6]);
+							ch_gsm->config.trunkonly = -str_true(a->argv[6]);
 							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CONFALLOW:
-							ch_gsm->config.conference_allowed = -ast_true(a->argv[6]);
+							ch_gsm->config.conference_allowed = -str_true(a->argv[6]);
 							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -26899,7 +27186,7 @@ static char *pg_cli_channel_gsm_action_debug(struct ast_cli_entry *e, int cmd, s
 				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 				case PG_CHANNEL_GSM_DEBUG_AT:
 					ast_cli(a->fd, "%s debug", a->argv[5]);
-					if (a->argv[6] && !ast_true(a->argv[6])) {
+					if (a->argv[6] && !str_true(a->argv[6])) {
 						// off
 						if (ch_gsm->debug.at) {
 							ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
@@ -26948,7 +27235,7 @@ static char *pg_cli_channel_gsm_action_debug(struct ast_cli_entry *e, int cmd, s
 				//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 				case PG_CHANNEL_GSM_DEBUG_RECEIVER:
 					ast_cli(a->fd, "%s debug", a->argv[5]);
-					if (a->argv[6] && !ast_true(a->argv[6])) {
+					if (a->argv[6] && !str_true(a->argv[6])) {
 						// off
 						if (ch_gsm->debug.receiver) {
 							ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
@@ -29063,7 +29350,7 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_FXS_PARAM_CALLWAIT:
-							ch_fxs->config.callwait = -ast_true(a->argv[6]);
+							ch_fxs->config.callwait = -str_true(a->argv[6]);
 							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -29870,6 +30157,8 @@ static char *pg_cli_channel_fxo_action_param(struct ast_cli_entry *e, int cmd, s
 						return pg_cli_generate_complete_context(a->word, a->n);
 					} else if (!strcmp(gargv[5], "dialing")) {
 						return pg_cli_generate_complete_channel_fxo_dialing(a->word, a->n, gargv[3]);
+					} else if (!strcmp(gargv[5], "overlap")) {
+						return pg_cli_generate_complete_channel_fxo_overlap(a->word, a->n, gargv[3]);
 					} else if (!strcmp(gargv[5], "ali.nelec")) {
 						return pg_cli_generate_complete_channel_fxo_ali_nelec(a->word, a->n, gargv[3]);
 					} else if (!strcmp(gargv[5], "ali.nelec.tm")) {
@@ -29964,6 +30253,10 @@ static char *pg_cli_channel_fxo_action_param(struct ast_cli_entry *e, int cmd, s
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_FXO_PARAM_DIALING:
 							ast_cli(a->fd, " -> %s\n", pg_call_dialing_type_to_string(ch_fxo->config.dialing_type));
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXO_PARAM_OVERLAP:
+							ast_cli(a->fd, " -> %s\n", (ch_fxo->config.overlap)?"yes":"no");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_FXO_PARAM_LANGUAGE:
@@ -30076,6 +30369,11 @@ static char *pg_cli_channel_fxo_action_param(struct ast_cli_entry *e, int cmd, s
 							} else {
 								ast_cli(a->fd, " - unknown call dialing type\n");
 							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXO_PARAM_OVERLAP:
+							ch_fxo->config.overlap = -str_true(a->argv[6]);
+							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_FXO_PARAM_LANGUAGE:
@@ -30585,6 +30883,14 @@ static char *pg_cli_channel_fxo_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_FXO_PARAM_EXTENSION:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXO_PARAM_DIALING:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_FXO_PARAM_OVERLAP:
 							ast_cli(a->fd, " - unsupported operation\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -31284,7 +31590,7 @@ static int pg_load(void)
 				// enable
 				ch_gsm->config.enable = 0;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "enable"))) {
-					ch_gsm->config.enable = -ast_true(cvar);
+					ch_gsm->config.enable = -str_true(cvar);
 				}
 				// pin
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "pin"))) {
@@ -31309,7 +31615,7 @@ static int pg_load(void)
 				// callwait
 				ch_gsm->config.callwait = PG_CALLWAIT_STATE_DISABLE;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "callwait"))) {
-					ch_gsm->config.callwait = -ast_true(cvar);
+					ch_gsm->config.callwait = -str_true(cvar);
 				}
 				if ((ch_gsm->config.callwait == PG_CALLWAIT_STATE_UNKNOWN) || (ch_gsm->config.callwait == PG_CALLWAIT_STATE_QUERY)) {
 					ch_gsm->config.callwait = PG_CALLWAIT_STATE_DISABLE;
@@ -31451,7 +31757,7 @@ static int pg_load(void)
 				// sms.notify.enable
 				ch_gsm->config.sms_notify_enable = 0;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "sms.notify.enable"))) {
-					ch_gsm->config.sms_notify_enable = -ast_true(cvar);
+					ch_gsm->config.sms_notify_enable = -str_true(cvar);
 				}
 				// sms.notify.context
 				ast_copy_string(ch_gsm->config.sms_notify_context, "default", sizeof(ch_gsm->config.sms_notify_context));
@@ -31506,12 +31812,12 @@ static int pg_load(void)
 				// trunkonly
 				ch_gsm->config.trunkonly = 0;
 				if ((ch_gsm->trunk_list.first) && (cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "trunkonly"))) {
-						ch_gsm->config.trunkonly = -ast_true(cvar);
+						ch_gsm->config.trunkonly = -str_true(cvar);
 				}
 				// confallow
 				ch_gsm->config.conference_allowed = 0;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "confallow"))) {
-					ch_gsm->config.conference_allowed = -ast_true(cvar);
+					ch_gsm->config.conference_allowed = -str_true(cvar);
 				}
 				// ali.nelec
 				ch_gsm->config.ali_nelec = VIN_EN;
@@ -31613,7 +31919,7 @@ static int pg_load(void)
 				// enable
 				ch_fxs->config.enable = 0;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "enable"))) {
-					ch_fxs->config.enable = -ast_true(cvar);
+					ch_fxs->config.enable = -str_true(cvar);
 				}
 				// outgoing
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "outgoing"))) {
@@ -31867,7 +32173,7 @@ static int pg_load(void)
 				// enable
 				ch_fxo->config.enable = 1;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxo->device, "enable"))) {
-					ch_fxo->config.enable = -ast_true(cvar);
+					ch_fxo->config.enable = -str_true(cvar);
 				}
 				// outgoing
 				ch_fxo->config.outgoing_perm = PG_CALL_PERMISSION_ALLOW;
@@ -31892,6 +32198,11 @@ static int pg_load(void)
 				}
 				if (ch_fxo->config.dialing_type == PG_CALL_DIALING_TYPE_UNKNOWN) {
 					ch_fxo->config.dialing_type = PG_CALL_DIALING_TYPE_PULSE;
+				}
+				// overlap
+				ch_fxo->config.overlap = 1;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxo->device, "overlap"))) {
+					ch_fxo->config.overlap = -str_true(cvar);
 				}
 				// context
 				ast_copy_string(ch_fxo->config.context, "fromfxs", sizeof(ch_fxo->config.context));
