@@ -32268,7 +32268,7 @@ static int pg_load(void)
 					ch_fxo->config.gainr = vin_gaindb_to_gainem(tmpf);
 				}
 				// ali.nelec
-				ch_fxo->config.ali_nelec = VIN_DIS;
+				ch_fxo->config.ali_nelec = VIN_EN;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxo->device, "ali.nelec"))) {
 					ch_fxo->config.ali_nelec = str_true(cvar)?VIN_EN:VIN_DIS;
 				}
