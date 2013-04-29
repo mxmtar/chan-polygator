@@ -1569,8 +1569,7 @@ void pg_printf(int type, uintptr_t dst, const char *fmt, ...)
 	int out;
 	char buff[1024];
 
-	switch (type)
-	{
+	switch (type) {
 		case PG_PRINT_FILE:
 			fp = (FILE *)dst;
 			va_start(va, fmt);
@@ -1652,11 +1651,11 @@ static void pg_sim_db_table_create(ast_mutex_t *lock)
 			row = 0;
 			while (1) {
 				res = sqlite3_step(sql0);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -1683,11 +1682,11 @@ static void pg_sim_db_table_create(ast_mutex_t *lock)
 					row = 0;
 					while (1) {
 						res = sqlite3_step(sql1);
-						if (res == SQLITE_ROW)
+						if (res == SQLITE_ROW) {
 							row++;
-						else if (res == SQLITE_DONE)
+						} else if (res == SQLITE_DONE) {
 							break;
-						else if (res == SQLITE_BUSY) {
+						} else if (res == SQLITE_BUSY) {
 							if (lock) ast_mutex_unlock(lock);
 							usleep(1000);
 							if (lock) ast_mutex_lock(lock);
@@ -1739,19 +1738,17 @@ static char *pg_get_pin_by_iccid(const char *iccid, ast_mutex_t *lock)
 	ast_mutex_lock(&pg_sim_db_lock);
 
 	str = sqlite3_mprintf("SELECT pin FROM 'simcards' WHERE iccid='%q';", iccid);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_sim_db, str, strlen(str), &sql, NULL);
 		if (res == SQLITE_OK) {
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
 					pin = ast_strdup((char *)sqlite3_column_text(sql, 0));
 					if (pin) break;
-				} else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -1798,19 +1795,17 @@ static char *pg_get_puk_by_iccid(const char *iccid, ast_mutex_t *lock)
 	ast_mutex_lock(&pg_sim_db_lock);
 
 	str = sqlite3_mprintf("SELECT puk FROM 'simcards' WHERE iccid='%q';", iccid);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_sim_db, str, strlen(str), &sql, NULL);
 		if (res == SQLITE_OK) {
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
 					puk = ast_strdup((char *)sqlite3_column_text(sql, 0));
 					if (puk) break;
-				} else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -1857,18 +1852,16 @@ static void pg_set_pin_by_iccid(const char *iccid, const char *pin, ast_mutex_t 
 	// check for entry
 	row = 0;
 	str = sqlite3_mprintf("SELECT pin FROM 'simcards' WHERE iccid='%q';", iccid);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_sim_db, str, strlen(str), &sql, NULL);
 		if (res == SQLITE_OK) {
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
 					row++;
-				} else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -1895,18 +1888,16 @@ static void pg_set_pin_by_iccid(const char *iccid, const char *pin, ast_mutex_t 
 	if (row) {
 		// update entry
 		str = sqlite3_mprintf("UPDATE 'simcards' SET pin='%q' WHERE iccid='%q';", pin, iccid);
-		while (1)
-		{
+		while (1) {
 			res = sqlite3_prepare_fun(pg_sim_db, str, strlen(str), &sql, NULL);
 			if (res == SQLITE_OK) {
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_step(sql);
-					if (res == SQLITE_ROW)
+					if (res == SQLITE_ROW) {
 						row++;
-					else if (res == SQLITE_DONE)
+					} else if (res == SQLITE_DONE) {
 						break;
-					else if (res == SQLITE_BUSY) {
+					} else if (res == SQLITE_BUSY) {
 						if (lock) ast_mutex_unlock(lock);
 						usleep(1000);
 						if (lock) ast_mutex_lock(lock);
@@ -1932,18 +1923,16 @@ static void pg_set_pin_by_iccid(const char *iccid, const char *pin, ast_mutex_t 
 	} else {
 		// insert new entry
 		str = sqlite3_mprintf("INSERT INTO 'simcards' (iccid, pin) VALUES ('%q','%q');", iccid, pin);
-		while (1)
-		{
+		while (1) {
 			res = sqlite3_prepare_fun(pg_sim_db, str, strlen(str), &sql, NULL);
 			if (res == SQLITE_OK) {
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_step(sql);
-					if (res == SQLITE_ROW)
+					if (res == SQLITE_ROW) {
 						row++;
-					else if (res == SQLITE_DONE)
+					} else if (res == SQLITE_DONE) {
 						break;
-					else if (res == SQLITE_BUSY) {
+					} else if (res == SQLITE_BUSY) {
 						if (lock) ast_mutex_unlock(lock);
 						usleep(1000);
 						if (lock) ast_mutex_lock(lock);
@@ -1990,18 +1979,16 @@ static void pg_set_puk_by_iccid(const char *iccid, const char *puk, ast_mutex_t 
 	// check for entry
 	row = 0;
 	str = sqlite3_mprintf("SELECT puk FROM 'simcards' WHERE iccid='%q';", iccid);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_sim_db, str, strlen(str), &sql, NULL);
 		if (res == SQLITE_OK) {
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
 					row++;
-				} else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2028,18 +2015,16 @@ static void pg_set_puk_by_iccid(const char *iccid, const char *puk, ast_mutex_t 
 	if (row) {
 		// update entry
 		str = sqlite3_mprintf("UPDATE 'simcards' SET puk='%q' WHERE iccid='%q';", puk, iccid);
-		while (1)
-		{
+		while (1) {
 			res = sqlite3_prepare_fun(pg_sim_db, str, strlen(str), &sql, NULL);
 			if (res == SQLITE_OK) {
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_step(sql);
-					if (res == SQLITE_ROW)
+					if (res == SQLITE_ROW) {
 						row++;
-					else if (res == SQLITE_DONE)
+					} else if (res == SQLITE_DONE) {
 						break;
-					else if (res == SQLITE_BUSY) {
+					} else if (res == SQLITE_BUSY) {
 						if (lock) ast_mutex_unlock(lock);
 						usleep(1000);
 						if (lock) ast_mutex_lock(lock);
@@ -2065,18 +2050,16 @@ static void pg_set_puk_by_iccid(const char *iccid, const char *puk, ast_mutex_t 
 	} else {
 		// insert new entry
 		str = sqlite3_mprintf("INSERT INTO 'simcards' (iccid, puk) VALUES ('%q','%q');", iccid, puk);
-		while (1)
-		{
+		while (1) {
 			res = sqlite3_prepare_fun(pg_sim_db, str, strlen(str), &sql, NULL);
 			if (res == SQLITE_OK) {
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_step(sql);
-					if (res == SQLITE_ROW)
+					if (res == SQLITE_ROW) {
 						row++;
-					else if (res == SQLITE_DONE)
+					} else if (res == SQLITE_DONE) {
 						break;
-					else if (res == SQLITE_BUSY) {
+					} else if (res == SQLITE_BUSY) {
 						if (lock) ast_mutex_unlock(lock);
 						usleep(1000);
 						if (lock) ast_mutex_lock(lock);
@@ -2088,8 +2071,7 @@ static void pg_set_puk_by_iccid(const char *iccid, const char *puk, ast_mutex_t 
 				}
 				sqlite3_finalize(sql);
 				break;
-			}
-			else if (res == SQLITE_BUSY) {
+			} else if (res == SQLITE_BUSY) {
 				if (lock) ast_mutex_unlock(lock);
 				usleep(1000);
 				if (lock) ast_mutex_lock(lock);
@@ -2122,19 +2104,17 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 
 	// create table for inbox SMS
 	str0 = sqlite3_mprintf("SELECT COUNT(msgno) FROM '%q-inbox';", iccid);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql0);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2167,19 +2147,17 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 										"part INTEGER, "
 										"content TEXT"
 										");", iccid);
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_prepare_fun(pg_sms_db, str1, strlen(str1), &sql1, NULL);
 				if (res == SQLITE_OK) {
 					row = 0;
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_step(sql1);
-						if (res == SQLITE_ROW)
+						if (res == SQLITE_ROW) {
 							row++;
-						else if (res == SQLITE_DONE)
+						} else if (res == SQLITE_DONE) {
 							break;
-						else if (res == SQLITE_BUSY) {
+						} else if (res == SQLITE_BUSY) {
 							if (lock) ast_mutex_unlock(lock);
 							usleep(1000);
 							if (lock) ast_mutex_lock(lock);
@@ -2212,19 +2190,17 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 
 	// create table for outbox SMS
 	str0 = sqlite3_mprintf("SELECT COUNT(msgno) FROM '%q-outbox';", iccid);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql0);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2250,19 +2226,17 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 									"enqueued INTEGER, "
 									"hash VARCHAR(32) UNIQUE"
 									");", iccid);
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_prepare_fun(pg_sms_db, str1, strlen(str1), &sql1, NULL);
 				if (res == SQLITE_OK) {
 					row = 0;
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_step(sql1);
-						if (res == SQLITE_ROW)
+						if (res == SQLITE_ROW) {
 							row++;
-						else if (res == SQLITE_DONE)
+						} else if (res == SQLITE_DONE) {
 							break;
-						else if (res == SQLITE_BUSY) {
+						} else if (res == SQLITE_BUSY) {
 							if (lock) ast_mutex_unlock(lock);
 							usleep(1000);
 							if (lock) ast_mutex_lock(lock);
@@ -2295,19 +2269,17 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 
 	// create table for preparing message PDU
 	str0 = sqlite3_mprintf("SELECT COUNT(msgno) FROM '%q-preparing';", iccid);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql0);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2345,19 +2317,17 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 										"flash INTEGER, "
 										"content TEXT"
 										");", iccid);
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_prepare_fun(pg_sms_db, str1, strlen(str1), &sql1, NULL);
 				if (res == SQLITE_OK) {
 					row = 0;
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_step(sql1);
-						if (res == SQLITE_ROW)
+						if (res == SQLITE_ROW) {
 							row++;
-						else if (res == SQLITE_DONE)
+						} else if (res == SQLITE_DONE) {
 							break;
-						else if (res == SQLITE_BUSY) {
+						} else if (res == SQLITE_BUSY) {
 							if (lock) ast_mutex_unlock(lock);
 							usleep(1000);
 							if (lock) ast_mutex_lock(lock);
@@ -2384,25 +2354,23 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 		} else {
 			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_sms_db));
 			break;
-			}
+		}
 	}
 	sqlite3_free(str0);
 
 	// create table for sent SMS
 	str0 = sqlite3_mprintf("SELECT COUNT(msgno) FROM '%q-sent';", iccid);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql0);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2445,19 +2413,17 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 										"flash INTEGER, "
 										"content TEXT"
 										");", iccid);
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_prepare_fun(pg_sms_db, str1, strlen(str1), &sql1, NULL);
 				if (res == SQLITE_OK) {
 					row = 0;
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_step(sql1);
-						if (res == SQLITE_ROW)
+						if (res == SQLITE_ROW) {
 							row++;
-						else if (res == SQLITE_DONE)
+						} else if (res == SQLITE_DONE) {
 							break;
-						else if (res == SQLITE_BUSY) {
+						} else if (res == SQLITE_BUSY) {
 							if (lock) ast_mutex_unlock(lock);
 							usleep(1000);
 							if (lock) ast_mutex_lock(lock);
@@ -2490,19 +2456,17 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 
 	// create table for discard SMS
 	str0 = sqlite3_mprintf("SELECT COUNT(id) FROM '%q-discard';", iccid);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql0);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2529,19 +2493,17 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 										"timestamp INTEGER, "
 										"hash VARCHAR(32)"
 										");", iccid);
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_prepare_fun(pg_sms_db, str1, strlen(str1), &sql1, NULL);
 				if (res == SQLITE_OK) {
 					row = 0;
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_step(sql1);
-						if (res == SQLITE_ROW)
+						if (res == SQLITE_ROW) {
 							row++;
-						else if (res == SQLITE_DONE)
+						} else if (res == SQLITE_DONE) {
 							break;
-						else if (res == SQLITE_BUSY) {
+						} else if (res == SQLITE_BUSY) {
 							if (lock) ast_mutex_unlock(lock);
 							usleep(1000);
 							if (lock) ast_mutex_lock(lock);
@@ -2592,19 +2554,17 @@ static void pg_dcr_table_create(const char *imsi, ast_mutex_t *lock)
 
 	// create table for dynamic CLIP routing
 	str0 = sqlite3_mprintf("SELECT COUNT(id) FROM '%q-dcr';", imsi);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_gen_db, str0, strlen(str0), &sql0, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql0);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2629,19 +2589,17 @@ static void pg_dcr_table_create(const char *imsi, ast_mutex_t *lock)
 										"totype INTEGER, "
 										"toname TEXT, "
 										"timestamp INTEGER);", imsi);
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_prepare_fun(pg_gen_db, str1, strlen(str1), &sql1, NULL);
 				if (res == SQLITE_OK) {
 					row = 0;
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_step(sql1);
-						if (res == SQLITE_ROW)
+						if (res == SQLITE_ROW) {
 							row++;
-						else if (res == SQLITE_DONE)
+						} else if (res == SQLITE_DONE) {
 							break;
-						else if (res == SQLITE_BUSY) {
+						} else if (res == SQLITE_BUSY) {
 							if (lock) ast_mutex_unlock(lock);
 							usleep(1000);
 							if (lock) ast_mutex_lock(lock);
@@ -2694,19 +2652,17 @@ static void pg_dcr_table_update(const char *imsi, struct address *from, struct a
 	// update dynamic clip routing table
 	// delete entry with the same called name = from
 	str = sqlite3_mprintf("DELETE FROM '%q-dcr' WHERE fromtype=%d AND fromname='%q';", imsi, from->type.full, from->value);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2734,19 +2690,17 @@ static void pg_dcr_table_update(const char *imsi, struct address *from, struct a
 	str = sqlite3_mprintf("INSERT INTO '%q-dcr' (fromtype, fromname, totype, toname, timestamp) VALUES (%d,'%q',%d,'%q',%ld);",
 							imsi, from->type.full, from->value,
 							to->type.full, to->value, tv.tv_sec);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2789,8 +2743,9 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 	struct address testaddr;
 	struct address *resaddr = NULL;
 
-	if (!imsi)
+	if (!imsi) {
 		return NULL;
+	}
 
 	ast_mutex_lock(&pg_gen_db_lock);
 
@@ -2799,8 +2754,7 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 	res = sqlite3_prepare_fun(pg_gen_db, str0, strlen(str0), &sql0, NULL);
 	if (res == SQLITE_OK) {
 		row = 0;
-		while (1)
-		{
+		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
 				row++;
@@ -2812,9 +2766,9 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 					resaddr = to;
 					break;
 				}
-			} else if (res == SQLITE_DONE)
+			} else if (res == SQLITE_DONE) {
 				break;
-			else if(res == SQLITE_BUSY) {
+			} else if(res == SQLITE_BUSY) {
 				if (lock) ast_mutex_unlock(lock);
 				usleep(1000);
 				if (lock) ast_mutex_lock(lock);
@@ -2831,14 +2785,13 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 			res = sqlite3_prepare_fun(pg_gen_db, str1, strlen(str1), &sql1, NULL);
 			if (res == SQLITE_OK) {
 				row = 0;
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_step(sql1);
 					if (res == SQLITE_ROW) {
 						row++;
-					} else if (res == SQLITE_DONE)
+					} else if (res == SQLITE_DONE) {
 						break;
-					else if (res == SQLITE_BUSY) {
+					} else if (res == SQLITE_BUSY) {
 						if (lock) ast_mutex_unlock(lock);
 						usleep(1000);
 						if (lock) ast_mutex_lock(lock);
@@ -2849,12 +2802,14 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 					}
 				}
 				sqlite3_finalize(sql1);
-			} else
+			} else {
 				ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+			}
 			sqlite3_free(str1);
 		}
-	} else
+	} else {
 		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+	}
 	sqlite3_free(str0);
 #if 0
 	if (!resaddr) {
@@ -2864,8 +2819,7 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 		sqlite3_free(str);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
 					row++;
@@ -2877,9 +2831,9 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 						resaddr = to;
 						break;
 					}
-				} else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2890,8 +2844,9 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 				}
 			}
 			sqlite3_finalize(sql0);
-		} else
+		} else {
 			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+		}
 		sqlite3_free(str0);
 
 	}
@@ -2919,19 +2874,17 @@ static void pg_cdr_table_create(ast_mutex_t *lock)
 
 	// create table for CDR
 	str0 = sqlite3_mprintf("SELECT COUNT(id) FROM 'cdr';");
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_cdr_db, str0, strlen(str0), &sql0, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql0);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -2963,19 +2916,17 @@ static void pg_cdr_table_create(ast_mutex_t *lock)
 										"endtime INTEGER, "
 										"hungupside INTEGER, "
 										"hungupcause INTEGER);");
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_prepare_fun(pg_cdr_db, str1, strlen(str1), &sql1, NULL);
 				if (res == SQLITE_OK) {
 					row = 0;
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_step(sql1);
-						if (res == SQLITE_ROW)
+						if (res == SQLITE_ROW) {
 							row++;
-						else if (res == SQLITE_DONE)
+						} else if (res == SQLITE_DONE) {
 							break;
-						else if (res == SQLITE_BUSY) {
+						} else if (res == SQLITE_BUSY) {
 							if (lock) ast_mutex_unlock(lock);
 							usleep(1000);
 							if (lock) ast_mutex_lock(lock);
@@ -3034,19 +2985,17 @@ static void pg_cdr_table_insert_record(const char *channel, const char *imsi, st
 						"%d,%ld,%ld,%ld,%d,%d);",
 						channel, imsi, call->calling_name.type.full, call->calling_name.value, call->called_name.type.full, call->called_name.value,
 						call->direction, call->start_time.tv_sec, call->answer_time.tv_sec, tv.tv_sec, call->hangup_side, call->hangup_cause);
-	while (1)
-	{
+	while (1) {
 		res = sqlite3_prepare_fun(pg_cdr_db, str, strlen(str), &sql, NULL);
 		if (res == SQLITE_OK) {
 			row = 0;
-			while (1)
-			{
+			while (1) {
 				res = sqlite3_step(sql);
-				if (res == SQLITE_ROW)
+				if (res == SQLITE_ROW) {
 					row++;
-				else if (res == SQLITE_DONE)
+				} else if (res == SQLITE_DONE) {
 					break;
-				else if (res == SQLITE_BUSY) {
+				} else if (res == SQLITE_BUSY) {
 					if (lock) ast_mutex_unlock(lock);
 					usleep(1000);
 					if (lock) ast_mutex_lock(lock);
@@ -3088,8 +3037,9 @@ static int64_t pg_cdr_table_get_out_total_call_count(const char *key, const char
 
 	int64_t count;
 
-	if (!key || !value)
+	if (!key || !value) {
 		return 0;
+	}
 
 	ast_mutex_lock(&pg_cdr_db_lock);
 
@@ -3098,16 +3048,15 @@ static int64_t pg_cdr_table_get_out_total_call_count(const char *key, const char
 	res = sqlite3_prepare_fun(pg_cdr_db, str0, strlen(str0), &sql0, NULL);
 	if (res == SQLITE_OK) {
 		row = 0;
-		while (1)
-		{
+		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
 				row++;
 				count = sqlite3_column_int64(sql0, 0);
 				break;
-			} else if (res == SQLITE_DONE)
+			} else if (res == SQLITE_DONE) {
 				break;
-			else if(res == SQLITE_BUSY) {
+			} else if(res == SQLITE_BUSY) {
 				if (lock) ast_mutex_unlock(lock);
 				usleep(1000);
 				if (lock) ast_mutex_lock(lock);
@@ -3118,8 +3067,9 @@ static int64_t pg_cdr_table_get_out_total_call_count(const char *key, const char
 			}
 		}
 		sqlite3_finalize(sql0);
-	} else
+	} else {
 		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_cdr_db));
+	}
 	sqlite3_free(str0);
 
 	ast_mutex_unlock(&pg_cdr_db_lock);
@@ -3142,8 +3092,9 @@ static int64_t pg_cdr_table_get_out_answered_call_count(const char *key, const c
 
 	int64_t count;
 
-	if (!key || !value)
+	if (!key || !value) {
 		return 0;
+	}
 
 	ast_mutex_lock(&pg_cdr_db_lock);
 
@@ -3152,16 +3103,15 @@ static int64_t pg_cdr_table_get_out_answered_call_count(const char *key, const c
 	res = sqlite3_prepare_fun(pg_cdr_db, str0, strlen(str0), &sql0, NULL);
 	if (res == SQLITE_OK) {
 		row = 0;
-		while (1)
-		{
+		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
 				row++;
 				count = sqlite3_column_int64(sql0, 0);
 				break;
-			} else if (res == SQLITE_DONE)
+			} else if (res == SQLITE_DONE) {
 				break;
-			else if(res == SQLITE_BUSY) {
+			} else if(res == SQLITE_BUSY) {
 				if (lock) ast_mutex_unlock(lock);
 				usleep(1000);
 				if (lock) ast_mutex_lock(lock);
@@ -3172,8 +3122,9 @@ static int64_t pg_cdr_table_get_out_answered_call_count(const char *key, const c
 			}
 		}
 		sqlite3_finalize(sql0);
-	} else
+	} else {
 		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_cdr_db));
+	}
 	sqlite3_free(str0);
 
 	ast_mutex_unlock(&pg_cdr_db_lock);
@@ -3198,8 +3149,9 @@ static time_t pg_cdr_table_get_out_active_call_duration(const char *key, const c
 	time_t end_time;
 	time_t duration;
 
-	if (!key || !value)
+	if (!key || !value) {
 		return 0;
+	}
 
 	ast_mutex_lock(&pg_cdr_db_lock);
 
@@ -3208,17 +3160,16 @@ static time_t pg_cdr_table_get_out_active_call_duration(const char *key, const c
 	res = sqlite3_prepare_fun(pg_cdr_db, str0, strlen(str0), &sql0, NULL);
 	if (res == SQLITE_OK) {
 		row = 0;
-		while (1)
-		{
+		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
 				row++;
 				answer_time = sqlite3_column_int64(sql0, 0);
 				end_time = sqlite3_column_int64(sql0, 1);
 				duration += end_time - answer_time;
-			} else if (res == SQLITE_DONE)
+			} else if (res == SQLITE_DONE) {
 				break;
-			else if(res == SQLITE_BUSY) {
+			} else if(res == SQLITE_BUSY) {
 				if (lock) ast_mutex_unlock(lock);
 				usleep(1000);
 				if (lock) ast_mutex_lock(lock);
@@ -3229,8 +3180,9 @@ static time_t pg_cdr_table_get_out_active_call_duration(const char *key, const c
 			}
 		}
 		sqlite3_finalize(sql0);
-	} else
+	} else {
 		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_cdr_db));
+	}
 	sqlite3_free(str0);
 
 	ast_mutex_unlock(&pg_cdr_db_lock);
@@ -3252,8 +3204,9 @@ static time_t pg_cdr_table_get_out_call_starttime(const char *key, const char *v
 
 	time_t start_time;
 
-	if (!key || !value)
+	if (!key || !value) {
 		return 0;
+	}
 
 	ast_mutex_lock(&pg_cdr_db_lock);
 
@@ -3261,15 +3214,14 @@ static time_t pg_cdr_table_get_out_call_starttime(const char *key, const char *v
 	str0 = sqlite3_mprintf("SELECT starttime FROM 'cdr' WHERE %q='%q' AND direction=%d ORDER BY starttime;", key, value, PG_CALL_DIRECTION_OUTGOING);
 	res = sqlite3_prepare_fun(pg_cdr_db, str0, strlen(str0), &sql0, NULL);
 	if (res == SQLITE_OK) {
-		while (1)
-		{
+		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
 				start_time = sqlite3_column_int64(sql0, 0);
 				break;
-			} else if (res == SQLITE_DONE)
+			} else if (res == SQLITE_DONE) {
 				break;
-			else if(res == SQLITE_BUSY) {
+			} else if(res == SQLITE_BUSY) {
 				if (lock) ast_mutex_unlock(lock);
 				usleep(1000);
 				if (lock) ast_mutex_lock(lock);
@@ -3280,8 +3232,9 @@ static time_t pg_cdr_table_get_out_call_starttime(const char *key, const char *v
 			}
 		}
 		sqlite3_finalize(sql0);
-	} else
+	} else {
 		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_cdr_db));
+	}
 	sqlite3_free(str0);
 
 	ast_mutex_unlock(&pg_cdr_db_lock);
@@ -3469,11 +3422,12 @@ static int pg_get_channel_gsm_power_sequence_number(void)
 {
 	struct pg_channel_gsm *ch_gsm;
 	int seq = 1;
-
 	// traverse channel gsm list
 	AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 		ast_mutex_lock(&ch_gsm->lock);
-		if (ch_gsm->power_sequence_number > 0) seq++;
+		if (ch_gsm->power_sequence_number > 0) {
+			seq++;
+		}
 		ast_mutex_unlock(&ch_gsm->lock);
 	}
 
@@ -3518,8 +3472,9 @@ static struct pg_trunk_gsm_channel_gsm_fold *pg_get_channel_gsm_fold_from_trunk_
 		// traverse channel gsm list for matching entry name
 		AST_LIST_TRAVERSE(&trunk->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry) {
 			// compare name strings
-			if (!strcmp(name, ch_gsm_fold->channel_gsm->alias))
+			if (!strcmp(name, ch_gsm_fold->channel_gsm->alias)) {
 				break;
+			}
 		}
 	}
 	return ch_gsm_fold;
@@ -3542,7 +3497,9 @@ static struct pg_trunk_gsm *pg_get_trunk_gsm_by_name(const char *name, int type)
 			tr_gsm = NULL;
 			AST_LIST_TRAVERSE(&pg_general_trunk_gsm_list, tr_gsm, pg_general_trunk_gsm_list_entry) {
 				// compare name strings
-				if ((type == tr_gsm->type) && (!strcmp(name, tr_gsm->name))) break;
+				if ((type == tr_gsm->type) && (!strcmp(name, tr_gsm->name))) {
+					break;
+				}
 			}
 		}
 	}
@@ -3560,8 +3517,9 @@ static int pg_gsm_module_type_get(const char *module_type)
 	size_t i;
 	int res = POLYGATOR_MODULE_TYPE_UNKNOWN;
 	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_gsm_module_types); i++) {
-		if (!strcasecmp(module_type, pg_gsm_module_types[i].name))
+		if (!strcasecmp(module_type, pg_gsm_module_types[i].name)) {
 			return pg_gsm_module_types[i].id;
+		}
 	}
 	return res;
 }
@@ -3576,8 +3534,9 @@ static char *pg_gsm_module_type_to_string(unsigned int type)
 {
 	size_t i;
 	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_gsm_module_types); i++) {
-		if (type == pg_gsm_module_types[i].id)
+		if (type == pg_gsm_module_types[i].id) {
 			return pg_gsm_module_types[i].name;
+		}
 	}
 	return "unknown";
 }
@@ -3638,8 +3597,9 @@ static char *pg_callwait_state_to_string(int state)
 {
 	size_t i;
 	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_callwait_states); i++) {
-		if (state == pg_callwait_states[i].id)
+		if (state == pg_callwait_states[i].id) {
 			return pg_callwait_states[i].name;
+		}
 	}
 	return "unknown";
 }
@@ -3675,8 +3635,9 @@ static char *pg_clir_state_to_string(int state)
 {
 	size_t i;
 	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_clir_states); i++) {
-		if (state == pg_clir_states[i].id)
+		if (state == pg_clir_states[i].id) {
 			return pg_clir_states[i].name;
+		}
 	}
 	return "unknown";
 }
@@ -3942,8 +3903,9 @@ static char *pg_call_gsm_progress_to_string(int progress)
 {
 	size_t i;
 	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_progress_types); i++) {
-		if (progress == pg_call_gsm_progress_types[i].id)
+		if (progress == pg_call_gsm_progress_types[i].id) {
 			return pg_call_gsm_progress_types[i].name;
+		}
 	}
 	return "unknown";
 }
@@ -3979,8 +3941,9 @@ static char *pg_call_incoming_type_to_string(int incoming)
 {
 	size_t i;
 	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); i++) {
-		if (incoming == pg_call_incoming_types[i].id)
+		if (incoming == pg_call_incoming_types[i].id) {
 			return pg_call_incoming_types[i].name;
+		}
 	}
 	return "unknown";
 }
@@ -4016,8 +3979,9 @@ static char *pg_call_dialing_type_to_string(int dialing)
 {
 	size_t i;
 	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_dialing_types); i++) {
-		if (dialing == pg_call_dialing_types[i].id)
+		if (dialing == pg_call_dialing_types[i].id) {
 			return pg_call_dialing_types[i].name;
+		}
 	}
 	return "unknown";
 }
@@ -4053,8 +4017,9 @@ static char *pg_call_permission_to_string(int outgoing)
 {
 	size_t i;
 	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
-		if (outgoing == pg_call_permissions[i].id)
+		if (outgoing == pg_call_permissions[i].id) {
 			return pg_call_permissions[i].name;
+		}
 	}
 	return "unknown";
 }
@@ -5114,9 +5079,9 @@ static int pg_atcommand_queue_prepend(struct pg_channel_gsm* ch_gsm,
 		cmd->cmd_len += vsprintf(cmd->cmd_buf + cmd->cmd_len, fmt, vargs);
 		va_end(vargs);
 		cmd->cmd_len += sprintf(cmd->cmd_buf + cmd->cmd_len, "\r");
-	} else
+	} else {
 		cmd->cmd_len = sprintf(cmd->cmd_buf, "%s%s\r", cmd->at->name, opstr);
-
+	}
 	// append to head of queue
 	AST_LIST_INSERT_HEAD(&ch_gsm->cmd_queue, cmd, entry);
 
@@ -5242,20 +5207,14 @@ static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 					ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
 					if (ch_gsm->debug.receiver_debug_fp) {
 						gettimeofday(&time_data, NULL);
-						if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-							fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
+						time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+						fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
 													time_ptr->tm_year + 1900,
 													time_ptr->tm_mon+1,
 													time_ptr->tm_mday,
 													time_ptr->tm_hour,
 													time_ptr->tm_min,
 													time_ptr->tm_sec,
-													time_data.tv_usec,
-													ch_gsm->at_cmd->cmd_len - 1,
-													ch_gsm->at_cmd->cmd_buf);
-						else
-							fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%ld.%06ld] AT send [%.*s]\n",
-													time_data.tv_sec,
 													time_data.tv_usec,
 													ch_gsm->at_cmd->cmd_len - 1,
 													ch_gsm->at_cmd->cmd_buf);
@@ -5268,20 +5227,14 @@ static int pg_atcommand_trysend(struct pg_channel_gsm* ch_gsm)
 					ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
 					if (ch_gsm->debug.at_debug_fp) {
 						gettimeofday(&time_data, NULL);
-						if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-							fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
+						time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+						fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT send [%.*s]\n",
 													time_ptr->tm_year + 1900,
 													time_ptr->tm_mon+1,
 													time_ptr->tm_mday,
 													time_ptr->tm_hour,
 													time_ptr->tm_min,
 													time_ptr->tm_sec,
-													time_data.tv_usec,
-													ch_gsm->at_cmd->cmd_len - 1,
-													ch_gsm->at_cmd->cmd_buf);
-						else
-							fprintf(ch_gsm->debug.at_debug_fp, "[%ld.%06ld] AT send [%.*s]\n",
-													time_data.tv_sec,
 													time_data.tv_usec,
 													ch_gsm->at_cmd->cmd_len - 1,
 													ch_gsm->at_cmd->cmd_buf);
@@ -5311,8 +5264,9 @@ static inline void pg_atcommand_queue_flush(struct pg_channel_gsm* ch_gsm)
 {
 	struct pg_at_cmd *at_cmd;
 	
-	while ((at_cmd = AST_LIST_REMOVE_HEAD(&ch_gsm->cmd_queue, entry)))
+	while ((at_cmd = AST_LIST_REMOVE_HEAD(&ch_gsm->cmd_queue, entry))) {
 		ast_free(at_cmd);
+	}
 }
 //------------------------------------------------------------------------------
 // end of pg_atcommand_queue_flush()
@@ -5373,8 +5327,7 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 	// write imei data1
 	pos = 0;
 	x_timer_set_second(timer, 10);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5391,7 +5344,9 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 				} else {
 					tmpi -= res;
 					pos += res;
-					if (tmpi <= 0) break;
+					if (tmpi <= 0) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -5405,8 +5360,7 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 	}
 	// wait for 0x06 from GSM module
 	x_timer_set_second(timer, 10);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5423,7 +5377,9 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim300_end;
 					}
 				} else {
-					if (tmpchr == 0x06) break;
+					if (tmpchr == 0x06) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -5440,8 +5396,7 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 	// write imei data2
 	pos = 0;
 	x_timer_set_second(timer, 10);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5458,7 +5413,9 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 				} else {
 					tmpi -= res;
 					pos += res;
-					if (tmpi <= 0) break;
+					if (tmpi <= 0) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -5472,8 +5429,7 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 	}
 	// wait for 0x06 from GSM module
 	x_timer_set_second(timer, 10);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5490,7 +5446,9 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim300_end;
 					}
 				} else {
-					if (tmpchr == 0x06) break;
+					if (tmpchr == 0x06) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -5505,8 +5463,7 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 	// write 0x06
 	tmpchr = 0x06;
 	x_timer_set_second(timer, 10);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5520,8 +5477,9 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 				if ((res = write(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
 					pg_printf(print_type, print_out, "GSM channel=\"%s\": write(0x06 a): %s\n", ch_gsm->alias, strerror(errno));
 					goto pg_channel_gsm_write_imei_sim300_end;
-				} else
+				} else {
 					break;
+				}
 			}
 		} else if (res < 0) {
 			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(write 0x06 a): %s\n", ch_gsm->alias, strerror(errno));
@@ -5538,8 +5496,7 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 	// write imei data3
 	pos = 0;
 	x_timer_set_second(timer, 10);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5556,7 +5513,9 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 				} else {
 					tmpi -= res;
 					pos += res;
-					if (tmpi <= 0) break;
+					if (tmpi <= 0) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -5570,8 +5529,7 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 	}
 	// wait for 0x06 from GSM module
 	x_timer_set_second(timer, 10);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5588,7 +5546,9 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim300_end;
 					}
 				} else {
-					if (tmpchr == 0x06) break;
+					if (tmpchr == 0x06) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -5603,8 +5563,7 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 	// write 0x06
 	tmpchr = 0x06;
 	x_timer_set_second(timer, 10);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5618,8 +5577,9 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 				if ((res = write(ch_gsm->tty_fd, &tmpchr, 1)) < 0) {
 					pg_printf(print_type, print_out, "GSM channel=\"%s\": write(0x06 b): %s\n", ch_gsm->alias, strerror(errno));
 					goto pg_channel_gsm_write_imei_sim300_end;
-				} else
+				} else {
 					break;
+				}
 			}
 		} else if (res < 0) {
 			pg_printf(print_type, print_out, "GSM channel=\"%s\": select(write 0x06 b): %s\n", ch_gsm->alias, strerror(errno));
@@ -5639,14 +5599,17 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 pg_channel_gsm_write_imei_sim300_end:
 
 	// restore old termios
-	if (tcsetattr(ch_gsm->tty_fd, TCSANOW, &old_termios))
+	if (tcsetattr(ch_gsm->tty_fd, TCSANOW, &old_termios)) {
 		pg_printf(print_type, print_out, "GSM channel=\"%s\": tcsetattr() error: %s\n", ch_gsm->alias, strerror(errno));
+	}
 	// select MAIN channel of SERIAL port
 	ch_gsm->flags.main_tty = 1;
-	if (pg_channel_gsm_serial_set(ch_gsm, 0) < 0)
+	if (pg_channel_gsm_serial_set(ch_gsm, 0) < 0) {
 		pg_printf(print_type, print_out, "GSM channel=\"%s\": can't switch serial port to main channel: %s\n", ch_gsm->alias, strerror(errno));
-	if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0)
+	}
+	if (tcflush(ch_gsm->tty_fd, TCIOFLUSH) < 0) {
 		pg_printf(print_type, print_out, "GSM channel=\"%s\": can't flush tty device: %s\n", ch_gsm->alias, strerror(errno));
+	}
 
 	return result;
 }
@@ -5758,8 +5721,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// Detection of synchronous bytes
 	action = "Detection of synchronous bytes";
 	x_timer_set_second(timer, 10);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		// writing synchronous octet 0x16
 		state = "writing synchronous octet (0x16)";
 		timeout.tv_sec = 0;
@@ -5802,7 +5764,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x16) break;	// synchronous octet received
+					if (t_char == 0x16) {
+						break;	// synchronous octet received
+					}
 				}
 			} if (res < 0) {
 				pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
@@ -5828,14 +5792,12 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	}
 	// write hex file
 	state = "write hex file";
-	while (fgets(t_buf, sizeof(t_buf), hex_fptr))
-	{
+	while (fgets(t_buf, sizeof(t_buf), hex_fptr)) {
 		t_ptr = t_buf;
 		t_size = strlen(t_buf);
 		t_pos = 0;
 		x_timer_set_second(timer, t_size/1000 + 1);
-		while (is_x_timer_active(timer))
-		{
+		while (is_x_timer_active(timer)) {
 			timeout.tv_sec = 0;
 			timeout.tv_usec = (t_size - t_pos) * 1000;
 			FD_ZERO(&fds);
@@ -5853,7 +5815,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						}
 					} else if (res > 0) {
 						t_pos += res;
-						if (t_size == t_pos) break;
+						if (t_size == t_pos) {
+							break;
+						}
 					}
 				}
 			} else if (res < 0) {
@@ -5869,8 +5833,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for success indication 0x00
 	state = "wait for success indication (0x00)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5887,7 +5850,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x00) break;
+					if (t_char == 0x00) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -5910,8 +5875,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	t_size = sim900_cmd_sel_mem_reg_size();
 	t_pos = 0;
 	x_timer_set_second(timer, t_size/1000 + 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = (t_size - t_pos) * 1000;
 		FD_ZERO(&fds);
@@ -5929,7 +5893,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 					}
 				} else if (res > 0) {
 					t_pos += res;
-					if (t_size == t_pos) break;
+					if (t_size == t_pos) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -5944,8 +5910,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for success indication 0x04
 	state = "wait for success indication (0x04)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -5962,7 +5927,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x04) break;
+					if (t_char == 0x04) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -5980,8 +5947,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// write command
 	state = "write command";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 1000;
 		FD_ZERO(&fds);
@@ -5998,7 +5964,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
-				} if (res == 1) break;
+				} if (res == 1) {
+					break;
+				}
 			}
 		} if (res < 0) {
 			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
@@ -6012,8 +5980,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// read marker 0x02
 	state = "read marker (0x02)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -6030,7 +5997,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x02) break;
+					if (t_char == 0x02) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6048,8 +6017,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	t_size = sizeof(storage_equipment);
 	t_pos = 0;
 	x_timer_set_second(timer, t_size/1000 + 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = (t_size - t_pos) * 1000;
 		FD_ZERO(&fds);
@@ -6067,7 +6035,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 					}
 				} else if (res > 0) {
 					t_pos += res;
-					if (t_size == t_pos) break;
+					if (t_size == t_pos) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6088,8 +6058,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	t_size = sim900_cmd_sel_mem_reg_size();
 	t_pos = 0;
 	x_timer_set_second(timer, t_size/1000 + 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = (t_size - t_pos) * 1000;
 		FD_ZERO(&fds);
@@ -6107,7 +6076,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 					}
 				} else if (res > 0) {
 					t_pos += res;
-					if (t_size == t_pos) break;
+					if (t_size == t_pos) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6122,8 +6093,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for success indication 0x04
 	state = "wait for success indication (0x04)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -6140,7 +6110,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x04) break;
+					if (t_char == 0x04) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6158,8 +6130,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// write command
 	state = "write command";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 1000;
 		FD_ZERO(&fds);
@@ -6176,7 +6147,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
-				} if (res == 1) break;
+				} if (res == 1) {
+					break;
+				}
 			}
 		} if (res < 0) {
 			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
@@ -6190,8 +6163,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// read marker 0x17
 	state = "read marker (0x17)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -6208,7 +6180,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x17) break;
+					if (t_char == 0x17) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6226,8 +6200,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	t_size = sizeof(page);
 	t_pos = 0;
 	x_timer_set_second(timer, t_size/1000 + 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 0;
 		timeout.tv_usec = (t_size - t_pos) * 1000;
 		FD_ZERO(&fds);
@@ -6245,7 +6218,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 					}
 				} else if (res > 0) {
 					t_pos += res;
-					if (t_size == t_pos) break;
+					if (t_size == t_pos) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6290,7 +6265,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 					}
 				} else if (res > 0) {
 					t_pos += res;
-					if (t_size == t_pos) break;
+					if (t_size == t_pos) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6322,7 +6299,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x09) break;
+					if (t_char == 0x09) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6357,7 +6336,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - write(): %s\n", ch_gsm->alias, action, state, strerror(errno));
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
-				} if (res == 1) break;
+				} if (res == 1) {
+					break;
+				}
 			}
 		} if (res < 0) {
 			pg_printf(print_type, print_out, "GSM channel=\"%s\": %s %s failed - select(): %s\n", ch_gsm->alias, action, state, strerror(errno));
@@ -6388,7 +6369,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x03) break;
+					if (t_char == 0x03) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6420,7 +6403,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x30) break;
+					if (t_char == 0x30) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6460,7 +6445,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 					}
 				} else if (res > 0) {
 					t_pos += res;
-					if (t_size == t_pos) break;
+					if (t_size == t_pos) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6475,8 +6462,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for success indication 0x04
 	state = "wait for success indication (0x04)";
 	x_timer_set_second(timer, 1);
-	while (is_x_timer_active(timer))
-	{
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -6493,7 +6479,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						goto pg_channel_gsm_write_imei_sim900_end;
 					}
 				} else if (res == 1) {
-					if (t_char == 0x04) break;
+					if (t_char == 0x04) {
+						break;
+					}
 				}
 			}
 		} else if (res < 0) {
@@ -6534,7 +6522,9 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 						}
 					} else if (res > 0) {
 						t_pos += res;
-						if (t_size == t_pos) break;
+						if (t_size == t_pos) {
+							break;
+						}
 					}
 				}
 			} else if (res < 0) {
@@ -9239,8 +9229,9 @@ static void *pg_channel_gsm_workthread(void *data)
 	res = ch_gsm->power_sequence_number;
 	ast_mutex_unlock(&ch_gsm->lock);
 
-	if (res > 0)
+	if (res > 0) {
 		usleep(799999 * res);
+	}
 
 	ast_mutex_lock(&ch_gsm->lock);
 	ch_gsm->power_sequence_number = -1;
@@ -10251,9 +10242,9 @@ static void *pg_channel_gsm_workthread(void *data)
 												ast_mutex_lock(&ch_gsm->lock);
 											}
 											// disable GSM module functionality
-											pg_atcommand_insert_spacer(ch_gsm, 3);
+											pg_atcommand_insert_spacer(ch_gsm, 3000);
 											pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-											pg_atcommand_insert_spacer(ch_gsm, 2);
+											pg_atcommand_insert_spacer(ch_gsm, 2000);
 											// mark this state as suspend
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -10469,9 +10460,9 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->flags.sim_test = 1;
 										}
 										// disable GSM module functionality
-										pg_atcommand_insert_spacer(ch_gsm, 3);
+										pg_atcommand_insert_spacer(ch_gsm, 3000);
 										pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-										pg_atcommand_insert_spacer(ch_gsm, 2);
+										pg_atcommand_insert_spacer(ch_gsm, 2000);
 										// mark this state as suspend
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -10500,9 +10491,9 @@ static void *pg_channel_gsm_workthread(void *data)
 										// check flags
 										if (ch_gsm->flags.sim_change) {
 											// disable GSM module functionality
-											pg_atcommand_insert_spacer(ch_gsm, 3);
+											pg_atcommand_insert_spacer(ch_gsm, 3000);
 											pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-											pg_atcommand_insert_spacer(ch_gsm, 2);
+											pg_atcommand_insert_spacer(ch_gsm, 2000);
 											// mark this state as suspend
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -10554,9 +10545,9 @@ static void *pg_channel_gsm_workthread(void *data)
 										}
 									} else if (!strcasecmp(r_buf, "+CPIN: SIM ERROR")) {
 										// disable GSM module functionality
-										pg_atcommand_insert_spacer(ch_gsm, 3);
+										pg_atcommand_insert_spacer(ch_gsm, 3000);
 										pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-										pg_atcommand_insert_spacer(ch_gsm, 2);
+										pg_atcommand_insert_spacer(ch_gsm, 2000);
 										// mark this state as suspend
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -10662,9 +10653,9 @@ static void *pg_channel_gsm_workthread(void *data)
 									// check flags
 									if (ch_gsm->flags.sim_change) {
 										// disable GSM module functionality
-										pg_atcommand_insert_spacer(ch_gsm, 3);
+										pg_atcommand_insert_spacer(ch_gsm, 3000);
 										pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-										pg_atcommand_insert_spacer(ch_gsm, 2);
+										pg_atcommand_insert_spacer(ch_gsm, 2000);
 										// mark this state as suspend
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -10686,9 +10677,9 @@ static void *pg_channel_gsm_workthread(void *data)
 									// check flags
 									if (ch_gsm->flags.sim_change) {
 										// disable GSM module functionality
-										pg_atcommand_insert_spacer(ch_gsm, 3);
+										pg_atcommand_insert_spacer(ch_gsm, 3000);
 										pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-										pg_atcommand_insert_spacer(ch_gsm, 2);
+										pg_atcommand_insert_spacer(ch_gsm, 2000);
 										// mark this state as suspend
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -11664,9 +11655,9 @@ static void *pg_channel_gsm_workthread(void *data)
 												ast_verbose("%s: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", AST_MODULE, ch_gsm->alias);
 												ch_gsm->flags.sim_test = 0;
 												// disable GSM module functionality
-												pg_atcommand_insert_spacer(ch_gsm, 3);
+												pg_atcommand_insert_spacer(ch_gsm, 3000);
 												pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-												pg_atcommand_insert_spacer(ch_gsm, 2);
+												pg_atcommand_insert_spacer(ch_gsm, 2000);
 												// mark this state as suspend
 												ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 												ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -11883,9 +11874,9 @@ static void *pg_channel_gsm_workthread(void *data)
 												ast_verbose("%s: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", AST_MODULE, ch_gsm->alias);
 												ch_gsm->flags.sim_test = 0;
 												// disable GSM module functionality
-												pg_atcommand_insert_spacer(ch_gsm, 3);
+												pg_atcommand_insert_spacer(ch_gsm, 3000);
 												pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-												pg_atcommand_insert_spacer(ch_gsm, 2);
+												pg_atcommand_insert_spacer(ch_gsm, 2000);
 												// mark this state as suspend
 												ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 												ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -12106,9 +12097,9 @@ static void *pg_channel_gsm_workthread(void *data)
 												ast_verbose("%s: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", AST_MODULE, ch_gsm->alias);
 												ch_gsm->flags.sim_test = 0;
 												// disable GSM module functionality
-												pg_atcommand_insert_spacer(ch_gsm, 3);
+												pg_atcommand_insert_spacer(ch_gsm, 3000);
 												pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-												pg_atcommand_insert_spacer(ch_gsm, 2);
+												pg_atcommand_insert_spacer(ch_gsm, 2000);
 												// mark this state as suspend
 												ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 												ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -12658,9 +12649,9 @@ static void *pg_channel_gsm_workthread(void *data)
 						x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
 					} else {
 						// try to switch GSM module into suspend state
-						pg_atcommand_insert_spacer(ch_gsm, 3);
+						pg_atcommand_insert_spacer(ch_gsm, 3000);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-						pg_atcommand_insert_spacer(ch_gsm, 2);
+						pg_atcommand_insert_spacer(ch_gsm, 2000);
 
 						if (ch_gsm->flags.sim_inserted) {
 							ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
@@ -12761,9 +12752,9 @@ static void *pg_channel_gsm_workthread(void *data)
 							ch_gsm->flags.sim_test = 1;
 						}
 						// disable GSM module functionality
-						pg_atcommand_insert_spacer(ch_gsm, 3);
+						pg_atcommand_insert_spacer(ch_gsm, 3000);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-						pg_atcommand_insert_spacer(ch_gsm, 2);
+						pg_atcommand_insert_spacer(ch_gsm, 2000);
 						// mark this state as suspend
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -12796,9 +12787,9 @@ static void *pg_channel_gsm_workthread(void *data)
 						// check flags
 						if (ch_gsm->flags.sim_change) {
 							// disable GSM module functionality
-							pg_atcommand_insert_spacer(ch_gsm, 3);
+							pg_atcommand_insert_spacer(ch_gsm, 3000);
 							pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-							pg_atcommand_insert_spacer(ch_gsm, 2);
+							pg_atcommand_insert_spacer(ch_gsm, 2000);
 							// mark this state as suspend
 							ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -12856,9 +12847,9 @@ static void *pg_channel_gsm_workthread(void *data)
 						}
 					} else if (!strcasecmp(r_buf, "+CPIN: SIM ERROR")) {
 						// disable GSM module functionality
-						pg_atcommand_insert_spacer(ch_gsm, 3);
+						pg_atcommand_insert_spacer(ch_gsm, 3000);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-						pg_atcommand_insert_spacer(ch_gsm, 2);
+						pg_atcommand_insert_spacer(ch_gsm, 2000);
 						// mark this state as suspend
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -13485,9 +13476,9 @@ static void *pg_channel_gsm_workthread(void *data)
 					ast_mutex_lock(&ch_gsm->lock);
 				}
 				// disable GSM module functionality
-				pg_atcommand_insert_spacer(ch_gsm, 3);
+				pg_atcommand_insert_spacer(ch_gsm, 3000);
 				pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-				pg_atcommand_insert_spacer(ch_gsm, 2);
+				pg_atcommand_insert_spacer(ch_gsm, 2000);
 				// mark this state as suspend
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -13529,9 +13520,9 @@ static void *pg_channel_gsm_workthread(void *data)
 					ast_mutex_lock(&ch_gsm->lock);
 				}
 				// disable GSM module functionality
-				pg_atcommand_insert_spacer(ch_gsm, 3);
+				pg_atcommand_insert_spacer(ch_gsm, 3000);
 				pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-				pg_atcommand_insert_spacer(ch_gsm, 2);
+				pg_atcommand_insert_spacer(ch_gsm, 2000);
 				// mark this state as suspend
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -13553,8 +13544,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				if (ch_gsm->baudrate_test) {
 					// set hardware baudrate
 					if (!tcgetattr(ch_gsm->tty_fd, &termios)) {
-						switch (ch_gsm->baudrate_test)
-						{
+						switch (ch_gsm->baudrate_test) {
 							case 9600:
 								baudrate = B9600;
 								break;
@@ -13809,7 +13799,6 @@ static void *pg_channel_gsm_workthread(void *data)
 				}
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-
 				// start pinwait timer
 				x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
 			}
@@ -13821,17 +13810,15 @@ static void *pg_channel_gsm_workthread(void *data)
 				ast_verb(5, "GSM channel=\"%s\": pinwait timer fired\n", ch_gsm->alias);
 				// stop pinwait timer
 				x_timer_stop(ch_gsm->timers.pinwait);
-
 				// disable GSM module functionality
-				pg_atcommand_insert_spacer(ch_gsm, 3);
+				pg_atcommand_insert_spacer(ch_gsm, 3000);
 				pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-				pg_atcommand_insert_spacer(ch_gsm, 2);
+				pg_atcommand_insert_spacer(ch_gsm, 2000);
 				// mark this state as suspend
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 				// wake up SIM
 				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
-
 			}
 		}
 		// smssend
@@ -13845,20 +13832,18 @@ static void *pg_channel_gsm_workthread(void *data)
 				int maxmsgid = 0;
 				ast_mutex_lock(&pg_sms_db_lock);
 				str0 = sqlite3_mprintf("SELECT MAX(msgid) FROM '%q-preparing';", ch_gsm->iccid);
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 					if (res == SQLITE_OK) {
 						row = 0;
-						while (1)
-						{
+						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
 								row++;
 								maxmsgid = sqlite3_column_int(sql0, 0);
-							} else if(res == SQLITE_DONE)
+							} else if(res == SQLITE_DONE) {
 								break;
-							else if (res == SQLITE_BUSY) {
+							} else if (res == SQLITE_BUSY) {
 								ast_mutex_unlock(&pg_sms_db_lock);
 								ast_mutex_unlock(&ch_gsm->lock);
 								usleep(1000);
@@ -14214,13 +14199,11 @@ static void *pg_channel_gsm_workthread(void *data)
 					// get pdu from database with unsent status
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("SELECT attempt,msgno,submitpdu,submitpdulen,datype,daname FROM '%q-preparing' WHERE status=0 ORDER BY msgno;", ch_gsm->iccid);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
 									row++;
@@ -14234,14 +14217,14 @@ static void *pg_channel_gsm_workthread(void *data)
 											ast_copy_string(ch_gsm->pdu_send_buf, (char *)sqlite3_column_text(sql0, 2), 512);
 											ch_gsm->pdu_send_len = strlen(ch_gsm->pdu_send_buf);
 											// send message command
-											pg_atcommand_insert_spacer(ch_gsm, 1);
+											pg_atcommand_insert_spacer(ch_gsm, 1000);
 											pg_atcommand_queue_prepend(ch_gsm, AT_CMGS, AT_OPER_WRITE, 0, 20000, 0, "%d", sqlite3_column_int(sql0, 3));
 											ast_verb(4, "GSM channel=\"%s\": send pdu to \"%s%s\"\n", ch_gsm->alias, (sqlite3_column_int(sql0, 4) == 145)?("+"):(""), sqlite3_column_text(sql0, 5));
 										}
 									}
-								} else if(res == SQLITE_DONE)
+								} else if(res == SQLITE_DONE) {
 									break;
-								else if (res == SQLITE_BUSY) {
+								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									ast_mutex_unlock(&ch_gsm->lock);
 									usleep(1000);
@@ -27789,18 +27772,18 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 	unsigned char hashbin[16];
 	char *content;
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			ast_cli(a->fd, "is ch_act_sms subhandler -- CLI_INIT unsupported in this context\n");
 			return CLI_FAILURE;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_GENERATE:
-			if (a->pos == 5)
+			if (a->pos == 5) {
 				return pg_cli_generate_complete_sms_group(a->word, a->n);
-			else if (a->pos == 6)
+			} else if (a->pos == 6) {
 				return pg_cli_generate_complete_sms_operation(a->word, a->n);
+			}
 			return NULL;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_HANDLER:
@@ -27819,8 +27802,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 			return CLI_SUCCESS;
 		}
 		//
-		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry)
-		{
+		AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
 			ast_mutex_lock(&ch_gsm->lock);
 			// get channel for stat
 			if (!strcmp(a->argv[3], "all") || !strcmp(a->argv[3], ch_gsm->alias)) {
@@ -27829,20 +27811,18 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 				if (ch_gsm->iccid) {
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("SELECT COUNT(DISTINCT msgid) FROM '%q-inbox' WHERE status=1;", ch_gsm->iccid);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
 									row++;
 									smscnt = sqlite3_column_int(sql0, 0);
-								} else if(res == SQLITE_DONE)
+								} else if(res == SQLITE_DONE) {
 									break;
-								else if(res == SQLITE_BUSY) {
+								} else if(res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									ast_mutex_unlock(&ch_gsm->lock);
 									usleep(1000);
@@ -27872,16 +27852,16 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					ast_mutex_unlock(&pg_sms_db_lock);
 				}
 				// print result
-				if (smscnt)
+				if (smscnt) {
 					ast_cli(a->fd, "  \"%s\": %d new messages\n", ch_gsm->alias, smscnt);
-				else
+				} else {
 					ast_cli(a->fd, "  \"%s\": no new messages\n", ch_gsm->alias);
+				}
 			}
 			ast_mutex_unlock(&ch_gsm->lock);
 		}
 		return CLI_SUCCESS;
 	}
-
 	// check name param for wildcard "all"
 	if (!strcmp(a->argv[3], "all")) {
 		ast_cli(a->fd, "  \"all\" not supported for operations -- use GSM channel name\n");
@@ -27893,7 +27873,6 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
 		return CLI_SUCCESS;
 	}
-
 	// inbox
 	if (!strcmp(a->argv[5], "inbox")) {
 		// check for presented arguments
@@ -27903,29 +27882,32 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					((a->argc >= 8) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))) && (!strcmp(a->argv[6], "last")))) {
 			// set message count for print
 			smscnt = 0;
-			if ((a->argc == 8) && (!strcmp(a->argv[6], "last")))
+			if ((a->argc == 8) && (!strcmp(a->argv[6], "last"))) {
 				smscnt = atoi(a->argv[7]);
-			else if ((a->argc == 9) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))) && (!strcmp(a->argv[7], "last")))
+			} else if ((a->argc == 9) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))) && (!strcmp(a->argv[7], "last"))) {
 				smscnt = atoi(a->argv[8]);
-			if (smscnt <= 0) smscnt = 10;
+			}
+			if (smscnt <= 0) {
+				smscnt = 10;
+			}
 			// get list of messages
 			if (ch_gsm->iccid) {
 				ast_mutex_lock(&pg_sms_db_lock);
 				str0 = sqlite3_mprintf("SELECT msgid,oatype,oaname,received,status FROM '%q-inbox' WHERE msgid>0 GROUP BY msgid ORDER BY received DESC;", ch_gsm->iccid);
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 					if (res == SQLITE_OK) {
 						row = 0;
-						while (1)
-						{
+						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
 								row++;
-								if (row > smscnt) break;
+								if (row > smscnt) {
+									break;
+								}
 								time_data.tv_sec = sqlite3_column_int64(sql0, 3);
-								if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-									ast_cli(a->fd, "%0d: %04d-%02d-%02d-%02d:%02d:%02d \"%s%s\"%s\n",
+								time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+								ast_cli(a->fd, "%0d: %04d-%02d-%02d-%02d:%02d:%02d \"%s%s\"%s\n",
 													sqlite3_column_int(sql0, 0),
 													time_ptr->tm_year + 1900,
 													time_ptr->tm_mon+1,
@@ -27936,16 +27918,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 													(sqlite3_column_int(sql0, 1) == 145)?("+"):(""),
 													sqlite3_column_text(sql0, 2),
 													(sqlite3_column_int(sql0, 4))?(" (new)"):(""));
-								else
-									ast_cli(a->fd, "%0d: %ld \"%s%s\"%s\n",
-													sqlite3_column_int(sql0, 0),
-													time_data.tv_sec,
-													(sqlite3_column_int(sql0, 1) == 145)?("+"):(""),
-													sqlite3_column_text(sql0, 2),
-													(sqlite3_column_int(sql0, 4))?(" (new)"):(""));
-							} else if (res == SQLITE_DONE)
+							} else if (res == SQLITE_DONE) {
 								break;
-							else if (res == SQLITE_BUSY) {
+							} else if (res == SQLITE_BUSY) {
 								ast_mutex_unlock(&pg_sms_db_lock);
 								usleep(1000);
 								ast_mutex_lock(&pg_sms_db_lock);
@@ -27970,27 +27945,27 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 				}
 				sqlite3_free(str0);
 				ast_mutex_unlock(&pg_sms_db_lock);
-			} else
+			} else {
 				ast_cli(a->fd, "SMS database not ready\n");
+			}
 		} else if((a->argc == 7) || ((a->argc == 8) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))))) {
 			//
 			if ((a->argc == 7) || ((a->argc == 8) && ((!strcmp(a->argv[6], "read"))))) {
-				if (a->argc == 7)
+				if (a->argc == 7) {
 					index = atoi(a->argv[6]);
-				else
+				} else {
 					index = atoi(a->argv[7]);
+				}
 				// get message content
 				if (ch_gsm->iccid) {
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("SELECT scatype,scaname,oatype,oaname,sent,received,part,content FROM '%q-inbox' WHERE msgid=%d ORDER BY part;", ch_gsm->iccid, index);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
 							part = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
 									row++;
@@ -28006,41 +27981,37 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 														sqlite3_column_text(sql0, 3));
 										// Sent time
 										time_data.tv_sec = sqlite3_column_int64(sql0, 4);
-										if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-											ast_cli(a->fd, "Sent: %04d-%02d-%02d %02d:%02d:%02d\n",
+										time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+										ast_cli(a->fd, "Sent: %04d-%02d-%02d %02d:%02d:%02d\n",
 													time_ptr->tm_year + 1900,
 													time_ptr->tm_mon+1,
 													time_ptr->tm_mday,
 													time_ptr->tm_hour,
 													time_ptr->tm_min,
 													time_ptr->tm_sec);
-										else
-											ast_cli(a->fd, "Sent timestamp: %ld\n", time_data.tv_sec);
 										// Received time
 										time_data.tv_sec = sqlite3_column_int64(sql0, 5);
-										if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-											ast_cli(a->fd, "Received: %04d-%02d-%02d %02d:%02d:%02d\n",
+										time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+										ast_cli(a->fd, "Received: %04d-%02d-%02d %02d:%02d:%02d\n",
 													time_ptr->tm_year + 1900,
 													time_ptr->tm_mon+1,
 													time_ptr->tm_mday,
 													time_ptr->tm_hour,
 													time_ptr->tm_min,
 													time_ptr->tm_sec);
-										else
-											ast_cli(a->fd, "Received timestamp: %ld\n", time_data.tv_sec);
 										// start border
 										ast_cli(a->fd, ">> ");
 									}
 									// missed text mark
-									if(part != sqlite3_column_int(sql0, 6)) {
+									if (part != sqlite3_column_int(sql0, 6)) {
 										ast_cli(a->fd, "*some text missed*");
 										part = sqlite3_column_int(sql0, 6);
 									}
 									// print message
 									ast_cli(a->fd, "%s", sqlite3_column_text(sql0, 7));
-								} else if (res == SQLITE_DONE)
+								} else if (res == SQLITE_DONE) {
 									break;
-								else if (res == SQLITE_BUSY) {
+								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									usleep(1000);
 									ast_mutex_lock(&pg_sms_db_lock);
@@ -28050,26 +28021,24 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 									break;
 								}
 							}
-							if (!row)
+							if (!row) {
 								ast_cli(a->fd, "  message \"%s\" not found\n", (a->argc == 7)?(a->argv[6]):(a->argv[7]));
-							else {
+							} else {
 								// end border
 								ast_cli(a->fd, " <<\n");
 								// mark this message as readed
 								str1 = sqlite3_mprintf("UPDATE '%q-inbox' SET status=0 WHERE msgid=%d;", ch_gsm->iccid, index);
-								while (1)
-								{
+								while (1) {
 									res = sqlite3_prepare_fun(pg_sms_db, str1, strlen(str1), &sql1, NULL);
 									if (res == SQLITE_OK) {
 										row = 0;
-										while (1)
-										{
+										while (1) {
 											res = sqlite3_step(sql1);
-											if (res == SQLITE_ROW)
+											if (res == SQLITE_ROW) {
 												row++;
-											else if (res == SQLITE_DONE)
+											} else if (res == SQLITE_DONE) {
 												break;
-											else if (res == SQLITE_BUSY) {
+											} else if (res == SQLITE_BUSY) {
 												ast_mutex_unlock(&pg_sms_db_lock);
 												usleep(1000);
 												ast_mutex_lock(&pg_sms_db_lock);
@@ -28107,27 +28076,26 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					}
 					sqlite3_free(str0);
 					ast_mutex_unlock(&pg_sms_db_lock);
-				} else
+				} else {
 					ast_cli(a->fd, "SMS database not ready\n");
+				}
 			} else if (!strcmp(a->argv[6], "delete")) {
 				// delete message
 				index = atoi(a->argv[7]);
 				if (ch_gsm->iccid) {
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("DELETE FROM '%q-inbox' WHERE msgid=%d;", ch_gsm->iccid, index);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
-								if (res == SQLITE_ROW)
+								if (res == SQLITE_ROW) {
 									row++;
-								else if (res == SQLITE_DONE)
+								} else if (res == SQLITE_DONE) {
 									break;
-								else if (res == SQLITE_BUSY) {
+								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									usleep(1000);
 									ast_mutex_lock(&pg_sms_db_lock);
@@ -28151,10 +28119,12 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					}
 					sqlite3_free(str0);
 					ast_mutex_unlock(&pg_sms_db_lock);
-				} else
+				} else {
 					ast_cli(a->fd, "SMS database not ready\n");
-			} else
+				}
+			} else {
 				ast_cli(a->fd, "  unknown operation \"%s\" in inbox\n", a->argv[5]);
+			}
 		}
 	} // end inbox
 
@@ -28167,18 +28137,16 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 				ast_mutex_lock(&pg_sms_db_lock);
 				str0 = sqlite3_mprintf("SELECT enqueued,msgno,destination,flash FROM '%q-outbox' ORDER BY enqueued;", ch_gsm->iccid);
 				res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
-				while (1)
-				{
+				while (1) {
 					if (res == SQLITE_OK) {
 						row = 0;
-						while (1)
-						{
+						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
 								row++;
 								time_data.tv_sec = sqlite3_column_int64(sql0, 0);
-								if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-									ast_cli(a->fd, "%0d: %04d-%02d-%02d-%02d:%02d:%02d \"%s\"%s\n",
+								time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+								ast_cli(a->fd, "%0d: %04d-%02d-%02d-%02d:%02d:%02d \"%s\"%s\n",
 													sqlite3_column_int(sql0, 1),
 													time_ptr->tm_year + 1900,
 													time_ptr->tm_mon+1,
@@ -28188,15 +28156,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 													time_ptr->tm_sec,
 													sqlite3_column_text(sql0, 2),
 													(sqlite3_column_int(sql0, 3))?(" (flash)"):(""));
-								else
-									ast_cli(a->fd, "%0d: %ld \"%s\"%s\n",
-													sqlite3_column_int(sql0, 1),
-													time_data.tv_sec,
-													sqlite3_column_text(sql0, 2),
-													(sqlite3_column_int(sql0, 3))?(" (flash)"):(""));
-							} else if (res == SQLITE_DONE)
+							} else if (res == SQLITE_DONE) {
 								break;
-							else if (res == SQLITE_BUSY) {
+							} else if (res == SQLITE_BUSY) {
 								ast_mutex_unlock(&pg_sms_db_lock);
 								usleep(1000);
 								ast_mutex_lock(&pg_sms_db_lock);
@@ -28207,7 +28169,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							}
 						}
 						//
-						if (!row) ast_cli(a->fd, "  no messages in outbox\n");
+						if (!row) {
+							ast_cli(a->fd, "  no messages in outbox\n");
+						}
 						sqlite3_finalize(sql0);
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -28222,26 +28186,26 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 				}
 				sqlite3_free(str0);
 				ast_mutex_unlock(&pg_sms_db_lock);
-			} else
+			} else {
 				ast_cli(a->fd, "SMS database not ready\n");
+			}
 		} else if ((a->argc == 7) || ((a->argc == 8) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))))) {
 			//
 			if ((a->argc == 7) || ((a->argc == 8) && ((!strcmp(a->argv[6], "read"))))) {
-				if (a->argc == 7)
+				if (a->argc == 7) {
 					index = atoi(a->argv[6]);
-				else
+				} else {
 					index = atoi(a->argv[7]);
+				}
 				// get message content
 				if (ch_gsm->iccid) {
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("SELECT destination,enqueued,content FROM '%q-outbox' WHERE msgno=%d;", ch_gsm->iccid, index);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
 									row++;
@@ -28249,21 +28213,19 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 									ast_cli(a->fd, "Destination Address: %s\n", sqlite3_column_text(sql0, 0));
 									// Enqueued time
 									time_data.tv_sec = sqlite3_column_int64(sql0, 1);
-									if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-										ast_cli(a->fd, "Enqueued: %04d-%02d-%02d %02d:%02d:%02d\n",
+									time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+									ast_cli(a->fd, "Enqueued: %04d-%02d-%02d %02d:%02d:%02d\n",
 												time_ptr->tm_year + 1900,
 												time_ptr->tm_mon+1,
 												time_ptr->tm_mday,
 												time_ptr->tm_hour,
 												time_ptr->tm_min,
 												time_ptr->tm_sec);
-									else
-										ast_cli(a->fd, "Enqueued timestamp: %ld\n", time_data.tv_sec);
 									// print message
 									ast_cli(a->fd, ">> %s <<\n", sqlite3_column_text(sql0, 2));
-								} else if (res == SQLITE_DONE)
+								} else if (res == SQLITE_DONE) {
 									break;
-								else if(res == SQLITE_BUSY) {
+								} else if(res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									usleep(1000);
 									ast_mutex_lock(&pg_sms_db_lock);
@@ -28274,9 +28236,11 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 								}
 							}
 							//
-							if (!row) ast_cli(a->fd, "  message \"%s\" not found\n", (a->argc == 7)?(a->argv[6]):(a->argv[7]));
-								sqlite3_finalize(sql0);
-								break;
+							if (!row) {
+								ast_cli(a->fd, "  message \"%s\" not found\n", (a->argc == 7)?(a->argv[6]):(a->argv[7]));
+							}
+							sqlite3_finalize(sql0);
+							break;
 						} else if (res == SQLITE_BUSY) {
 							ast_mutex_unlock(&pg_sms_db_lock);
 							usleep(1000);
@@ -28289,27 +28253,26 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					}
 					sqlite3_free(str0);
 					ast_mutex_unlock(&pg_sms_db_lock);
-				} else
+				} else {
 					ast_cli(a->fd, "SMS database not ready\n");
+				}
 			} else if (!strcmp(a->argv[6], "delete")) {
 				// delete message
 				index = atoi(a->argv[7]);
 				if (ch_gsm->iccid) {
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("DELETE FROM '%q-outbox' WHERE msgno=%d;", ch_gsm->iccid, index);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
-								if (res == SQLITE_ROW)
+								if (res == SQLITE_ROW) {
 									row++;
-								else if (res == SQLITE_DONE)
+								} else if (res == SQLITE_DONE) {
 									break;
-								else if (res == SQLITE_BUSY) {
+								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									usleep(1000);
 									ast_mutex_lock(&pg_sms_db_lock);
@@ -28333,8 +28296,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					}
 					sqlite3_free(str0);
 					ast_mutex_unlock(&pg_sms_db_lock);
-				} else
+				} else {
 					ast_cli(a->fd, "SMS database not ready\n");
+				}
 			} else
 				ast_cli(a->fd, "  unknown operation \"%s\" in outbox\n", a->argv[6]);
 		}
@@ -28349,26 +28313,29 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					((a->argc >= 8) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))) && (!strcmp(a->argv[7], "last")))) {
 			// set message count for print
 			smscnt = 0;
-			if ((a->argc == 8) && (!strcmp(a->argv[6], "last")))
+			if ((a->argc == 8) && (!strcmp(a->argv[6], "last"))) {
 				smscnt = atoi(a->argv[7]);
-			else if ((a->argc == 9) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))) && (!strcmp(a->argv[7], "last")))
+			} else if ((a->argc == 9) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))) && (!strcmp(a->argv[7], "last"))) {
 				smscnt = atoi(a->argv[8]);
-			if (smscnt <= 0) smscnt = 10;
+			}
+			if (smscnt <= 0) {
+				smscnt = 10;
+			}
 			// get list of messages
 			if (ch_gsm->iccid) {
 				ast_mutex_lock(&pg_sms_db_lock);
 				str0 = sqlite3_mprintf("SELECT status,msgid,sent,received,datype,daname FROM '%q-sent' WHERE owner='this' GROUP BY msgid ORDER BY msgno DESC;", ch_gsm->iccid);
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 					if (res == SQLITE_OK) {
 						row = 0;
-						while (1)
-						{
+						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
 								row++;
-								if (row > smscnt) break;
+								if (row > smscnt) {
+									break;
+								}
 								// check status
 								if (sqlite3_column_int(sql0, 0)) {
 									// delivered
@@ -28376,8 +28343,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 									time_data2.tv_sec = sqlite3_column_int64(sql0, 3); // received
 									time_ptr = ast_localtime(&time_data, &time_buf, NULL);
 									time_ptr2 = ast_localtime(&time_data2, &time_buf2, NULL);
-									if (time_ptr && time_ptr2)
-										ast_cli(a->fd, "%0d: \"%s%s\" - sent: %04d-%02d-%02d-%02d:%02d:%02d - delivered: %04d-%02d-%02d-%02d:%02d:%02d\n",
+									ast_cli(a->fd, "%0d: \"%s%s\" - sent: %04d-%02d-%02d-%02d:%02d:%02d - delivered: %04d-%02d-%02d-%02d:%02d:%02d\n",
 														sqlite3_column_int(sql0, 1),
 														(sqlite3_column_int(sql0, 4) == 145)?("+"):(""),
 														sqlite3_column_text(sql0, 5),
@@ -28393,19 +28359,11 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 														time_ptr2->tm_hour,
 														time_ptr2->tm_min,
 														time_ptr2->tm_sec);
-									else
-										ast_cli(a->fd, "%0d: \"%s%s\" - sent: %ld - delivered: %ld\n",
-														sqlite3_column_int(sql0, 1),
-														(sqlite3_column_int(sql0, 4) == 145)?("+"):(""),
-														sqlite3_column_text(sql0, 5),
-														time_data.tv_sec,
-														time_data2.tv_sec);
 								} else {
 									// waiting
 									time_data.tv_sec = sqlite3_column_int64(sql0, 2); // sent
 									time_ptr = ast_localtime(&time_data, &time_buf, NULL);
-									if (time_ptr)
-										ast_cli(a->fd, "%0d: \"%s%s\" - sent: %04d-%02d-%02d-%02d:%02d:%02d - waiting\n",
+									ast_cli(a->fd, "%0d: \"%s%s\" - sent: %04d-%02d-%02d-%02d:%02d:%02d - waiting\n",
 														sqlite3_column_int(sql0, 1),
 														(sqlite3_column_int(sql0, 4) == 145)?("+"):(""),
 														sqlite3_column_text(sql0, 5),
@@ -28415,16 +28373,10 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 														time_ptr->tm_hour,
 														time_ptr->tm_min,
 														time_ptr->tm_sec);
-									else
-										ast_cli(a->fd, "%0d: \"%s%s\" - sent: %ld - waiting\n",
-														sqlite3_column_int(sql0, 1),
-														(sqlite3_column_int(sql0, 4) == 145)?("+"):(""),
-														sqlite3_column_text(sql0, 5),
-														time_data.tv_sec);
 								}
-							} else if (res == SQLITE_DONE)
+							} else if (res == SQLITE_DONE) {
 								break;
-							else if (res == SQLITE_BUSY) {
+							} else if (res == SQLITE_BUSY) {
 								ast_mutex_unlock(&pg_sms_db_lock);
 								usleep(1000);
 								ast_mutex_lock(&pg_sms_db_lock);
@@ -28435,7 +28387,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							}
 						}
 						//
-						if (!row) ast_cli(a->fd, "  no sent messages\n");
+						if (!row) {
+							ast_cli(a->fd, "  no sent messages\n");
+						}
 						sqlite3_finalize(sql0);
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -28450,27 +28404,27 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 				}
 				sqlite3_free(str0);
 				ast_mutex_unlock(&pg_sms_db_lock);
-			} else
+			} else {
 				ast_cli(a->fd, "SMS database not ready\n");
+			}
 		} else if ((a->argc == 7) || ((a->argc == 8) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))))) {
 			// read message from sent
 			if ((a->argc == 7) || ((a->argc == 8) && ((!strcmp(a->argv[6], "read"))))) {
-				if (a->argc == 7)
+				if (a->argc == 7) {
 					index = atoi(a->argv[6]);
-				else
+				} else {
 					index = atoi(a->argv[7]);
+				}
 				// get message content
 				if (ch_gsm->iccid) {
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("SELECT scatype,scaname,datype,daname,sent,received,part,content FROM '%q-sent' WHERE owner='this' AND msgid=%d ORDER BY part;", ch_gsm->iccid, index);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
 							part = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
 									row++;
@@ -28486,31 +28440,28 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 														sqlite3_column_text(sql0, 3));
 										// Sent time
 										time_data.tv_sec = sqlite3_column_int64(sql0, 4);
-										if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-											ast_cli(a->fd, "Sent: %04d-%02d-%02d %02d:%02d:%02d\n",
+										time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+										ast_cli(a->fd, "Sent: %04d-%02d-%02d %02d:%02d:%02d\n",
 													time_ptr->tm_year + 1900,
 													time_ptr->tm_mon+1,
 													time_ptr->tm_mday,
 													time_ptr->tm_hour,
 													time_ptr->tm_min,
 													time_ptr->tm_sec);
-										else
-											ast_cli(a->fd, "Sent timestamp: %ld\n", time_data.tv_sec);
 										// Received time
 										time_data.tv_sec = sqlite3_column_int64(sql0, 5);
 										if (time_data.tv_sec) {
-											if((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-												ast_cli(a->fd, "Delivered: %04d-%02d-%02d %02d:%02d:%02d\n",
+											time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+											ast_cli(a->fd, "Delivered: %04d-%02d-%02d %02d:%02d:%02d\n",
 														time_ptr->tm_year + 1900,
 														time_ptr->tm_mon+1,
 														time_ptr->tm_mday,
 														time_ptr->tm_hour,
 														time_ptr->tm_min,
 														time_ptr->tm_sec);
-											else
-												ast_cli(a->fd, "Received timestamp: %ld\n", time_data.tv_sec);
-										} else
+										} else {
 											ast_cli(a->fd, "Delivered: Waiting...\n");
+										}
 										// start border
 										ast_cli(a->fd, ">> ");
 									}
@@ -28521,9 +28472,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 									}
 									// print message
 									ast_cli(a->fd, "%s", sqlite3_column_text(sql0, 7));
-								} else if (res == SQLITE_DONE)
+								} else if (res == SQLITE_DONE) {
 									break;
-								else if (res == SQLITE_BUSY) {
+								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									usleep(1000);
 									ast_mutex_lock(&pg_sms_db_lock);
@@ -28534,10 +28485,11 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 								}
 							}
 							//
-							if (!row)
-								ast_cli(a->fd, "  message \"%s\" not found\n", (a->argc == 7)?(a->argv[6]):(a->argv[7]));
-							else
+							if (row) {
 								ast_cli(a->fd, " <<\n"); // end border
+							} else {
+								ast_cli(a->fd, "  message \"%s\" not found\n", (a->argc == 7)?(a->argv[6]):(a->argv[7]));
+							}
 							sqlite3_finalize(sql0);
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -28552,27 +28504,26 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					}
 					sqlite3_free(str0);
 					ast_mutex_unlock(&pg_sms_db_lock);
-				} else
+				} else {
 					ast_cli(a->fd, "SMS database not ready\n");
+				}
 			} else if (!strcmp(a->argv[6], "delete")){
 				// delete message from sent
 				index = atoi(a->argv[7]);
 				if (ch_gsm->iccid) {
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("DELETE FROM '%q-sent' WHERE owner='this' AND msgid=%d;", ch_gsm->iccid, index);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
-								if (res == SQLITE_ROW)
+								if (res == SQLITE_ROW) {
 									row++;
-								else if (res == SQLITE_DONE)
+								} else if (res == SQLITE_DONE) {
 									break;
-								else if (res == SQLITE_BUSY) {
+								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									usleep(1000);
 									ast_mutex_lock(&pg_sms_db_lock);
@@ -28596,10 +28547,12 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					}
 					sqlite3_free(str0);
 					ast_mutex_unlock(&pg_sms_db_lock);
-				} else
+				} else {
 					ast_cli(a->fd, "SMS database not ready\n");
-			} else
+				}
+			} else {
 				ast_cli(a->fd, "  unknown operation \"%s\" in sent\n", a->argv[6]);
+			}
 		}
 	} // end of sent
 
@@ -28612,30 +28565,32 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					((a->argc >= 8) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))) && (!strcmp(a->argv[7], "last")))) {
 			// set message count for print
 			smscnt = 0;
-			if ((a->argc == 8) && (!strcmp(a->argv[6], "last")))
+			if ((a->argc == 8) && (!strcmp(a->argv[6], "last"))) {
 				smscnt = atoi(a->argv[7]);
-			else if ((a->argc == 9) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))) && (!strcmp(a->argv[7], "last")))
+			} else if ((a->argc == 9) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))) && (!strcmp(a->argv[7], "last"))) {
 				smscnt = atoi(a->argv[8]);
-			if (smscnt <= 0) smscnt = 10;
+			}
+			if (smscnt <= 0) {
+				smscnt = 10;
+			}
 			// get list of messages
 			if (ch_gsm->iccid) {
 				ast_mutex_lock(&pg_sms_db_lock);
 				str0 = sqlite3_mprintf("SELECT id,timestamp,destination,cause FROM '%q-discard' ORDER BY timestamp;", ch_gsm->iccid);
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 					if (res == SQLITE_OK) {
 						row = 0;
-						while (1)
-						{
+						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
 								row++;
-								if (row > smscnt) break;
+								if (row > smscnt) {
+									break;
+								}
 								time_data.tv_sec = sqlite3_column_int64(sql0, 1);
 								time_ptr = ast_localtime(&time_data, &time_buf, NULL);
-								if (time_ptr)
-									ast_cli(a->fd, "%0d: %04d-%02d-%02d-%02d:%02d:%02d - \"%s\" - cause: \"%s\"\n",
+								ast_cli(a->fd, "%0d: %04d-%02d-%02d-%02d:%02d:%02d - \"%s\" - cause: \"%s\"\n",
 														sqlite3_column_int(sql0, 0),
 														time_ptr->tm_year + 1900,
 														time_ptr->tm_mon+1,
@@ -28645,15 +28600,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 														time_ptr->tm_sec,
 														sqlite3_column_text(sql0, 2),
 														sqlite3_column_text(sql0, 3));
-								else
-									ast_cli(a->fd, "%0d: %ld - \"%s\" - cause: \"%s\"\n",
-														sqlite3_column_int(sql0, 0),
-														time_data.tv_sec,
-														sqlite3_column_text(sql0, 2),
-														sqlite3_column_text(sql0, 3));
-							} else if (res == SQLITE_DONE)
+							} else if (res == SQLITE_DONE) {
 								break;
-							else if (res == SQLITE_BUSY) {
+							} else if (res == SQLITE_BUSY) {
 								ast_mutex_unlock(&pg_sms_db_lock);
 								usleep(1000);
 								ast_mutex_lock(&pg_sms_db_lock);
@@ -28664,7 +28613,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							}
 						}
 						//
-						if (!row) ast_cli(a->fd, "  no messages in discard\n");
+						if (!row) {
+							ast_cli(a->fd, "  no messages in discard\n");
+						}
 						sqlite3_finalize(sql0);
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -28679,51 +28630,49 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 				}
 				sqlite3_free(str0);
 				ast_mutex_unlock(&pg_sms_db_lock);
-			} else
+			} else {
 				ast_cli(a->fd, "SMS database not ready\n");
+			}
 		} else if ((a->argc == 7) || ((a->argc == 8) && ((!strcmp(a->argv[6], "read")) || (!strcmp(a->argv[6], "delete"))))) {
 			// read message from discard
 			if ((a->argc == 7) || ((a->argc == 8) && ((!strcmp(a->argv[6], "read"))))) {
-				if (a->argc == 7)
+				if (a->argc == 7) {
 					index = atoi(a->argv[6]);
-				else
+				} else {
 					index = atoi(a->argv[7]);
+				}
 				// get message content
 				if (ch_gsm->iccid) {
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("SELECT timestamp,cause,destination,content FROM '%q-discard' WHERE id=%d;", ch_gsm->iccid, index);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
 							part = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
 									row++;
 									// Timestamp
 									time_data.tv_sec = sqlite3_column_int64(sql0, 0);
-									if ((time_ptr = ast_localtime(&time_data, &time_buf, NULL)))
-										ast_cli(a->fd, "Timestamp: %04d-%02d-%02d %02d:%02d:%02d\n",
+									time_ptr = ast_localtime(&time_data, &time_buf, NULL);
+									ast_cli(a->fd, "Timestamp: %04d-%02d-%02d %02d:%02d:%02d\n",
 													time_ptr->tm_year + 1900,
 													time_ptr->tm_mon+1,
 													time_ptr->tm_mday,
 													time_ptr->tm_hour,
 													time_ptr->tm_min,
 													time_ptr->tm_sec);
-									else
-										ast_cli(a->fd, "Timestamp: %ld\n", time_data.tv_sec);
 									// Cause
 									ast_cli(a->fd, "Cause: \"%s\"\n", sqlite3_column_text(sql0, 1));
 									// Destination
 									ast_cli(a->fd, "Destination Address: \"%s\"\n", sqlite3_column_text(sql0, 2));
 									// Content
 									ast_cli(a->fd, ">> %s <<\n", sqlite3_column_text(sql0, 3));
-								} else if (res == SQLITE_DONE)
+								} else if (res == SQLITE_DONE) {
 									break;
-								else if (res == SQLITE_BUSY) {
+								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									usleep(1000);
 									ast_mutex_lock(&pg_sms_db_lock);
@@ -28734,7 +28683,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 								}
 							}
 							//
-							if (!row) ast_cli(a->fd, "  message \"%s\" not found\n", (a->argc == 7)?(a->argv[6]):(a->argv[7]));
+							if (!row) {
+								ast_cli(a->fd, "  message \"%s\" not found\n", (a->argc == 7)?(a->argv[6]):(a->argv[7]));
+							}
 							sqlite3_finalize(sql0);
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -28749,27 +28700,26 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					}
 					sqlite3_free(str0);
 					ast_mutex_unlock(&pg_sms_db_lock);
-				} else
+				} else {
 					ast_cli(a->fd, "SMS database not ready\n");
+				}
 			} else if (!strcmp(a->argv[6], "delete")) {
 				// delete message from discard
 				index = atoi(a->argv[7]);
 				if (ch_gsm->iccid) {
 					ast_mutex_lock(&pg_sms_db_lock);
 					str0 = sqlite3_mprintf("DELETE FROM '%q-discard' WHERE id=%d;", ch_gsm->iccid, index);
-					while (1)
-					{
+					while (1) {
 						res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 						if (res == SQLITE_OK) {
 							row = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql0);
-								if (res == SQLITE_ROW)
+								if (res == SQLITE_ROW) {
 									row++;
-								else if (res == SQLITE_DONE)
+								} else if (res == SQLITE_DONE) {
 									break;
-								else if (res == SQLITE_BUSY) {
+								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
 									usleep(1000);
 									ast_mutex_lock(&pg_sms_db_lock);
@@ -28793,10 +28743,12 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 					}
 					sqlite3_free(str0);
 					ast_mutex_unlock(&pg_sms_db_lock);
-				} else
+				} else {
 					ast_cli(a->fd, "SMS database not ready\n");
-			} else
+				}
+			} else {
 				ast_cli(a->fd, "  unknown operation \"%s\" in discard\n", a->argv[6]);
+			}
 		}
 	} // end of discard
 
@@ -28804,12 +28756,11 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 	else if (!strcmp(a->argv[5], "new")) {
 		// check for destination present
 		if (a->argv[6]) {
-			
-			if (a->argv[7])
+			if (a->argv[7]) {
 				content = (char *)a->argv[7];
-			else
+			} else {
 				content = "";
-			
+			}
 			// get current time
 			gettimeofday(&time_data, NULL);
 			sprintf(hsec, "%ld", time_data.tv_sec);
@@ -28823,9 +28774,9 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 			MD5Update(&Md5Ctx, (unsigned char *)husec, strlen(husec));
 			MD5Final(hashbin, &Md5Ctx);
 			res = 0;
-			for (row=0; row<16; row++)
+			for (row = 0; row < 16; row++) {
 				res += sprintf(hash+res, "%02x", (unsigned char)hashbin[row]);
-
+			}
 			// enqueue new message into outbox queue
 			if (ch_gsm->iccid) {
 				ast_mutex_lock(&pg_sms_db_lock);
@@ -28847,19 +28798,17 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 									0, // flash TEXT
 									time_data.tv_sec, // enqueued INTEGER
 									hash); // hash  VARCHAR(32) UNIQUE
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 					if (res == SQLITE_OK) {
 						row = 0;
-						while (1)
-						{
+						while (1) {
 							res = sqlite3_step(sql0);
-							if (res == SQLITE_ROW)
+							if (res == SQLITE_ROW) {
 								row++;
-							else if (res == SQLITE_DONE)
+							} else if (res == SQLITE_DONE) {
 								break;
-							else if (res == SQLITE_BUSY) {
+							} else if (res == SQLITE_BUSY) {
 								ast_mutex_unlock(&pg_sms_db_lock);
 								usleep(1000);
 								ast_mutex_lock(&pg_sms_db_lock);
@@ -28883,16 +28832,18 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 				}
 				sqlite3_free(str0);
 				ast_mutex_unlock(&pg_sms_db_lock);
-			} else
+			} else {
 				ast_cli(a->fd, "SMS database not ready\n");
+			}
 		} else {
 			ast_cli(a->fd, "Usage: polygator channel gsm <alias> sms new <destination> [<content>]\n");
 		}
 	} // end of new
 
 	// unknown
-	else
+	else {
 		ast_cli(a->fd, "  unknown message group \"%s\"\n", a->argv[5]);
+	}
 
 	return CLI_SUCCESS;
 }
