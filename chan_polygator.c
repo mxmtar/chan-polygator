@@ -13899,7 +13899,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				x_timer_set(ch_gsm->timers.runquartersecond, runquartersecond_timeout);
 				if (pg_is_channel_gsm_has_calls(ch_gsm)) {
 					// get current call list
-					pg_atcommand_queue_append(ch_gsm, AT_CLCC, AT_OPER_EXEC, 0, 1, 0, NULL);
+					pg_atcommand_queue_append(ch_gsm, AT_CLCC, AT_OPER_EXEC, 0, 1000, 0, NULL);
 				}
 			}
 		}
@@ -26894,7 +26894,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 										address_classify(a->argv[6], &fromaddr);
 										address_classify(a->argv[7], &toaddr);
 										pg_pcr_table_update(ch_gsm->imsi, &fromaddr, &toaddr, &ch_gsm->lock);
-										ast_cli(a->fd, " - \"%s\" -> \"%s\"permanent routing table updated\n", a->argv[6], a->argv[7]);
+										ast_cli(a->fd, " -> \"%s\" - permanent clip routing table updated\n", a->argv[7]);
 									} else {
 										ast_cli(a->fd, " - permanent clip routing table is not ready\n");
 									}
