@@ -1135,6 +1135,7 @@ static char *pg_cli_channel_gsm_action_debug(struct ast_cli_entry *e, int cmd, s
 static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_at(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
+static char *pg_cli_channel_gsm_action_pcr(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a);
 static struct pg_cli_action pg_cli_channel_gsm_action_handlers[] = {
@@ -1149,6 +1150,7 @@ static struct pg_cli_action pg_cli_channel_gsm_action_handlers[] = {
 	PG_CLI_ACTION("debug", pg_cli_channel_gsm_action_debug),
 	PG_CLI_ACTION("ussd", pg_cli_channel_gsm_action_ussd),
 	PG_CLI_ACTION("at", pg_cli_channel_gsm_action_at),
+	PG_CLI_ACTION("pcr", pg_cli_channel_gsm_action_pcr),
 	PG_CLI_ACTION("dcr", pg_cli_channel_gsm_action_dcr),
 	PG_CLI_ACTION("sms", pg_cli_channel_gsm_action_sms),
 };
@@ -1219,6 +1221,7 @@ enum {
 	PG_CHANNEL_GSM_PARAM_GAINX,
 	PG_CHANNEL_GSM_PARAM_GAINR,
 	PG_CHANNEL_GSM_PARAM_MODULETYPE,
+	PG_CHANNEL_GSM_PARAM_PCR,
 	PG_CHANNEL_GSM_PARAM_SMSSENDINTERVAL,
 	PG_CHANNEL_GSM_PARAM_SMSSENDATTEMPT,
 	PG_CHANNEL_GSM_PARAM_SMSMAXPARTCOUNT,
@@ -1261,6 +1264,7 @@ static struct pg_channel_param pg_channel_gsm_params[] = {
 	PG_CHANNEL_PARAM("gainx", PG_CHANNEL_GSM_PARAM_GAINX, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 	PG_CHANNEL_PARAM("gainr", PG_CHANNEL_GSM_PARAM_GAINR, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 	PG_CHANNEL_PARAM("module", PG_CHANNEL_GSM_PARAM_MODULETYPE, PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_QUERY, PG_CHANNEL_PARAM_OP_GET),
+	PG_CHANNEL_PARAM("pcr", PG_CHANNEL_GSM_PARAM_PCR, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_DELETE, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET|PG_CHANNEL_PARAM_OP_DELETE),
 	PG_CHANNEL_PARAM("sms.snd.intrv", PG_CHANNEL_GSM_PARAM_SMSSENDINTERVAL, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 	PG_CHANNEL_PARAM("sms.snd.atmpt", PG_CHANNEL_GSM_PARAM_SMSSENDATTEMPT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
 	PG_CHANNEL_PARAM("sms.max.part", PG_CHANNEL_GSM_PARAM_SMSMAXPARTCOUNT, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET, PG_CHANNEL_PARAM_OP_SET|PG_CHANNEL_PARAM_OP_GET),
@@ -2541,6 +2545,308 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_pcr_table_create()
+//------------------------------------------------------------------------------
+static void pg_pcr_table_create(const char *imsi, ast_mutex_t *lock)
+{
+	char *str0, *str1;
+	int res;
+	int row;
+	sqlite3_stmt *sql0, *sql1;
+
+	ast_mutex_lock(&pg_gen_db_lock);
+
+	// create table for dynamic CLIP routing
+	str0 = sqlite3_mprintf("SELECT COUNT(id) FROM '%q-pcr';", imsi);
+	while (1) {
+		res = sqlite3_prepare_fun(pg_gen_db, str0, strlen(str0), &sql0, NULL);
+		if (res == SQLITE_OK) {
+			row = 0;
+			while (1) {
+				res = sqlite3_step(sql0);
+				if (res == SQLITE_ROW) {
+					row++;
+				} else if (res == SQLITE_DONE) {
+					break;
+				} else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_finalize(sql0);
+			break;
+		} else if (res == SQLITE_BUSY) {
+			if (lock) ast_mutex_unlock(lock);
+			usleep(1000);
+			if (lock) ast_mutex_lock(lock);
+			continue;
+		} else if ((res == SQLITE_ERROR) && (strstr(sqlite3_errmsg(pg_gen_db), "no such table"))) {
+			str1 = sqlite3_mprintf("CREATE TABLE '%q-pcr' ("
+										"id INTEGER PRIMARY KEY, "
+										"fromtype INTEGER, "
+										"fromname TEXT, "
+										"totype INTEGER, "
+										"toname TEXT);", imsi);
+			while (1) {
+				res = sqlite3_prepare_fun(pg_gen_db, str1, strlen(str1), &sql1, NULL);
+				if (res == SQLITE_OK) {
+					row = 0;
+					while (1) {
+						res = sqlite3_step(sql1);
+						if (res == SQLITE_ROW) {
+							row++;
+						} else if (res == SQLITE_DONE) {
+							break;
+						} else if (res == SQLITE_BUSY) {
+							if (lock) ast_mutex_unlock(lock);
+							usleep(1000);
+							if (lock) ast_mutex_lock(lock);
+							continue;
+						} else {
+							ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+							break;
+						}
+					}
+					sqlite3_finalize(sql1);
+					break;
+				} else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_free(str1);
+			break;
+		} else {
+			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+			break;
+		}
+	}
+	sqlite3_free(str0);
+
+	ast_mutex_unlock(&pg_gen_db_lock);
+}
+//------------------------------------------------------------------------------
+// end of pg_pcr_table_create()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_pcr_table_update()
+//------------------------------------------------------------------------------
+static void pg_pcr_table_update(const char *imsi, struct address *from, struct address *to, ast_mutex_t *lock)
+{
+	char *str;
+	int res;
+	int row;
+	sqlite3_stmt *sql;
+
+	ast_mutex_lock(&pg_gen_db_lock);
+
+	// update permanent clip routing table
+	// delete entry with the same called name = from
+	str = sqlite3_mprintf("DELETE FROM '%q-pcr' WHERE fromtype=%d AND fromname='%q';", imsi, from->type.full, from->value);
+	while (1) {
+		res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
+		if (res == SQLITE_OK) {
+			row = 0;
+			while (1) {
+				res = sqlite3_step(sql);
+				if (res == SQLITE_ROW) {
+					row++;
+				} else if (res == SQLITE_DONE) {
+					break;
+				} else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_finalize(sql);
+			break;
+		} else if (res == SQLITE_BUSY) {
+			if (lock) ast_mutex_unlock(lock);
+			usleep(1000);
+			if (lock) ast_mutex_lock(lock);
+			continue;
+		} else {
+			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+			break;
+		}
+	}
+	sqlite3_free(str);
+	// insert new entry
+	str = sqlite3_mprintf("INSERT INTO '%q-pcr' (fromtype, fromname, totype, toname) VALUES (%d,'%q',%d,'%q');",
+							imsi, from->type.full, from->value, to->type.full, to->value);
+	while (1) {
+		res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
+		if (res == SQLITE_OK) {
+			row = 0;
+			while (1) {
+				res = sqlite3_step(sql);
+				if (res == SQLITE_ROW) {
+					row++;
+				} else if (res == SQLITE_DONE) {
+					break;
+				} else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_finalize(sql);
+			break;
+		} else if(res == SQLITE_BUSY) {
+			if (lock) ast_mutex_unlock(lock);
+			usleep(1000);
+			if (lock) ast_mutex_lock(lock);
+			continue;
+		} else {
+			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+			break;
+		}
+	}
+	sqlite3_free(str);
+
+	ast_mutex_unlock(&pg_gen_db_lock);
+}
+//------------------------------------------------------------------------------
+// end of pg_pcr_table_update()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// pg_pcr_table_delete()
+//------------------------------------------------------------------------------
+static void pg_pcr_table_delete(const char *imsi, struct address *from, ast_mutex_t *lock)
+{
+	char *str;
+	int res;
+	int row;
+	sqlite3_stmt *sql;
+
+	ast_mutex_lock(&pg_gen_db_lock);
+
+	// delete entry with the same called name = from
+	str = sqlite3_mprintf("DELETE FROM '%q-pcr' WHERE fromtype=%d AND fromname='%q';", imsi, from->type.full, from->value);
+	while (1) {
+		res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
+		if (res == SQLITE_OK) {
+			row = 0;
+			while (1) {
+				res = sqlite3_step(sql);
+				if (res == SQLITE_ROW) {
+					row++;
+				} else if (res == SQLITE_DONE) {
+					break;
+				} else if (res == SQLITE_BUSY) {
+					if (lock) ast_mutex_unlock(lock);
+					usleep(1000);
+					if (lock) ast_mutex_lock(lock);
+					continue;
+				} else {
+					ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+					break;
+				}
+			}
+			sqlite3_finalize(sql);
+			break;
+		} else if (res == SQLITE_BUSY) {
+			if (lock) ast_mutex_unlock(lock);
+			usleep(1000);
+			if (lock) ast_mutex_lock(lock);
+			continue;
+		} else {
+			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+			break;
+		}
+	}
+	sqlite3_free(str);
+
+	ast_mutex_unlock(&pg_gen_db_lock);
+}
+//------------------------------------------------------------------------------
+// end of pg_pcr_table_delete()
+//------------------------------------------------------------------------------
+#if 0
+//------------------------------------------------------------------------------
+// pg_pcr_table_get_match_record()
+//------------------------------------------------------------------------------
+static struct address *pg_pcr_table_get_match_record(const char *imsi, struct address *from, time_t ttl, struct address *to, ast_mutex_t *lock)
+{
+	char *str0;
+	int res;
+	int row;
+	sqlite3_stmt *sql0;
+	struct timeval tv;
+	struct address testaddr;
+	struct address *resaddr = NULL;
+
+	if (!imsi) {
+		return NULL;
+	}
+
+	ast_mutex_lock(&pg_gen_db_lock);
+
+	// look-up permanent clip routing table
+	str0 = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM '%q-dcr';", imsi);
+	res = sqlite3_prepare_fun(pg_gen_db, str0, strlen(str0), &sql0, NULL);
+	if (res == SQLITE_OK) {
+		row = 0;
+		while (1) {
+			res = sqlite3_step(sql0);
+			if (res == SQLITE_ROW) {
+				row++;
+				testaddr.type.full = sqlite3_column_int(sql0, 0);
+				ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql0, 1), MAX_ADDRESS_LENGTH);
+				if (is_address_equal(&testaddr, from)) {
+					to->type.full = sqlite3_column_int(sql0, 2);
+					ast_copy_string(to->value, (char *)sqlite3_column_text(sql0, 3), MAX_ADDRESS_LENGTH);
+					resaddr = to;
+					break;
+				}
+			} else if (res == SQLITE_DONE) {
+				break;
+			} else if (res == SQLITE_BUSY) {
+				if (lock) ast_mutex_unlock(lock);
+				usleep(1000);
+				if (lock) ast_mutex_lock(lock);
+				continue;
+			} else {
+				ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+				break;
+			}
+		}
+		sqlite3_finalize(sql0);
+	} else {
+		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+	}
+	sqlite3_free(str0);
+
+	ast_mutex_unlock(&pg_gen_db_lock);
+
+	return resaddr;
+}
+//------------------------------------------------------------------------------
+// end of pg_pcr_table_get_match_record()
+//------------------------------------------------------------------------------
+#endif
+//------------------------------------------------------------------------------
 // pg_dcr_table_create()
 //------------------------------------------------------------------------------
 static void pg_dcr_table_create(const char *imsi, ast_mutex_t *lock)
@@ -2731,9 +3037,9 @@ static void pg_dcr_table_update(const char *imsi, struct address *from, struct a
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// pg_dcr_table_get_match_record()
+// pg_xcr_table_get_match_record()
 //------------------------------------------------------------------------------
-static struct address *pg_dcr_table_get_match_record(const char *imsi, struct address *from, time_t ttl, struct address *to, ast_mutex_t *lock)
+static struct address *pg_xcr_table_get_match_record(const char *imsi, struct address *from, time_t ttl, struct address *to, ast_mutex_t *lock)
 {
 	char *str0, *str1;
 	int res;
@@ -2749,6 +3055,44 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 
 	ast_mutex_lock(&pg_gen_db_lock);
 
+	// look-up permanent clip routing table
+	str0 = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM '%q-pcr';", imsi);
+	res = sqlite3_prepare_fun(pg_gen_db, str0, strlen(str0), &sql0, NULL);
+	if (res == SQLITE_OK) {
+		row = 0;
+		while (1) {
+			res = sqlite3_step(sql0);
+			if (res == SQLITE_ROW) {
+				row++;
+				testaddr.type.full = sqlite3_column_int(sql0, 0);
+				ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql0, 1), MAX_ADDRESS_LENGTH);
+				if (is_address_equal(&testaddr, from)) {
+					to->type.full = sqlite3_column_int(sql0, 2);
+					ast_copy_string(to->value, (char *)sqlite3_column_text(sql0, 3), MAX_ADDRESS_LENGTH);
+					resaddr = to;
+					break;
+				}
+			} else if (res == SQLITE_DONE) {
+				break;
+			} else if (res == SQLITE_BUSY) {
+				if (lock) ast_mutex_unlock(lock);
+				usleep(1000);
+				if (lock) ast_mutex_lock(lock);
+				continue;
+			} else {
+				ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+				break;
+			}
+		}
+		sqlite3_finalize(sql0);
+	} else {
+		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+	}
+	sqlite3_free(str0);
+	if (resaddr) {
+		goto pg_xcr_table_get_match_record_end;
+	}
+	// look-up dynamic clip routing table
 	gettimeofday(&tv, NULL);
 	str0 = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM '%q-dcr' WHERE timestamp>%ld ORDER BY timestamp DESC;", imsi, (long int)(tv.tv_sec - ttl));
 	res = sqlite3_prepare_fun(pg_gen_db, str0, strlen(str0), &sql0, NULL);
@@ -2811,53 +3155,12 @@ static struct address *pg_dcr_table_get_match_record(const char *imsi, struct ad
 		ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
 	}
 	sqlite3_free(str0);
-#if 0
-	if (!resaddr) {
-		// search in permanent routing table
-		str0 = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM 'permanent-dcr';", iccid);
-		res = sqlite3_prepare_fun(gendb, str0, strlen(str0), &sql0, NULL);
-		sqlite3_free(str);
-		if (res == SQLITE_OK) {
-			row = 0;
-			while (1) {
-				res = sqlite3_step(sql0);
-				if (res == SQLITE_ROW) {
-					row++;
-					testaddr.type.full = sqlite3_column_int(sql0, 0);
-					ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql, 1), MAX_ADDRESS_LENGTH);
-					if (is_address_equal(&testaddr, from)) {
-						to->type.full = sqlite3_column_int(sql0, 2);
-						ast_copy_string(to->value, (char *)sqlite3_column_text(sql0, 3), MAX_ADDRESS_LENGTH);
-						resaddr = to;
-						break;
-					}
-				} else if (res == SQLITE_DONE) {
-					break;
-				} else if (res == SQLITE_BUSY) {
-					if (lock) ast_mutex_unlock(lock);
-					usleep(1000);
-					if (lock) ast_mutex_lock(lock);
-					continue;
-				} else {
-					ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
-					break;
-				}
-			}
-			sqlite3_finalize(sql0);
-		} else {
-			ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
-		}
-		sqlite3_free(str0);
-
-	}
-#endif
-
+pg_xcr_table_get_match_record_end:
 	ast_mutex_unlock(&pg_gen_db_lock);
-
 	return resaddr;
 }
 //------------------------------------------------------------------------------
-// end of pg_dcr_table_get_match_record()
+// end of pg_xcr_table_get_match_record()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -7466,7 +7769,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 					address_classify(ch_gsm->config.call_extension, &call->called_name);
 				} else if(ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_DYN) {
 					// incoming call dynamic routed
-					if (!pg_dcr_table_get_match_record(ch_gsm->imsi, &call->calling_name, ch_gsm->config.dcrttl, &call->called_name, &ch_gsm->lock)) {
+					if (!pg_xcr_table_get_match_record(ch_gsm->imsi, &call->calling_name, ch_gsm->config.dcrttl, &call->called_name, &ch_gsm->lock)) {
 						address_classify("s", &call->called_name);
 					}
 				} else if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_DENY) {
@@ -8974,7 +9277,7 @@ static int pg_call_fxo_sm(struct pg_call* call, int message, int cause)
 #if 0
 				} else if(ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_DYN) {
 					// incoming call dynamic routed
-					if (!pg_dcr_table_get_match_record(ch_gsm->imsi, &call->calling_name, ch_gsm->config.dcrttl, &call->called_name, &ch_gsm->lock)) {
+					if (!pg_xcr_table_get_match_record(ch_gsm->imsi, &call->calling_name, ch_gsm->config.dcrttl, &call->called_name, &ch_gsm->lock)) {
 						address_classify("s", &call->called_name);
 					}
 #endif
@@ -9811,6 +10114,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								if (ch_gsm->imsi) ast_free(ch_gsm->imsi);
 								ch_gsm->imsi = ast_strdup(r_buf);
 								if (ch_gsm->flags.dcr_table_needed) {
+									pg_pcr_table_create(ch_gsm->imsi, &ch_gsm->lock);
 									pg_dcr_table_create(ch_gsm->imsi, &ch_gsm->lock);
 									ch_gsm->flags.dcr_table_needed = 0;
 								}
@@ -25808,6 +26112,18 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 	char *cp;
 	char tmpbuf[256];
 
+	char from[MAX_ADDRESS_LENGTH];
+	char to[MAX_ADDRESS_LENGTH];
+	char *str;
+	sqlite3_stmt *sql;
+	int res;
+	int row;
+	char buf[20];
+	int number_fl;
+	int from_fl;
+	int to_fl;
+	struct address fromaddr, toaddr;
+
 	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
@@ -25935,7 +26251,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								ast_cli(a->fd, " -> unknown\n");
 							}
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_IMEI:
 							if (strlen(ch_gsm->imei)) {
 								ast_cli(a->fd, " -> %s\n", ch_gsm->imei);
@@ -25943,27 +26259,27 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								ast_cli(a->fd, " -> unknown\n");
 							}
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_PROGRESS:
 							ast_cli(a->fd, " -> %s\n", pg_call_gsm_progress_to_string(ch_gsm->config.progress));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_INCOMING:
 							ast_cli(a->fd, " -> %s\n", pg_call_incoming_type_to_string(ch_gsm->config.incoming_type));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_EXTENSION:
 							ast_cli(a->fd, " -> %s\n", strlen(ch_gsm->config.call_extension)?ch_gsm->config.call_extension:"unknown");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_OUTGOING:
 							ast_cli(a->fd, " -> %s\n", pg_call_permission_to_string(ch_gsm->config.outgoing_perm));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CONTEXT:
 							ast_cli(a->fd, " -> %s\n", strlen(ch_gsm->config.call_context)?ch_gsm->config.call_context:"unknown");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_REGATTEMPT:
 							if (ch_gsm->config.reg_try_count < 0) {
 								ast_cli(a->fd, " -> forever\n");
@@ -25971,83 +26287,165 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								ast_cli(a->fd, " -> %d\n", ch_gsm->config.reg_try_count);
 							}
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CALLWAIT:
 							ast_cli(a->fd, " -> %s\n", pg_callwait_state_to_string(ch_gsm->config.callwait));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CLIR:
 							ast_cli(a->fd, " -> %s\n", pg_clir_state_to_string(ch_gsm->config.clir));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_DCRTTL:
 							ast_cli(a->fd, " -> %ld\n", (long int)ch_gsm->config.dcrttl);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_LANGUAGE:
 							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->config.language)?"unknown":ch_gsm->config.language);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_MOHINTERPRET:
 							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->config.mohinterpret)?"unknown":ch_gsm->config.mohinterpret);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_BAUDRATE:
 							ast_cli(a->fd, " -> %u\n", ch_gsm->config.baudrate);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAININ:
 							ast_cli(a->fd, " -> %d\n", ch_gsm->config.gainin);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAINOUT:
 							ast_cli(a->fd, " -> %d\n", ch_gsm->config.gainout);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAIN1:
 							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_gsm->config.gain1));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAIN2:
 							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_gsm->config.gain2));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAINX:
 							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_gsm->config.gainx));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_GAINR:
 							ast_cli(a->fd, " -> %2.2f dB\n", vin_gainem_to_gaindb(ch_gsm->config.gainr));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_MODULETYPE:
 							ast_cli(a->fd, " -> %s\n", pg_gsm_module_type_to_string(ch_gsm->gsm_module_type));
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_PCR:
+							number_fl = 0;
+							from_fl = 0;
+							to_fl = 0;
+							if (ch_gsm->iccid) {
+								// get dynamic clip routing table
+								ast_mutex_lock(&pg_gen_db_lock);
+								str = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM '%q-pcr';", ch_gsm->imsi);
+								while (1) {
+									res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
+									if (res == SQLITE_OK) {
+										row = 0;
+										while (1) {
+											res = sqlite3_step(sql);
+											if (res == SQLITE_ROW) {
+												number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%d", row));
+												from_fl = mmax(from_fl, snprintf(from, sizeof(from), "%s%s", (sqlite3_column_int(sql, 0) == 145)?("+"):(""), sqlite3_column_text(sql, 1)));
+												to_fl = mmax(to_fl, snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3)));
+												row++;
+											} else if (res == SQLITE_DONE) {
+												break;
+											} else if (res == SQLITE_BUSY) {
+												ast_mutex_unlock(&ch_gsm->lock);
+												usleep(1000);
+												ast_mutex_lock(&ch_gsm->lock);
+												continue;
+											} else {
+												ast_cli(a->fd, " - sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+												break;
+											}
+										}
+										if ((row) && (sqlite3_reset(sql) == SQLITE_OK)) {
+											ast_cli(a->fd, " - ok\n\t| %-*s | %-*s | %-*s |\n",
+														number_fl, "#",
+														from_fl, "From",
+														to_fl, "To");
+											row = 0;
+											while (1) {
+												res = sqlite3_step(sql);
+												if (res == SQLITE_ROW) {
+													snprintf(buf, sizeof(buf), "%d", row);
+													snprintf(from, sizeof(from), "%s%s", (sqlite3_column_int(sql, 0) == 145)?("+"):(""), sqlite3_column_text(sql, 1));
+													snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3));
+													ast_cli(a->fd, "\t| %-*s | %-*s | %-*s |\n",
+																number_fl, buf,
+			  													from_fl, from,
+																to_fl, to);
+													row++;
+												} else if (res == SQLITE_DONE) {
+													break;
+												} else if (res == SQLITE_BUSY) {
+													ast_mutex_unlock(&ch_gsm->lock);
+													usleep(1000);
+													ast_mutex_lock(&ch_gsm->lock);
+													continue;
+												} else {
+													ast_cli(a->fd, " - sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+													break;
+												}
+											}
+										} else {
+											ast_cli(a->fd, " - permanent clip routing table is empty\n");
+										}
+										sqlite3_finalize(sql);
+										break;
+									} else if (res == SQLITE_BUSY) {
+										ast_mutex_unlock(&ch_gsm->lock);
+										usleep(1000);
+										ast_mutex_lock(&ch_gsm->lock);
+										continue;
+									} else {
+										ast_cli(a->fd, " - sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+										break;
+									}
+								}
+								sqlite3_free(str);
+								ast_mutex_unlock(&pg_gen_db_lock);
+							} else {
+								ast_cli(a->fd, " - permanent clip routing table is not ready\n");
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMSSENDINTERVAL:
 							ast_cli(a->fd, " -> %ld\n", ch_gsm->config.sms_send_interval);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMSSENDATTEMPT:
 							ast_cli(a->fd, " -> %d\n", ch_gsm->config.sms_send_attempt);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMSMAXPARTCOUNT:
 							ast_cli(a->fd, " -> %d\n", ch_gsm->config.sms_max_part);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_ENABLE:
 							ast_cli(a->fd, " -> %s\n", ch_gsm->config.sms_notify_enable?"yes":"no");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_CONTEXT:
 							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->config.sms_notify_context)?"unknown":ch_gsm->config.sms_notify_context);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMS_NOTIFY_EXTENSION:
 							ast_cli(a->fd, " -> %s\n", ast_strlen_zero(ch_gsm->config.sms_notify_extension)?"unknown":ch_gsm->config.sms_notify_extension);
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNK:
 							total = 0;
 							AST_LIST_TRAVERSE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry) {
@@ -26059,35 +26457,35 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 								ast_cli(a->fd, " -> <empty list>\n");
 							}
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNKONLY:
 							ast_cli(a->fd, " -> %s\n", ch_gsm->config.trunkonly?"yes":"no");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_CONFALLOW:
 							ast_cli(a->fd, " -> %s\n", ch_gsm->config.conference_allowed?"yes":"no");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NELEC:
 							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec == VIN_DIS)?"inactive":"active");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NELEC_TM:
 							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec_tm == VIN_DTM_ON)?"on":"off");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NELEC_OLDC:
 							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec_oldc == VIN_OLDC_ZERO)?"zero":"old");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NELEC_AS:
 							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec_as == VIN_AS_RUN)?"run":"stop");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NELEC_NLP:
 							ast_cli(a->fd, " -> %s\n", (ch_gsm->config.ali_nelec_nlp == VIN_OFF)?"off":"on");
 							break;
-						//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_NELEC_NLPM:
 							ast_cli(a->fd, " -> %s\n", pg_vinetic_ali_nelec_nlpm_to_string(ch_gsm->config.ali_nelec_nlpm));
 							break;
@@ -26483,6 +26881,25 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_MODULETYPE:
 							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_PCR:
+							if (ast_strlen_zero(a->argv[6])) {
+								ast_cli(a->fd, " - address \"from\" not specified\n");
+							} else {
+								if (ast_strlen_zero(a->argv[7])) {
+									ast_cli(a->fd, " - address \"to\" not specified\n");
+								} else {
+									if (ch_gsm->imsi) {
+										address_classify(a->argv[6], &fromaddr);
+										address_classify(a->argv[7], &toaddr);
+										pg_pcr_table_update(ch_gsm->imsi, &fromaddr, &toaddr, &ch_gsm->lock);
+										ast_cli(a->fd, " - \"%s\" -> \"%s\"permanent routing table updated\n", a->argv[6], a->argv[7]);
+									} else {
+										ast_cli(a->fd, " - permanent clip routing table is not ready\n");
+									}
+								}
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_SMSSENDINTERVAL:
@@ -26883,6 +27300,20 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 					ast_cli(a->fd, "delete(%s)", a->argv[5]);
 					switch (param) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_PCR:
+							if (ast_strlen_zero(a->argv[6])) {
+								ast_cli(a->fd, " - record not specified\n");
+							} else {
+								if (ch_gsm->imsi) {
+									address_classify(a->argv[6], &fromaddr);
+									pg_pcr_table_delete(ch_gsm->imsi, &fromaddr, &ch_gsm->lock);
+									ast_cli(a->fd, " - record=\"%s\" removed from permanent routing table\n", a->argv[6]);
+								} else {
+									ast_cli(a->fd, " - permanent clip routing table is not ready\n");
+								}
+							}
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_TRUNK:
 							// check for trunk exist
 							if ((tr_gsm = pg_get_trunk_gsm_by_name(a->argv[6], PG_TRUNK_GSM_MANUAL))) {
@@ -26922,7 +27353,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 						case PG_CHANNEL_GSM_PARAM_PIN:
 							cp = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock);
 							ast_cli(a->fd, " -> %s\n", cp?cp:"unknown");
-							if(cp) {
+							if (cp) {
 								ast_free(cp);
 							}
 							break;
@@ -27016,6 +27447,10 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_GSM_PARAM_MODULETYPE:
+							ast_cli(a->fd, " - unsupported operation\n");
+							break;
+						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						case PG_CHANNEL_GSM_PARAM_PCR:
 							ast_cli(a->fd, " - unsupported operation\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -27593,10 +28028,153 @@ is_at_send_end:
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_cli_channel_gsm_action_pcr()
+//------------------------------------------------------------------------------
+static char *pg_cli_channel_gsm_action_pcr(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
+	struct pg_channel_gsm *ch_gsm;
+
+	char from[MAX_ADDRESS_LENGTH];
+	char to[MAX_ADDRESS_LENGTH];
+	char *str;
+	sqlite3_stmt *sql;
+	int res;
+	int row;
+
+	char buf[20];
+	int number_fl;
+	int from_fl;
+	int to_fl;
+
+	switch (cmd) {
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_INIT:
+			ast_cli(a->fd, "is ch_act_at subhandler -- CLI_INIT unsupported in this context\n");
+			return CLI_FAILURE;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_GENERATE:
+			return NULL;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		case CLI_HANDLER:
+			break;
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		default:
+			ast_cli(a->fd, "unknown CLI command = %d\n", cmd);
+			return CLI_FAILURE;
+	}
+
+	if (a->argc < 5) {
+		sprintf(pg_cli_channel_gsm_actions_usage, "Usage: polygator channel gsm <channel> dcr\n");
+		return CLI_SHOWUSAGE;
+	}
+
+	// check name param for wildcard "all"
+	if (!strcmp(a->argv[3], "all")) {
+		ast_cli(a->fd, "wildcard \"all\" not supported -- use channel name\n");
+		return CLI_SUCCESS;
+	}
+
+	number_fl = strlen("#");
+	from_fl = strlen("From");
+	to_fl = strlen("To");
+
+	if ((ch_gsm = pg_get_channel_gsm_by_name(a->argv[3]))) {
+		ast_mutex_lock(&ch_gsm->lock);
+		if (ch_gsm->config.incoming_type == PG_CALL_INCOMING_TYPE_DYN) {
+			if (ch_gsm->iccid) {
+				// get dynamic clip routing table
+				ast_mutex_lock(&pg_gen_db_lock);
+				str = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname FROM '%q-pcr';", ch_gsm->imsi);
+				while (1) {
+					res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
+					if (res == SQLITE_OK) {
+						row = 0;
+						while (1) {
+							res = sqlite3_step(sql);
+							if (res == SQLITE_ROW) {
+								number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%d", row));
+								from_fl = mmax(from_fl, snprintf(from, sizeof(from), "%s%s", (sqlite3_column_int(sql, 0) == 145)?("+"):(""), sqlite3_column_text(sql, 1)));
+								to_fl = mmax(to_fl, snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3)));
+								row++;
+							} else if (res == SQLITE_DONE) {
+								break;
+							} else if (res == SQLITE_BUSY) {
+								ast_mutex_unlock(&ch_gsm->lock);
+								usleep(1000);
+								ast_mutex_lock(&ch_gsm->lock);
+								continue;
+							} else {
+								ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+								break;
+							}
+						}
+						if ((row) && (sqlite3_reset(sql) == SQLITE_OK)) {
+							ast_cli(a->fd, "| %-*s | %-*s | %-*s |\n",
+									number_fl, "#",
+		  							from_fl, "From",
+									to_fl, "To");
+							row = 0;
+							while (1) {
+								res = sqlite3_step(sql);
+								if (res == SQLITE_ROW) {
+									snprintf(buf, sizeof(buf), "%d", row);
+									snprintf(from, sizeof(from), "%s%s", (sqlite3_column_int(sql, 0) == 145)?("+"):(""), sqlite3_column_text(sql, 1));
+									snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3));
+									ast_cli(a->fd, "| %-*s | %-*s | %-*s |\n",
+										number_fl, buf,
+			  							from_fl, from,
+										to_fl, to);
+									row++;
+								} else if (res == SQLITE_DONE) {
+									break;
+								} else if (res == SQLITE_BUSY) {
+									ast_mutex_unlock(&ch_gsm->lock);
+									usleep(1000);
+									ast_mutex_lock(&ch_gsm->lock);
+									continue;
+								} else {
+									ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+									break;
+								}
+							}
+						} else {
+							ast_cli(a->fd, "<%s>: permanent clip routing table is empty\n", ch_gsm->alias);
+						}
+						sqlite3_finalize(sql);
+						break;
+					} else if (res == SQLITE_BUSY) {
+						ast_mutex_unlock(&ch_gsm->lock);
+						usleep(1000);
+						ast_mutex_lock(&ch_gsm->lock);
+						continue;
+					} else {
+						ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_gen_db));
+						break;
+					}
+				}
+				sqlite3_free(str);
+				ast_mutex_unlock(&pg_gen_db_lock);
+			} else {
+				ast_cli(a->fd, "<%s>: permanent clip routing table is empty\n", ch_gsm->alias);
+			}
+		} else {
+			ast_cli(a->fd, "  GSM channel=\"%s\": this channel not used dynamic clip routing\n", ch_gsm->alias);
+		}
+		ast_mutex_unlock(&ch_gsm->lock);
+	} else {
+		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
+	}
+	return CLI_SUCCESS;
+}
+//------------------------------------------------------------------------------
+// end of pg_cli_channel_gsm_action_pcr()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_cli_channel_gsm_action_dcr()
 //------------------------------------------------------------------------------
-static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a){
-
+static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+{
 	struct pg_channel_gsm *ch_gsm;
 
 	struct timeval tv;
@@ -27614,8 +28192,7 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 	int to_fl;
 	int ttl_fl;
 
-	switch(cmd)
-	{
+	switch (cmd) {
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case CLI_INIT:
 			ast_cli(a->fd, "is ch_act_at subhandler -- CLI_INIT unsupported in this context\n");
@@ -27656,13 +28233,11 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 				gettimeofday(&tv, NULL);
 				ast_mutex_lock(&pg_gen_db_lock);
 				str = sqlite3_mprintf("SELECT fromtype,fromname,totype,toname,timestamp FROM '%q-dcr' WHERE timestamp>%ld ORDER BY timestamp DESC;", ch_gsm->imsi, (long int)(tv.tv_sec - ch_gsm->config.dcrttl));
-				while (1)
-				{
+				while (1) {
 					res = sqlite3_prepare_fun(pg_gen_db, str, strlen(str), &sql, NULL);
 					if (res == SQLITE_OK) {
 						row = 0;
-						while (1)
-						{
+						while (1) {
 							res = sqlite3_step(sql);
 							if (res == SQLITE_ROW) {
 								number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%d", row));
@@ -27670,9 +28245,9 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 								to_fl = mmax(to_fl, snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3)));
 								ttl_fl = mmax(ttl_fl, snprintf(tmbuf, sizeof(tmbuf), "%ld", (long int)(ch_gsm->config.dcrttl - (tv.tv_sec - (long int)sqlite3_column_int64(sql, 4)))));
 								row++;
-							} else if (res == SQLITE_DONE)
+							} else if (res == SQLITE_DONE) {
 								break;
-							else if (res == SQLITE_BUSY) {
+							} else if (res == SQLITE_BUSY) {
 								ast_mutex_unlock(&ch_gsm->lock);
 								usleep(1000);
 								ast_mutex_lock(&ch_gsm->lock);
@@ -27689,8 +28264,7 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 									to_fl, "To",
 									ttl_fl, "TTL");
 							row = 0;
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_step(sql);
 								if (res == SQLITE_ROW) {
 									snprintf(buf, sizeof(buf), "%d", row);
@@ -27703,9 +28277,9 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 										to_fl, to,
 										ttl_fl, tmbuf);
 									row++;
-								} else if (res == SQLITE_DONE)
+								} else if (res == SQLITE_DONE) {
 									break;
-								else if (res == SQLITE_BUSY) {
+								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&ch_gsm->lock);
 									usleep(1000);
 									ast_mutex_lock(&ch_gsm->lock);
@@ -27715,8 +28289,9 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 									break;
 								}
 							}
-						} else
+						} else {
 							ast_cli(a->fd, "<%s>: dynamic clip routing table is empty\n", ch_gsm->alias);
+						}
 						sqlite3_finalize(sql);
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -27731,14 +28306,16 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 				}
 				sqlite3_free(str);
 				ast_mutex_unlock(&pg_gen_db_lock);
-			} else
+			} else {
 				ast_cli(a->fd, "<%s>: dynamic clip routing table is empty\n", ch_gsm->alias);
-		} else
+			}
+		} else {
 			ast_cli(a->fd, "  GSM channel=\"%s\": this channel not used dynamic clip routing\n", ch_gsm->alias);
+		}
 		ast_mutex_unlock(&ch_gsm->lock);
-	} else
+	} else {
 		ast_cli(a->fd, "  Channel \"%s\" not found\n", a->argv[3]);
-
+	}
 	return CLI_SUCCESS;
 }
 //------------------------------------------------------------------------------

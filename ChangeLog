@@ -116,3 +116,8 @@ Change default state of GSM channels.
 5) context is "default".
 26.03.13
 Added ability to customize some default parameters. See file "defaults".
+03.06.13
+Add permanent clip routing table functionality.
+On routing incoming GSM call in "dyn" mode, call control look-up first
+permanent routing table. If no match entry found it look-up dynamic
+routing table.
