@@ -4,7 +4,7 @@
 AC_PREREQ([2.60])
 
 # set project attribute
-AC_INIT([chan-polygator], [1.6.0])
+AC_INIT([chan-polygator], [1.7.0])
 
 # init automake
 AM_INIT_AUTOMAKE([-Wall -Werror])
@@ -83,10 +83,10 @@ AC_ARG_WITH([asterisk], AC_HELP_STRING([--with-asterisk=PATH],[use asterisk file
 
 # Checks for packages.
 # Checks for required polygator-linux version.
-PG_POLYGATOR_LINUX_VERSION_PREREQ([1.1.1])
+PG_POLYGATOR_LINUX_VERSION_PREREQ([1.1.8])
 
 # Checks for required libvinetic version.
-PG_LIBVINETIC_VERSION_PREREQ([1.1.1])
+PG_LIBVINETIC_VERSION_PREREQ([1.1.4])
 
 # Checks for required asterisk version.
 PG_ASTERISK_VERSION_PREREQ([1.6.0], [${ASTERISK_SRC_PATH}])
@@ -173,6 +173,12 @@ PG_ASTERISK_GET_DIRECTORY([astmoddir])
 PG_ASTERISK_GET_DIRECTORY([astdatadir])
 
 AC_DEFINE_UNQUOTED([ASTERISK_DATA_DEFAULT_PATH], ["${astdatadir}"], [Define default path to asterisk data directory.])
+
+PG_ASTERISK_GET_DEFAULTS([gsm.enable], ["no"])
+PG_ASTERISK_GET_DEFAULTS([gsm.context], ["default"])
+PG_ASTERISK_GET_DEFAULTS([gsm.incoming], ["deny"])
+PG_ASTERISK_GET_DEFAULTS([gsm.incomingto], ["s"])
+PG_ASTERISK_GET_DEFAULTS([gsm.outgoing], ["deny"])
 
 AC_CONFIG_FILES([Makefile])
 

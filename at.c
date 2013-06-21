@@ -1236,8 +1236,7 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 	if (!cnum) return -1;
 
 	// init params
-	for (param_cnt=0; param_cnt<MAX_CNUM_EXEC_PARAM; param_cnt++)
-	{
+	for (param_cnt=0; param_cnt<MAX_CNUM_EXEC_PARAM; param_cnt++) {
 		params[param_cnt].type = PRM_TYPE_UNKNOWN;
 		params[param_cnt].buf = NULL;
 		params[param_cnt].len = -1;
@@ -1255,20 +1254,20 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 
 
 	// init ptr
-	if (!(sp = strchr(fld, ' ')))
+	if (!(sp = strchr(fld, ' '))) {
 		return -1;
+	}
 	tp = ++sp;
 	ep = (char *)fld + fld_len;
 
 	// search params delimiters
 	param_cnt = 0;
-	while ((param_cnt < MAX_CNUM_EXEC_PARAM))
-	{
+	while ((param_cnt < MAX_CNUM_EXEC_PARAM)) {
 		// get param type
 		if (*tp == '"') {
 			params[param_cnt].type = PRM_TYPE_STRING;
 			params[param_cnt].buf = ++tp;
-		} else {
+		} else if (isdigit(*tp)) {
 			params[param_cnt].type = PRM_TYPE_INTEGER;
 			params[param_cnt].buf = tp;
 		}
@@ -1291,7 +1290,7 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 	}
 
 	if ((param_cnt >= 2) &&
-			(params[0].type == PRM_TYPE_STRING) &&
+			((params[0].type == PRM_TYPE_STRING) || (params[0].type == PRM_TYPE_UNKNOWN)) &&
 				(params[1].type == PRM_TYPE_INTEGER)) {
 
 		// check if alpha (optional) not present
@@ -1301,10 +1300,10 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 		// get type
 		if (params[1].len > 0) {
 			tp = params[1].buf;
-			while (params[1].len--)
-			{
-				if (!isdigit(*tp++))
+			while (params[1].len--) {
+				if (!isdigit(*tp++)) {
 					return -1;
+				}
 			}
 			cnum->type = atoi(params[1].buf);
 		}
@@ -1319,20 +1318,20 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 			// get speed
 			if (params[2].len > 0) {
 				tp = params[2].buf;
-				while (params[2].len--)
-				{
-					if (!isdigit(*tp++))
+				while (params[2].len--) {
+					if (!isdigit(*tp++)) {
 						return -1;
+					}
 				}
 				cnum->speed = atoi(params[2].buf);
 			}
 			// get service
 			if (params[3].len > 0) {
 				tp = params[3].buf;
-				while (params[3].len--)
-				{
-					if (!isdigit(*tp++))
+				while (params[3].len--) {
+					if (!isdigit(*tp++)) {
 						return -1;
+					}
 				}
 				cnum->service = atoi(params[3].buf);
 			}
@@ -1342,17 +1341,17 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 				// get itc
 				if (params[4].len > 0) {
 					tp = params[4].buf;
-					while (params[4].len--)
-					{
-						if (!isdigit(*tp++))
+					while (params[4].len--) {
+						if (!isdigit(*tp++)) {
 							return -1;
+						}
 					}
 					cnum->itc = atoi(params[4].buf);
 				}
 			}
 		}
 	} else if ((param_cnt >= 3) &&
-				(params[0].type == PRM_TYPE_STRING) &&
+				((params[0].type == PRM_TYPE_STRING) || (params[0].type == PRM_TYPE_UNKNOWN)) &&
 					(params[1].type == PRM_TYPE_STRING) &&
 						(params[2].type == PRM_TYPE_INTEGER)) {
 
@@ -1366,10 +1365,10 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 		// get type
 		if (params[2].len > 0) {
 			tp = params[2].buf;
-			while (params[2].len--)
-			{
-				if (!isdigit(*tp++))
+			while (params[2].len--) {
+				if (!isdigit(*tp++)) {
 					return -1;
+				}
 			}
 			cnum->type = atoi(params[2].buf);
 		}
@@ -1384,20 +1383,20 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 			// get speed
 			if (params[3].len > 0) {
 				tp = params[3].buf;
-				while (params[3].len--)
-				{
-					if (!isdigit(*tp++))
+				while (params[3].len--) {
+					if (!isdigit(*tp++)) {
 						return -1;
+					}
 				}
 				cnum->speed = atoi(params[3].buf);
 			}
 			// get service
 			if (params[4].len > 0) {
 				tp = params[4].buf;
-				while (params[4].len--)
-				{
-					if (!isdigit(*tp++))
+				while (params[4].len--) {
+					if (!isdigit(*tp++)) {
 						return -1;
+					}
 				}
 				cnum->service = atoi(params[4].buf);
 			}
@@ -1407,17 +1406,18 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 				// get itc
 				if (params[5].len > 0){
 					tp = params[5].buf;
-					while (params[5].len--)
-					{
-						if (!isdigit(*tp++))
+					while (params[5].len--) {
+						if (!isdigit(*tp++)) {
 							return -1;
+						}
 					}
 					cnum->itc = atoi(params[5].buf);
 				}
 			}
 		}
-	} else
+	} else {
 		return -1;
+	}
 
 	return param_cnt;
 }
