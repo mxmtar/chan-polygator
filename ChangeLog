@@ -121,3 +121,6 @@ Add permanent clip routing table functionality.
 On routing incoming GSM call in "dyn" mode, call control look-up first
 permanent routing table. If no match entry found it look-up dynamic
 routing table.
+19.07.13
+Adjust codec to best for GSM calls on PROCEEDING and RONGING events.
+Set VINETIC firmware verison RTP_20_15_264 as default.

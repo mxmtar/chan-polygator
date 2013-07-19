@@ -18660,6 +18660,97 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_RINGING:
 			ast_debug(4, "GSM channel=\"%s\": call line=%d indicate ringing\n", ch_gsm->alias, call->line);
+			// adjust voice format
+			rtp = ch_gsm->channel_rtp;
+			vin = rtp->vinetic;
+#if ASTERISK_VERSION_NUMBER >= 110000
+			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			ast_format_copy(&rtp->format, &ast_ch->writeformat);
+#else
+			rtp->format = ast_ch->writeformat;
+#endif
+#if ASTERISK_VERSION_NUMBER >= 100000
+			switch (rtp->format.id) {
+#else
+			switch (rtp->format) {
+#endif
+				case AST_FORMAT_G723_1:
+					/*! G.723.1 compression */
+					rtp->payload_type = RTP_PT_G723;
+					rtp->encoder_packet_time = VIN_PTE_30;
+					rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+					break;
+				case AST_FORMAT_ULAW:
+					/*! Raw mu-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMU;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+					break;
+				case AST_FORMAT_ALAW:
+					/*! Raw A-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMA;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+					break;
+				case AST_FORMAT_G729A:
+					/*! G.729A audio */
+					rtp->payload_type = RTP_PT_G729;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+					break;
+				case AST_FORMAT_G726:
+					/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+					rtp->payload_type = 2;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G726_32;
+					break;
+				default:
+					rtp->payload_type = -1;
+#if ASTERISK_VERSION_NUMBER >= 100000
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(&rtp->format));
+#else
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(rtp->format));
+#endif
+					break;
+			}
+			if (rtp->payload_type < 0) {
+#if ASTERISK_VERSION_NUMBER >= 100000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
+#else
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
+#endif
+				break;;
+			}
+			rtp->payload_type &= 0x7f;
+			rtp->event_payload_type = 107;
+
+			ast_mutex_lock(&vin->lock);
+			// unblock vinetic
+			if (vin_reset_status(&vin->context) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_gsm_indicate_ringing_end;
+			}
+			// enable coder channel speech compression
+			vin_coder_channel_set_pte(&vin->context, rtp->position_on_vinetic, rtp->encoder_packet_time);
+			vin_coder_channel_set_enc(&vin->context, rtp->position_on_vinetic, rtp->encoder_algorithm);
+			if (vin_coder_channel_enable(&vin->context, rtp->position_on_vinetic) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_gsm_indicate_ringing_end;
+			}
+pg_gsm_indicate_ringing_end:
+			ast_mutex_unlock(&vin->lock);
+#if ASTERISK_VERSION_NUMBER >= 110000
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#else
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
+#endif
 			res = 0;
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -18691,11 +18782,193 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_PROCEEDING:
 			ast_verb(4, "GSM channel=\"%s\": call line=%d indicate proceeding\n", ch_gsm->alias, call->line);
+			// adjust voice format
+			rtp = ch_gsm->channel_rtp;
+			vin = rtp->vinetic;
+#if ASTERISK_VERSION_NUMBER >= 110000
+			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			ast_format_copy(&rtp->format, &ast_ch->writeformat);
+#else
+			rtp->format = ast_ch->writeformat;
+#endif
+#if ASTERISK_VERSION_NUMBER >= 100000
+			switch (rtp->format.id) {
+#else
+			switch (rtp->format) {
+#endif
+				case AST_FORMAT_G723_1:
+					/*! G.723.1 compression */
+					rtp->payload_type = RTP_PT_G723;
+					rtp->encoder_packet_time = VIN_PTE_30;
+					rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+					break;
+				case AST_FORMAT_ULAW:
+					/*! Raw mu-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMU;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+					break;
+				case AST_FORMAT_ALAW:
+					/*! Raw A-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMA;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+					break;
+				case AST_FORMAT_G729A:
+					/*! G.729A audio */
+					rtp->payload_type = RTP_PT_G729;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+					break;
+				case AST_FORMAT_G726:
+					/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+					rtp->payload_type = 2;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G726_32;
+					break;
+				default:
+					rtp->payload_type = -1;
+#if ASTERISK_VERSION_NUMBER >= 100000
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(&rtp->format));
+#else
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(rtp->format));
+#endif
+					break;
+			}
+			if (rtp->payload_type < 0) {
+#if ASTERISK_VERSION_NUMBER >= 100000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
+#else
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
+#endif
+				break;;
+			}
+			rtp->payload_type &= 0x7f;
+			rtp->event_payload_type = 107;
+
+			ast_mutex_lock(&vin->lock);
+			// unblock vinetic
+			if (vin_reset_status(&vin->context) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_gsm_proceeding_ringing_end;
+			}
+			// enable coder channel speech compression
+			vin_coder_channel_set_pte(&vin->context, rtp->position_on_vinetic, rtp->encoder_packet_time);
+			vin_coder_channel_set_enc(&vin->context, rtp->position_on_vinetic, rtp->encoder_algorithm);
+			if (vin_coder_channel_enable(&vin->context, rtp->position_on_vinetic) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_gsm_proceeding_ringing_end;
+			}
+pg_gsm_proceeding_ringing_end:
+			ast_mutex_unlock(&vin->lock);
+#if ASTERISK_VERSION_NUMBER >= 110000
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#else
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
+#endif
 			res = 0;
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_PROGRESS:
 			ast_debug(4, "GSM channel=\"%s\": call line=%d indicate progress\n", ch_gsm->alias, call->line);
+			// adjust voice format
+			rtp = ch_gsm->channel_rtp;
+			vin = rtp->vinetic;
+#if ASTERISK_VERSION_NUMBER >= 110000
+			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			ast_format_copy(&rtp->format, &ast_ch->writeformat);
+#else
+			rtp->format = ast_ch->writeformat;
+#endif
+#if ASTERISK_VERSION_NUMBER >= 100000
+			switch (rtp->format.id) {
+#else
+			switch (rtp->format) {
+#endif
+				case AST_FORMAT_G723_1:
+					/*! G.723.1 compression */
+					rtp->payload_type = RTP_PT_G723;
+					rtp->encoder_packet_time = VIN_PTE_30;
+					rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+					break;
+				case AST_FORMAT_ULAW:
+					/*! Raw mu-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMU;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+					break;
+				case AST_FORMAT_ALAW:
+					/*! Raw A-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMA;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+					break;
+				case AST_FORMAT_G729A:
+					/*! G.729A audio */
+					rtp->payload_type = RTP_PT_G729;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+					break;
+				case AST_FORMAT_G726:
+					/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+					rtp->payload_type = 2;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G726_32;
+					break;
+				default:
+					rtp->payload_type = -1;
+#if ASTERISK_VERSION_NUMBER >= 100000
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(&rtp->format));
+#else
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_getformatname(rtp->format));
+#endif
+					break;
+			}
+			if (rtp->payload_type < 0) {
+#if ASTERISK_VERSION_NUMBER >= 100000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
+#else
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
+#endif
+				break;;
+			}
+			rtp->payload_type &= 0x7f;
+			rtp->event_payload_type = 107;
+
+			ast_mutex_lock(&vin->lock);
+			// unblock vinetic
+			if (vin_reset_status(&vin->context) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_gsm_indicate_progress_end;
+			}
+			// enable coder channel speech compression
+			vin_coder_channel_set_pte(&vin->context, rtp->position_on_vinetic, rtp->encoder_packet_time);
+			vin_coder_channel_set_enc(&vin->context, rtp->position_on_vinetic, rtp->encoder_algorithm);
+			if (vin_coder_channel_enable(&vin->context, rtp->position_on_vinetic) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_gsm_indicate_progress_end;
+			}
+pg_gsm_indicate_progress_end:
+			ast_mutex_unlock(&vin->lock);
+#if ASTERISK_VERSION_NUMBER >= 110000
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#else
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
+#endif
 			res = 0;
 			break;
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -32887,7 +33160,7 @@ static int pg_load(void)
 					vin->firmware = ast_strdup(cvar);
 				}
 				if (!vin->firmware) {
-					vin->firmware = ast_strdup("RTP_0_15_56_V14");
+					vin->firmware = ast_strdup("RTP_20_15_264_V14");
 				}
 				// almab
 				if ((cvar = pg_get_config_variable(ast_cfg, vin->name, "almab"))) {
