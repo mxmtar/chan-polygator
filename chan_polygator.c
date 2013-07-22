@@ -14522,7 +14522,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->pdu_send_len = strlen(ch_gsm->pdu_send_buf);
 											// send message command
 											pg_atcommand_insert_spacer(ch_gsm, 1000);
-											pg_atcommand_queue_prepend(ch_gsm, AT_CMGS, AT_OPER_WRITE, 0, 20000, 0, "%d", sqlite3_column_int(sql0, 3));
+											pg_atcommand_queue_prepend(ch_gsm, AT_CMGS, AT_OPER_WRITE, 0, 30000, 0, "%d", sqlite3_column_int(sql0, 3));
 											ast_verb(4, "GSM channel=\"%s\": send pdu to \"%s%s\"\n", ch_gsm->alias, (sqlite3_column_int(sql0, 4) == 145)?("+"):(""), sqlite3_column_text(sql0, 5));
 										}
 									}
