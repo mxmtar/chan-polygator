@@ -124,3 +124,6 @@ routing table.
 19.07.13
 Adjust codec to best for GSM calls on PROCEEDING and RONGING events.
 Set VINETIC firmware verison RTP_20_15_264 as default.
+25.10.13
+Fix address_classify() function - set numbering plan always as ISDN. Resolve
+problem on sent SMS to short number.

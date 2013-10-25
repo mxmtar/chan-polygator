@@ -23,15 +23,16 @@ int is_address_string(const char *buf)
 		return 0;
 	// check first symbol
 	if ((!isdigit(*buf)) && (*buf != '+') && (*buf != '*')
-		&& (*buf != '#') && (*buf != 'p') && (*buf != 'w'))
+		&& (*buf != '#') && (*buf != 'p') && (*buf != 'w')) {
 		return 0;
+	}
 	buf++;
 	// check rest symbols
-	while (*buf)
-	{
+	while (*buf) {
 		if (!isdigit(*buf) && (*buf != '*')
-			&& (*buf != '#') && (*buf != 'p') && (*buf != 'w'))
+			&& (*buf != '#') && (*buf != 'p') && (*buf != 'w')) {
 			return 0;
+		}
 		buf++;
 	}
 	return 1;
@@ -45,13 +46,17 @@ int is_address_string(const char *buf)
 //------------------------------------------------------------------------------
 int is_address_equal(struct address *lhs, struct address *rhs)
 {
-	if (!lhs || !rhs) return 0;
+	if (!lhs || !rhs) {
+		return 0;
+	}
 
 	if (lhs->type.full == rhs->type.full) {
-		if (strcmp(lhs->value, rhs->value))
+		if (strcmp(lhs->value, rhs->value)) {
 			return 0;
-	} else
+		}
+	} else {
 		return 0;
+	}
 
 	return 1;
 }
@@ -69,15 +74,11 @@ void address_classify(const char *input, struct address *addr)
 	strcpy(addr->value, input);
 	addr->length = strlen(addr->value);
 	addr->type.bits.reserved = 1;
-	// get numbering plan
-	if ((is_address_string(addr->value)) && (addr->length > 7))
-		addr->type.bits.numbplan = NUMBERING_PLAN_ISDN_E164;
-	else
-		addr->type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
+	addr->type.bits.numbplan = NUMBERING_PLAN_ISDN_E164;
 	// get type of number
 	if (((addr->value[0] == '0') && (addr->value[1] == '0')) ||
 		((addr->value[0] == '0') && (addr->value[1] == '0') && (addr->value[2] == '0')) ||
-			((addr->value[0] == '+'))){
+			((addr->value[0] == '+'))) {
 		addr->type.bits.typenumb = TYPE_OF_NUMBER_INTERNATIONAL;
 	} else if (addr->value[0] == '0') {
 		addr->type.bits.typenumb = TYPE_OF_NUMBER_NATIONAL;
@@ -164,23 +165,22 @@ char *address_show(char *buf, struct address *addr, int full)
 {
 	int len;
 
-	if (!buf || !addr)
+	if (!buf || !addr) {
 		return "unknown";
-
+	}
 	*buf = '\0';
 	len = 0;
 
 	if ((addr->type.bits.typenumb == TYPE_OF_NUMBER_INTERNATIONAL) &&
 				(addr->type.bits.numbplan == NUMBERING_PLAN_ISDN_E164)) {
 		len += sprintf(buf+len, "+%.*s", addr->length, addr->value);
-	} else
+	} else {
 		len += sprintf(buf+len, "%.*s", addr->length, addr->value);
-
+	}
 	if (full) {
 		// type of number
 		len += sprintf(buf+len, ", type=");
-		switch (addr->type.bits.typenumb)
-		{
+		switch (addr->type.bits.typenumb) {
 			case TYPE_OF_NUMBER_UNKNOWN:
 				len += sprintf(buf+len, "unknown");
 				break;
@@ -211,8 +211,7 @@ char *address_show(char *buf, struct address *addr, int full)
 		}
 		// numbering plan
 		len += sprintf(buf+len, ", plan=");
-		switch (addr->type.bits.numbplan)
-		{
+		switch (addr->type.bits.numbplan) {
 			case NUMBERING_PLAN_UNKNOWN:
 				len += sprintf(buf+len, "unknown");
 				break;
