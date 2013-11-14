@@ -653,8 +653,8 @@ int at_gen_cops_read_parse(const char *fld, int fld_len, struct at_gen_cops_read
 //------------------------------------------------------------------------------
 // at_gen_cusd_write_parse()
 //------------------------------------------------------------------------------
-int at_gen_cusd_write_parse(const char *fld, int fld_len, struct at_gen_cusd_write *cusd){
-
+int at_gen_cusd_write_parse(const char *fld, int fld_len, struct at_gen_cusd_write *cusd)
+{
 	char *sp;
 	char *tp;
 	char *ep;
@@ -664,110 +664,108 @@ int at_gen_cusd_write_parse(const char *fld, int fld_len, struct at_gen_cusd_wri
 	int param_cnt;
 
 	// check params
-	if(!fld) return -1;
-
-	if((fld_len <= 0) || (fld_len > 512)) return -1;
-
-	if(!cusd) return -1;
-
-	// init ptr
-	if(!(sp = strchr(fld, ' ')))
+	if (!fld) {
 		return -1;
+	}
+	if ((fld_len <= 0) || (fld_len > 512)) {
+		return -1;
+	}
+	if (!cusd) {
+		return -1;
+	}
+	// init ptr
+	if (!(sp = strchr(fld, ' '))) {
+		return -1;
+	}
 	tp = ++sp;
 	ep = (char *)fld + fld_len;
-
 	// init params
-	for(param_cnt=0; param_cnt<MAX_CUSD_WRITE_PARAM; param_cnt++){
+	for (param_cnt = 0; param_cnt < MAX_CUSD_WRITE_PARAM; param_cnt++) {
 		params[param_cnt].type = PRM_TYPE_UNKNOWN;
 		params[param_cnt].buf = NULL;
 		params[param_cnt].len = -1;
-		}
-
+	}
 	// init at_gen_cusd_write
 	cusd->n = -1;
 	cusd->str = NULL;
 	cusd->str_len = -1;
 	cusd->dcs = -1;
-
 	// search params delimiters
 	param_cnt = 0;
-	while((tp < ep) && (param_cnt < MAX_CUSD_WRITE_PARAM)){
+	while ((tp < ep) && (param_cnt < MAX_CUSD_WRITE_PARAM)) {
 		// get param type
-		if(*tp == '"'){
+		if (*tp == 0x20) {
+			tp++;
+			continue;
+		} else if (*tp == '"') {
 			params[param_cnt].type = PRM_TYPE_STRING;
 			params[param_cnt].buf = ++tp;
-			}
-		else if(isdigit(*tp)){
+		} else if (isdigit(*tp)) {
 			params[param_cnt].type = PRM_TYPE_INTEGER;
 			params[param_cnt].buf = tp;
-			}
-		else{
+		} else {
 			params[param_cnt].type = PRM_TYPE_UNKNOWN;
 			params[param_cnt].buf = tp;
-			}
+		}
 		sp = tp;
 		// search delimiter and put terminated null-symbol
-		if(!(tp = strchr(sp, ',')))
+		if (!(tp = strchr(sp, ','))) {
 			tp = ep;
+		}
 		*tp = '\0';
 		// set param len
-		if(params[param_cnt].type == PRM_TYPE_STRING){
+		if (params[param_cnt].type == PRM_TYPE_STRING) {
 			params[param_cnt].len = tp - sp - 1;
 			*(tp-1) = '\0';
-			}
-		else{
+		} else {
 			params[param_cnt].len = tp - sp;
-			}
-		//
+		}
 		param_cnt++;
 		tp++;
-		}
-
+	}
 	// n (mandatory)
-	if((param_cnt >= 1) && (params[0].type == PRM_TYPE_INTEGER)){
+	if ((param_cnt >= 1) && (params[0].type == PRM_TYPE_INTEGER)) {
 		// check for digit
-		if(params[0].len > 0){
+		if (params[0].len > 0) {
 			tp = params[0].buf;
-			while(params[0].len--){
-				if(!isdigit(*tp++))
+			while (params[0].len--) {
+				if(!isdigit(*tp++)) {
 					return -1;
 				}
 			}
-		cusd->n = atoi(params[0].buf);
 		}
-	else
+		cusd->n = atoi(params[0].buf);
+	} else {
 		return -1;
-
+	}
 	// str (optional)
-	if(param_cnt >= 2){
-		if(params[1].type == PRM_TYPE_STRING){
-			//
+	if (param_cnt >= 2) {
+		if (params[1].type == PRM_TYPE_STRING) {
 			cusd->str = params[1].buf;
 			cusd->str_len = params[1].len;
-			}
-		else
+		} else {
 			return -1;
 		}
-
+	}
 	// dcs (optional)
-	if(param_cnt >= 3){
-		if(params[2].type == PRM_TYPE_INTEGER){
+	if (param_cnt >= 3) {
+		if (params[2].type == PRM_TYPE_INTEGER) {
 			// check for digit
-			if(params[2].len > 0){
+			if (params[2].len > 0) {
 				tp = params[2].buf;
-				while(params[2].len--){
-					if(!isdigit(*tp++))
+				while (params[2].len--) {
+					if (!isdigit(*tp++)) {
 						return -1;
 					}
 				}
-			cusd->dcs = atoi(params[2].buf);
 			}
-		else
+			cusd->dcs = atoi(params[2].buf);
+		} else {
 			return -1;
 		}
-
-	return param_cnt;
 	}
+	return param_cnt;
+}
 //------------------------------------------------------------------------------
 // end of at_gen_cusd_write_parse()
 //------------------------------------------------------------------------------
