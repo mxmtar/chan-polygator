@@ -121,3 +121,5 @@ Add permanent clip routing table functionality.
 On routing incoming GSM call in "dyn" mode, call control look-up first
 permanent routing table. If no match entry found it look-up dynamic
 routing table.
+21.11.13
+1. SIM5215. Added SIM hot change.
