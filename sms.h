@@ -146,7 +146,7 @@ struct pdu {
 struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t ltime, int *err);
 void pdu_free(struct pdu *pdu);
 int dcs_parser(unsigned char inp, struct dcs *dcs);
-int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen);
+int gsm7_to_ucs2(char **instr, size_t *inlen, int start, char **outstr, size_t *outlen);
 struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct address *sca, int id);
 
 char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs);

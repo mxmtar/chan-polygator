@@ -190,19 +190,22 @@ extern int is_str_digit(const char *buf);
 extern int is_str_xdigit(const char *buf);
 extern int is_str_printable(const char *buf);
 extern void str_digit_to_bcd(const char *instr, int inlen, char *out);
-extern int str_bin_to_hex(char **instr, int *inlen, char **outstr, int *outlen);
-extern int str_hex_to_bin(char **instr, int *inlen, char **outstr, int *outlen);
-extern int from_ucs2_to_specset(char *specset, char **instr, int *inlen, char **outstr, int *outlen);
+
+extern size_t str_from_bin_to_hex(char **ibuf, size_t *ilen, char **obuf, size_t *olen);
+extern size_t str_from_hex_to_bin(char **ibuf, size_t *ilen, char **obuf, size_t *olen);
+extern size_t str_from_ucs2_to_set(const char *set, char **ibuf, size_t *ilen, char **obuf, size_t *olen);
+extern size_t str_from_set_to_ucs2(const char *set, char **ibuf, size_t *ilen, char **obuf, size_t *olen);
 
 #define is_str_begin_by(_str, _bgn) \
-	({ \
-		int __res; \
-		if (strncasecmp(_str, _bgn, strlen(_bgn))) \
-			__res = 0; \
-		else \
-			__res = 1; \
-		__res; \
-	})
+({ \
+	int __res; \
+	if (strncasecmp(_str, _bgn, strlen(_bgn))) { \
+		__res = 0; \
+	} else { \
+		__res = 1; \
+	} \
+	__res; \
+})
 
 
 #endif //__STRUTIL_H__

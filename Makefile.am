@@ -12,7 +12,8 @@ chan_polygator_la_SOURCES = \
 		at.c \
 		m10.c \
 		sim300.c \
-		sim900.c
+		sim900.c \
+		sim5215.c
 
 chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
 chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic -lrt
@@ -25,6 +26,7 @@ noinst_HEADERS = \
 		rtp.h \
 		sim300.h \
 		sim900.h \
+		sim5215.h \
 		sms.h \
 		strutil.h \
 		x_timer.h

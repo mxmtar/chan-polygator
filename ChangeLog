@@ -129,3 +129,5 @@ Fix address_classify() function - set numbering plan always as ISDN. Resolve
 problem on sent SMS to short number.
 14.11.13
 Bug fixes. Old M10 (05) firmware insert whitespace in CUSD respose.
+21.11.13
+1. SIM5215. Added SIM hot change.

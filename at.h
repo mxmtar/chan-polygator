@@ -11,7 +11,7 @@
 enum {
 	AT_UNKNOWN = 0,
 
-	// V.25TER
+	// V.25ter
 	AT_A_SLASH,		// A/ - Re-issues last AT command given
 	AT_A,			// ATA - Answer an incoming call
 	AT_D,			// ATD - Mobile originated call to dial a number
@@ -120,6 +120,10 @@ enum {
 	AT_CSSN,		// AT+CSSN - Supplementary services notification
 	AT_CSNS,		// AT+CSNS - Single numbering scheme (M10)
 	AT_CMOD,		// AT+CMOD - Configure alternating mode calls (M10)
+	AT_CVHU,		// AT+CVHU - Voice hang up control
+	AT_CHUP,		// AT+CHUP - Hang up control
+	AT_CTZU,		// AT+CTZU - Automatic time and time zone update
+	AT_CTZR,		// AT+CTZR - Time and time Zone Reporting
 
 	// GSM07.05
 	AT_CMGD,		// AT+CMGD - Delete SMS message
@@ -139,6 +143,7 @@ enum {
 	AT_CSDH,		// AT+CSDH - Show SMS text mode parameters
 	AT_CSMP,		// AT+CSMP - Set SMS text mode parameters
 	AT_CSMS,		// AT+CSMS - Select message service
+	AT_CNMA,		// AT+CNMA New message acknowledgement to ME/TA
 };
 //------------------------------------------------------------------------------
 // CME ERROR CODE
@@ -276,8 +281,8 @@ typedef int add_check_at_resp_fun_t(const char*);
 struct at_command {
 	int id;
 	u_int32_t operations;
-	char name[16];
-	char response[MAX_AT_CMD_RESP][16];
+	char name[32];
+	char response[MAX_AT_CMD_RESP][32];
 	char description[256];
 	add_check_at_resp_fun_t *check_fun;
 };
@@ -422,9 +427,9 @@ struct at_gen_clip_unsol {
 };
 //------------------------------------------------------------------------------
 // prototype
-extern struct at_command *get_at_com_by_id(int id, const struct at_command *list, int maxnum);
+extern const struct at_command *get_at_com_by_id(int id, const struct at_command *list, size_t maxnum);
 extern int is_at_com_done(const char *response);
-extern int is_at_com_response(struct at_command *at, const char *response);
+extern int is_at_com_response(const struct at_command *at, const char *response);
 extern char *get_at_com_oper_by_id(u_int32_t oper);
 extern char *reg_status_print(int stat);
 extern char *reg_status_print_short(int stat);

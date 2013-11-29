@@ -302,7 +302,7 @@ static const unsigned short gsm_to_unicode_be[128] = {
 struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t ltime, int *err)
 {
 	char *ip, *op;
-	int ilen, olen;
+	size_t ilen, olen;
 	char *cp;
 	char *tp;
 	int tlen;
@@ -343,7 +343,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 	ilen = tlen;
 	op = pdu->buf;
 	olen = MAX_PDU_BIN_SIZE;
-	if (str_hex_to_bin(&ip, &ilen, &op, &olen)) {
+	if (str_from_hex_to_bin(&ip, &ilen, &op, &olen)) {
 		if (err) {
 			*err = __LINE__;
 		}
@@ -1021,7 +1021,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			ilen = tlen;
 			op = pdu->ud;
 			olen = 640;
-			if (from_ucs2_to_specset("UTF-8", &ip, &ilen, &op, &olen)) {
+			if (str_from_ucs2_to_set("UTF-8", &ip, &ilen, &op, &olen)) {
 				if (err) {
 					*err = __LINE__;
 				}
@@ -1053,7 +1053,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			ilen = pdu->udl;
 			op = pdu->ud;
 			olen = 640;
-			if (from_ucs2_to_specset("UTF-8", &ip, &ilen, &op, &olen)) {
+			if (str_from_ucs2_to_set("UTF-8", &ip, &ilen, &op, &olen)) {
 				if (err) {
 					*err = __LINE__;
 				}
@@ -1165,7 +1165,7 @@ int dcs_parser(unsigned char inp, struct dcs *dcs)
 //------------------------------------------------------------------------------
 // gsm7_to_ucs2()
 //------------------------------------------------------------------------------
-int gsm7_to_ucs2(char **instr, int *inlen, int start, char **outstr, int *outlen)
+int gsm7_to_ucs2(char **instr, size_t *inlen, int start, char **outstr, size_t *outlen)
 {
 	int len;
 	int rest;
@@ -1504,9 +1504,9 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 	symcnt = olen = ucs2len / 2;
 
 	if (isgsm7) {
-		if (olen <= 160)
+		if (olen <= 160) {
 			part_count = 1;
-		else {
+		} else {
 			part_count = olen / 153;
 			if(olen % 153) {
 				part_count++;
@@ -1580,8 +1580,9 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 				*bldp = ((curr->raddr.value[i] - '0') & 0x0f);
 			}
 		}
-		if (curr->raddr.length%2)
+		if (curr->raddr.length % 2) {
 			*bldp++ |= 0xf0;
+		}
 		// protocol id
 		*bldp++ = curr->pid = 0;
 		// data coding scheme
@@ -1621,7 +1622,7 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 				ilen = ((symcnt/153)?(153):(symcnt%153)) * 2;
 				obuf = curr->ud;
 				olen = 640;
-				if (from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)) {
+				if (str_from_ucs2_to_set("UTF-8", &ibuf, &ilen, &obuf, &olen) == (size_t)-1) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
@@ -1649,7 +1650,7 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 				ilen = ucs2len;
 				obuf = curr->ud;
 				olen = 640;
-				if (from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)) {
+				if (str_from_ucs2_to_set("UTF-8", &ibuf, &ilen, &obuf, &olen) == (size_t)-1) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
@@ -1686,7 +1687,7 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 				ilen = (ucs2len/134)?(134):(ucs2len%134);
 				obuf = curr->ud;
 				olen = 640;
-				if (from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)) {
+				if (str_from_ucs2_to_set("UTF-8", &ibuf, &ilen, &obuf, &olen) == (size_t)-1) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
@@ -1704,7 +1705,7 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 				ilen = ucs2len;
 				obuf = curr->ud;
 				olen = 640;
-				if (from_ucs2_to_specset("UTF-8", &ibuf, (int *)&ilen, &obuf, (int *)&olen)) {
+				if (str_from_ucs2_to_set("UTF-8", &ibuf, &ilen, &obuf, &olen) == (size_t)-1) {
 					free(ucs2buf);
 					pdu_free(pdu);
 					return NULL;
@@ -1755,34 +1756,34 @@ void pdu_free(struct pdu *pdu)
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// ussd_decode()
+// get_ussd_decoded()
 //------------------------------------------------------------------------------
 char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs)
 {
 	char *res;
 
-	char ussdbin[256];
+	char ussdbin[512];
 	int ussdbinlen;
 
 	char *ip, *op;
-	int ilen, olen;
+	size_t ilen, olen;
 
 	// get buffer for result
-	if (!(res = malloc(512))) {
+	if (!(res = malloc(1024))) {
 		return NULL;
 	}
-	memset(res, 0, 512);
+	memset(res, 0, 1024);
 
 	// convert from hex
 	ip = ussdhex;
 	ilen = ussdhexlen;
 	op = ussdbin;
 	olen = 256;
-	if (str_hex_to_bin(&ip, &ilen, &op, &olen)) {
+	if (str_from_hex_to_bin(&ip, &ilen, &op, &olen)) {
 		return NULL;
 	}
 	ussdbinlen = 256 - olen;
-
+#if 0
 	// sim300 ucs2 or gsm7
 	if ((dcs == 0x11) ||
 		(((dcs & 0xc0) == 0x40) && ((dcs & 0x0c) == 0x08)) ||
@@ -1792,7 +1793,7 @@ char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs)
 		ilen = ussdbinlen;
 		op = res;
 		olen = 512;
-		if (from_ucs2_to_specset("UTF-8", &ip, &ilen, &op, &olen)) {
+		if (str_from_ucs2_to_set("UTF-8", &ip, &ilen, &op, &olen) == (size_t)-1) {
 			free(res);
 			return NULL;
 		}
@@ -1800,7 +1801,17 @@ char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs)
 		// gsm7
 		memcpy(res, ussdbin, ussdbinlen);
 	}
-
+#else
+	// ucs2
+	ip = ussdbin;
+	ilen = ussdbinlen;
+	op = res;
+	olen = 1024;
+	if (str_from_ucs2_to_set("UTF-8", &ip, &ilen, &op, &olen) == (size_t)-1) {
+		free(res);
+		return NULL;
+	}
+#endif
 	return res;
 }
 //------------------------------------------------------------------------------

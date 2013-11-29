@@ -1,10 +1,6 @@
 /******************************************************************************/
 /* m10.c                                                                      */
 /******************************************************************************/
-/* $Rev:: 140                        $                                        */
-/* $Author:: maksym                  $                                        */
-/* $Date:: 2012-03-20 18:19:44 +0200#$                                        */
-/******************************************************************************/
 
 #include <sys/types.h>
 
@@ -15,10 +11,9 @@
 #include "at.h"
 #include "m10.h"
 #include "strutil.h"
-//------------------------------------------------------------------------------
 
-const struct at_command m10_at_com_list[AT_M10_MAXNUM] = {
-	// int id; u_int32_t operations; char name[16]; char response[MAX_AT_CMD_RESP][16]; char description[256]; add_check_at_resp_fun_t *check_fun;
+const struct at_command m10_at_com_list[] = {
+	// int id; u_int32_t operations; char name[32]; char response[MAX_AT_CMD_RESP][32]; char description[256]; add_check_at_resp_fun_t *check_fun;
 	{AT_M10_UNKNOWN, AT_OPER_EXEC, "", {"", ""}, "", is_str_printable},
 	// M10 V.25TER V1.04
 	{AT_M10_A_SLASH, AT_OPER_EXEC, "A/", {"", ""}, "Re-issues last AT command given", NULL},
@@ -197,8 +192,12 @@ const struct at_command m10_at_com_list[AT_M10_MAXNUM] = {
 	{AT_M10_EGPAU, AT_OPER_EXEC|AT_OPER_TEST, "AT+EGPAU",  {"+EGPAU:", ""}, "PPP authentication", NULL},
 	{AT_M10_QNITZ, AT_OPER_TEST|AT_OPER_WRITE, "AT+QNITZ",  {"+QNITZ:", ""}, "Network time synchronization", NULL},
 	{AT_M10_EGMR, AT_OPER_TEST|AT_OPER_WRITE, "AT+EGMR",  {"+EGMR:", ""}, "Set/Inquiry product serial number identification", NULL},
-	};
-//------------------------------------------------------------------------------
+};
+
+size_t m10_at_com_list_length()
+{
+	return sizeof(m10_at_com_list)/sizeof(m10_at_com_list[0]);
+}
 
 //==============================================================================
 // begin parser response function section

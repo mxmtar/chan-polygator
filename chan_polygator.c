@@ -55,6 +55,7 @@
 #include "m10.h"
 #include "sim300.h"
 #include "sim900.h"
+#include "sim5215.h"
 
 /*** DOCUMENTATION
 	<manager name="PolygatorShowGSMNetInfo" language="en_US">
@@ -149,8 +150,8 @@ enum {
 };
 
 enum {
-	PG_AT_SUBCMD_CFUN_DISABLE = 1,
-	PG_AT_SUBCMD_CFUN_ENABLE = 2,
+	PG_AT_SUBCMD_CFUN_DISABLE = 0,
+	PG_AT_SUBCMD_CFUN_ENABLE = 1,
 };
 
 enum {
@@ -172,7 +173,7 @@ enum {
 
 #define PG_DEFAULT_AT_RESPONSE_TIMEOUT 2000
 struct pg_at_cmd {
-	struct at_command *at;
+	const struct at_command *at;
 	int id;
 	u_int32_t oper;
 	u_int32_t sub_cmd;
@@ -599,6 +600,8 @@ struct pg_channel_gsm {
 		unsigned int sms_table_needed:1;
 		unsigned int dcr_table_needed:1;
 		unsigned int main_tty:1;
+		unsigned int gainin:1;
+		unsigned int gainout:1;
 	} flags;
 
 	// timers
@@ -664,8 +667,6 @@ struct pg_channel_gsm {
 	char *operator_name;
 	struct address subscriber_number;
 	struct address smsc_number;
-	int gainin;
-	int gainout;
 	int clir;
 	int clir_status;
 	int rssi;
@@ -5327,7 +5328,7 @@ static int pg_atcommand_queue_prepend(struct pg_channel_gsm* ch_gsm,
 										const char *fmt, ...)
 {
 	struct pg_at_cmd *cmd;
-	struct at_command *at;
+	const struct at_command *at;
 	char *opstr;
 
 	va_list vargs;
@@ -5340,11 +5341,13 @@ static int pg_atcommand_queue_prepend(struct pg_channel_gsm* ch_gsm,
 	// get at command data
 	at = NULL;
 	if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
-		at = get_at_com_by_id(id, sim300_at_com_list, AT_SIM300_MAXNUM);
+		at = get_at_com_by_id(id, sim300_at_com_list, sim300_at_com_list_length());
 	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
-		at = get_at_com_by_id(id, sim900_at_com_list, AT_SIM900_MAXNUM);
+		at = get_at_com_by_id(id, sim900_at_com_list, sim900_at_com_list_length());
 	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
-		at = get_at_com_by_id(id, m10_at_com_list, AT_M10_MAXNUM);
+		at = get_at_com_by_id(id, m10_at_com_list, m10_at_com_list_length());
+	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+		at = get_at_com_by_id(id, sim5215_at_com_list, sim5215_at_com_list_length());
 	}
 	if (!at) {
 		ast_log(LOG_WARNING, "GSM channel=\"%s\": can't find at commmand id=[%d]\n", ch_gsm->alias, id);
@@ -5408,7 +5411,7 @@ static int pg_atcommand_queue_append(struct pg_channel_gsm* ch_gsm,
 										const char *fmt, ...)
 {
 	struct pg_at_cmd *cmd;
-	struct at_command *at;
+	const struct at_command *at;
 	char *opstr;
 
 	va_list vargs;
@@ -5421,11 +5424,13 @@ static int pg_atcommand_queue_append(struct pg_channel_gsm* ch_gsm,
 	// get at command data
 	at = NULL;
 	if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
-		at = get_at_com_by_id(id, sim300_at_com_list, AT_SIM300_MAXNUM);
+		at = get_at_com_by_id(id, sim300_at_com_list, sim300_at_com_list_length());
 	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
-		at = get_at_com_by_id(id, sim900_at_com_list, AT_SIM900_MAXNUM);
+		at = get_at_com_by_id(id, sim900_at_com_list, sim900_at_com_list_length());
 	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
-		at = get_at_com_by_id(id, m10_at_com_list, AT_M10_MAXNUM);
+		at = get_at_com_by_id(id, m10_at_com_list, m10_at_com_list_length());
+	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+		at = get_at_com_by_id(id, sim5215_at_com_list, sim5215_at_com_list_length());
 	}
 	if (!at) {
 		ast_log(LOG_WARNING, "GSM channel=\"%s\": can't find at commmand id=[%d]\n", ch_gsm->alias, id);
@@ -5438,7 +5443,7 @@ static int pg_atcommand_queue_append(struct pg_channel_gsm* ch_gsm,
 	}
 	// check for operation is available for this AT command
 	if (!(oper & at->operations)) {
-		ast_log(LOG_WARNING, "GSM channel=\"%s\": operation [%0X] is not available for \"%s\"\n", ch_gsm->alias, oper, at->name);
+		ast_log(LOG_WARNING, "GSM channel=\"%s\": operation [%0X] is not available for id=%d:%d \"%s\"\n", ch_gsm->alias, oper, id, at->id, at->name);
 		return -1;
 	}
 	// creating command container
@@ -7217,6 +7222,26 @@ static int pg_channel_gsm_write_imei_m10(struct pg_channel_gsm* ch_gsm, const ch
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+// pg_channel_gsm_write_imei_sim5215()
+//------------------------------------------------------------------------------
+static int pg_channel_gsm_write_imei_sim5215(struct pg_channel_gsm* ch_gsm, const char *imei, int print_type, uintptr_t print_out)
+{
+	char imei_buf[16];
+
+	snprintf(imei_buf, sizeof(imei_buf), "%.*s%c", 14, imei, (char)imei_calc_check_digit(imei));
+
+	pg_atcommand_queue_append(ch_gsm, AT_SIM5215_SIMEI, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%s", imei_buf);
+
+	ch_gsm->imei[0] = '\0';
+	pg_printf(print_type, print_out, "GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
+
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_channel_gsm_write_imei_sim5215()
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
 // pg_channel_gsm_suspend_action()
 //------------------------------------------------------------------------------
 static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
@@ -7237,6 +7262,8 @@ static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
 			pg_channel_gsm_write_imei_sim300(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
 		} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 			pg_channel_gsm_write_imei_m10(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
+		} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+			pg_channel_gsm_write_imei_sim5215(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
 		}
 		ch_gsm->imei_new[0] = '\0';
 	}
@@ -7623,6 +7650,8 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 					pg_atcommand_queue_append(ch_gsm, AT_SIM300_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
 				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 					pg_atcommand_queue_append(ch_gsm, AT_SIM900_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,1", 0);
 				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 					pg_atcommand_queue_append(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 				}
@@ -7680,7 +7709,11 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 					pg_atcommand_insert_spacer(ch_gsm, 500);
 					pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 				} else {
-					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
+					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						pg_atcommand_insert_spacer(ch_gsm, 500);
+						pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+						pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_insert_spacer(ch_gsm, 500);
 						pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 					} else {
@@ -7782,7 +7815,11 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 						pg_atcommand_insert_spacer(ch_gsm, 500);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
+						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							pg_atcommand_insert_spacer(ch_gsm, 500);
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_insert_spacer(ch_gsm, 500);
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						} else {
@@ -7801,7 +7838,11 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 						pg_atcommand_insert_spacer(ch_gsm, 500);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
+						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							pg_atcommand_insert_spacer(ch_gsm, 500);
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_insert_spacer(ch_gsm, 500);
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						} else {
@@ -7819,7 +7860,11 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 						pg_atcommand_insert_spacer(ch_gsm, 500);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
+						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							pg_atcommand_insert_spacer(ch_gsm, 500);
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_insert_spacer(ch_gsm, 500);
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						} else {
@@ -7841,6 +7886,8 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 					pg_atcommand_queue_append(ch_gsm, AT_SIM300_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
 				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 					pg_atcommand_queue_append(ch_gsm, AT_SIM900_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 2);
 				} else if (ch_gsm->gsm_module_type== POLYGATOR_MODULE_TYPE_M10) {
 					pg_atcommand_queue_append(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 				}
@@ -9477,10 +9524,11 @@ static void *pg_channel_gsm_workthread(void *data)
 	unsigned int cause_select;
 	unsigned int cause_value;
 
+	char immbuf[256];
 	char *ip;
-	int ilen;
+	size_t ilen;
 	char *op;
-	int olen;
+	size_t olen;
 
 	char *str0, *str1;
 	sqlite3_stmt *sql0, *sql1;
@@ -9608,25 +9656,9 @@ static void *pg_channel_gsm_workthread(void *data)
 	ch_gsm->pdu_cmt_wait = 0;
 	ch_gsm->pdu_cds_wait = 0;
 	ch_gsm->pdu_send_id = 0;
-#if 0
-	ch_gsm->init.ready = 0;
-	ch_gsm->init.clip = 1;
-	ch_gsm->init.chfa = 1;
-	ch_gsm->init.colp = 0;
-	ch_gsm->init.clvl = 1;
-	ch_gsm->init.cmic = 1;
-	ch_gsm->init.cscs = 1;
-	ch_gsm->init.cmee = 1;
-	ch_gsm->init.ceer = 1;
-	ch_gsm->init.cclk = 1;
-	ch_gsm->init.creg = 0;
-	ch_gsm->init.cmgf = 1;
-	ch_gsm->init.echo = 1;
-	ch_gsm->init.cnmi = 1;
-	ch_gsm->init.fallback = 0;
-#else
+
 	pg_channel_gsm_set_init_flags(ch_gsm);
-#endif
+
 	// startup flags
 	ch_gsm->flags.shutdown = 0;
 	ch_gsm->flags.restart = 0;
@@ -9680,8 +9712,6 @@ static void *pg_channel_gsm_workthread(void *data)
 	ch_gsm->state = PG_CHANNEL_GSM_STATE_DISABLED;
 	ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 
-	ast_mutex_unlock(&ch_gsm->lock);
-
 	// init receiver
 	r_buf[0] = '\0';
 	r_cptr = r_buf;
@@ -9694,13 +9724,14 @@ static void *pg_channel_gsm_workthread(void *data)
 		gettimeofday(&curr_tv, &curr_tz);
 
 		FD_ZERO(&rfds);
-		if (ch_gsm->flags.main_tty)
+		if (ch_gsm->flags.main_tty) {
 			FD_SET(ch_gsm->tty_fd, &rfds);
-
+		}
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 250000;
-
+		ast_mutex_unlock(&ch_gsm->lock);
 		res = ast_select(ch_gsm->tty_fd + 1, &rfds, NULL, NULL, &timeout);
+		ast_mutex_lock(&ch_gsm->lock);
 		if (res > 0) {
 			if (FD_ISSET(ch_gsm->tty_fd, &rfds)) {
 				r_len = read(ch_gsm->tty_fd, &r_char, 1);
@@ -9709,14 +9740,15 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (ch_gsm->debug.receiver) {
 						ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
 						if (ch_gsm->debug.receiver_debug_fp) {
-							if (r_char == '\r')
+							if (r_char == '\r') {
 								fprintf(ch_gsm->debug.receiver_debug_fp, "\nCR");
-							else if (r_char == '\n')
+							} else if (r_char == '\n') {
 								fprintf(ch_gsm->debug.receiver_debug_fp, "LF\n");
-							else if (isprint(r_char))
+							} else if (isprint(r_char)) {
 								fprintf(ch_gsm->debug.receiver_debug_fp, "%c", r_char);
-							else
+							} else {
 								fprintf(ch_gsm->debug.receiver_debug_fp, "[%02x]", (unsigned char)r_char);
+							}
 							fflush(ch_gsm->debug.receiver_debug_fp);
 							fclose(ch_gsm->debug.receiver_debug_fp);
 							ch_gsm->debug.receiver_debug_fp = NULL;
@@ -9797,9 +9829,6 @@ static void *pg_channel_gsm_workthread(void *data)
 			ast_log(LOG_ERROR, "GSM channel=\"%s\": select error: %s\n", ch_gsm->alias, strerror(errno));
 			continue;
 		}
-
-		ast_mutex_lock(&ch_gsm->lock);
-
 		// check for command timeout expired
 		if (ch_gsm->at_cmd) {
 			// check command timeout
@@ -10124,7 +10153,9 @@ static void *pg_channel_gsm_workthread(void *data)
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CLCC:
-							if ((is_str_begin_by(r_buf, "+CLCC:")) && (sscanf(r_buf, "+CLCC: %u,%u,%u,%u,%u,\"%[0-9+]\",%u,\"%s\"", &tu0, &tu1, &tu2, &tu3, &tu4, ts0, &tu5, ts1) == 8)) {
+							if ((is_str_begin_by(r_buf, "+CLCC:")) &&
+								((sscanf(r_buf, "+CLCC: %u,%u,%u,%u,%u,\"%[0-9+]\",%u,\"%s\"", &tu0, &tu1, &tu2, &tu3, &tu4, ts0, &tu5, ts1) == 8) ||
+								(sscanf(r_buf, "+CLCC: %u,%u,%u,%u,%u,\"%[0-9+]\",%u", &tu0, &tu1, &tu2, &tu3, &tu4, ts0, &tu5) == 7))) {
 								parser_ptrs.clcc_ex = (struct at_gen_clcc_exec *)tmpbuf;
 								if (at_gen_clcc_exec_parse(r_buf, r_buf_len, parser_ptrs.clcc_ex) < 0) {
 									ast_log(LOG_ERROR, "GSM channel=\"%s\": at_gen_clcc_exec_parse(%.*s) error\n", ch_gsm->alias, r_buf_len, r_buf);
@@ -10147,8 +10178,9 @@ static void *pg_channel_gsm_workthread(void *data)
 														call->calling_name.length = parser_ptrs.clcc_ex->number_len;
 														call->calling_name.type.full = parser_ptrs.clcc_ex->type;
 														address_normalize(&call->calling_name);
-													} else
+													} else {
 														address_classify("unknown", &call->calling_name);
+													}
 													// run call state machine
 													pg_call_gsm_sm(call, PG_CALL_GSM_MSG_INFO_IND, 0);
 												}
@@ -10223,8 +10255,9 @@ static void *pg_channel_gsm_workthread(void *data)
 													call->calling_name.length = parser_ptrs.clcc_ex->number_len;
 													call->calling_name.type.full = parser_ptrs.clcc_ex->type;
 													address_normalize(&call->calling_name);
-												} else
+												} else {
 													address_classify("unknown", &call->calling_name);
+												}
 												ast_verb(2, "GSM channel=\"%s\": Call \"%s%s\" Waiting...\n", ch_gsm->alias, 
 																			(call->calling_name.type.full == 145)?("+"):(""),
 																			call->calling_name.value);
@@ -10235,8 +10268,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										}
 									}
 									// perform line contest
-									AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry)
-									{
+									AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
 										if (call->line == parser_ptrs.clcc_ex->id) call->contest = 0;
 									}
 								} /* parsing success */
@@ -10553,7 +10585,12 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 											// wake up SIM
-											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+											if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+												ch_gsm->flags.restart = 1;
+												ch_gsm->flags.restart_now = 1;
+											} else {
+												pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+											}
 										} else if (ch_gsm->reg_stat == REG_STAT_NOTREG_SEARCH) {
 											// start registering timer
 											x_timer_set(ch_gsm->timers.registering, registering_timeout);
@@ -10619,6 +10656,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								}
 							}
 							break;
+#if 0
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CLVL:
 							if (is_str_begin_by(r_buf, "+CLVL:")) {
@@ -10653,6 +10691,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #endif
 							}
 							break;
+#endif
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CSCA:
 							if (is_str_begin_by(r_buf, "+CSCA:")) {
@@ -10671,7 +10710,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										op = ch_gsm->smsc_number.value;
 										olen = MAX_ADDRESS_LENGTH;
 										memset(ch_gsm->smsc_number.value, 0 , MAX_ADDRESS_LENGTH);
-										if (!str_hex_to_bin(&ip, &ilen, &op, &olen)) {
+										if (!str_from_hex_to_bin(&ip, &ilen, &op, &olen)) {
 											ch_gsm->smsc_number.length = strlen(ch_gsm->smsc_number.value);
 											ch_gsm->smsc_number.type.full = parser_ptrs.csca_rd->tosca;
 											address_normalize(&ch_gsm->smsc_number);
@@ -10702,15 +10741,17 @@ static void *pg_channel_gsm_workthread(void *data)
 										pg_atcommand_queue_append(ch_gsm, AT_SIM300_CSMINS, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 									} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 										pg_atcommand_queue_append(ch_gsm, AT_SIM900_CSMINS, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+									} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+										/* operation not supported */;
 									} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 										pg_atcommand_queue_append(ch_gsm, AT_M10_QSIMSTAT, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 									}
 									// get imei
-									pg_atcommand_queue_append(ch_gsm, AT_GSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+									pg_atcommand_queue_append(ch_gsm, AT_CGSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 									// get model
-									pg_atcommand_queue_append(ch_gsm, AT_GMM, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+									pg_atcommand_queue_append(ch_gsm, AT_CGMM, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 									// get firmware
-									pg_atcommand_queue_append(ch_gsm, AT_GMR, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+									pg_atcommand_queue_append(ch_gsm, AT_CGMR, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 									//
 									if (!strcasecmp(r_buf, "+CPIN: NOT INSERTED") || !strcasecmp(r_buf, "+CPIN: NOT READY")) {
 										// - SIM card not inserted
@@ -10771,7 +10812,12 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 										// wake up SIM
-										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+										if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+											ch_gsm->flags.restart = 1;
+											ch_gsm->flags.restart_now = 1;
+										} else {
+											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+										}
 									} else if (!strcasecmp(r_buf, "+CPIN: READY")) {
 										// - PIN ready
 										if (!ch_gsm->flags.sim_inserted)
@@ -10789,6 +10835,8 @@ static void *pg_channel_gsm_workthread(void *data)
 											pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 											pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+											pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 											pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										}
@@ -10802,7 +10850,12 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 											// wake up SIM
-											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+											if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+												ch_gsm->flags.restart = 1;
+												ch_gsm->flags.restart_now = 1;
+											} else {
+												pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+											}
 										} else {
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_CALL_READY;
 											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -10826,6 +10879,8 @@ static void *pg_channel_gsm_workthread(void *data)
 												pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 											} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 												pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+											} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+												pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 											} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 												pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 											}
@@ -10844,6 +10899,8 @@ static void *pg_channel_gsm_workthread(void *data)
 											pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 											pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+											pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 											pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										}
@@ -10856,7 +10913,12 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 										// wake up SIM
-										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+										if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+											ch_gsm->flags.restart = 1;
+											ch_gsm->flags.restart_now = 1;
+										} else {
+											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+										}
 									}
 								} else if (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_SUSPEND) {
 									if (!strcasecmp(r_buf, "+CPIN: NOT READY")) {
@@ -10888,14 +10950,19 @@ static void *pg_channel_gsm_workthread(void *data)
 					} // end of READ operations
 				else if (ch_gsm->at_cmd->oper == AT_OPER_WRITE) {
 					// WRITE operations
-					switch (ch_gsm->at_cmd->id)
-					{
+					switch (ch_gsm->at_cmd->id) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CFUN:
 							if (strstr(r_buf, "OK")) {
 								if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CFUN_ENABLE) {
 									// start simpoll timer
 									x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
+								} else if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CFUN_DISABLE) {
+									if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+										ast_verbose("%s: GSM channel=\"%s\": suspend action\n", AST_MODULE, ch_gsm->alias);
+										// perform suspend action
+										pg_channel_gsm_suspend_action(ch_gsm);
+									}
 								}
 							}
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -10964,7 +11031,12 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 										// wake up SIM
-										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+										if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+											ch_gsm->flags.restart = 1;
+											ch_gsm->flags.restart_now = 1;
+										} else {
+											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+										}
 									} else {
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_CALL_READY;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -10988,7 +11060,12 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 										// wake up SIM
-										pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+										if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+											ch_gsm->flags.restart = 1;
+											ch_gsm->flags.restart_now = 1;
+										} else {
+											pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+										}
 									} else {
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_CALL_READY;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -11025,10 +11102,11 @@ static void *pg_channel_gsm_workthread(void *data)
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CLVL:
-							if (is_str_begin_by(r_buf, "OK"))
-								ch_gsm->gainin = ch_gsm->config.gainin;
-							else if (strstr(r_buf, "ERROR"))
-								ch_gsm->gainin = 0;
+							if (is_str_begin_by(r_buf, "OK")) {
+								ch_gsm->flags.gainin = 0;
+							} else if (strstr(r_buf, "ERROR")) {
+								ch_gsm->flags.gainin = 1;
+							}
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CUSD:
@@ -11946,7 +12024,6 @@ static void *pg_channel_gsm_workthread(void *data)
 										pg_sms_db_table_create(ch_gsm->iccid, &ch_gsm->lock);
 										ch_gsm->flags.sms_table_needed = 0;
 									}
-									//
 									if (ch_gsm->flags.sim_change) {
 										if (ch_gsm->iccid && ch_gsm->iccid_ban && strcmp(ch_gsm->iccid, ch_gsm->iccid_ban)) {
 											// new SIM
@@ -11965,12 +12042,16 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 												ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 												// wake up SIM
-												pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+												if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+													ch_gsm->flags.restart = 1;
+													ch_gsm->flags.restart_now = 1;
+												} else {
+													pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+												}
 												break;
 											}
 										}
 									}
-									//
 									if (ch_gsm->flags.pin_required) {
 										if (ch_gsm->pin) ast_free(ch_gsm->pin);
 										if ((ch_gsm->pin = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock))) {
@@ -11994,19 +12075,17 @@ static void *pg_channel_gsm_workthread(void *data)
 							default:
 								break;
 						}
-					}
-					else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
+					} else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
 						// TEST operations
-						switch (ch_gsm->at_cmd->id)
-						{
+						switch (ch_gsm->at_cmd->id) {
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							default:
 								break;
 						}
-					}
-					else if(ch_gsm->at_cmd->oper == AT_OPER_READ){
+					} else if(ch_gsm->at_cmd->oper == AT_OPER_READ) {
 						// READ operations
-						switch(ch_gsm->at_cmd->id){
+						switch (ch_gsm->at_cmd->id) {
+#if 0
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM300_CMIC:
 								if (strstr(r_buf, "+CMIC:")) {
@@ -12041,6 +12120,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #endif
 								}
 								break;
+#endif
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM300_CSMINS:
 								if (strstr(r_buf, "+CSMINS:")) {
@@ -12125,9 +12205,9 @@ static void *pg_channel_gsm_workthread(void *data)
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM300_CMIC:
 								if (is_str_begin_by(r_buf, "OK"))
-									ch_gsm->gainout = ch_gsm->config.gainout;
+									ch_gsm->flags.gainout = 0;
 								else if (strstr(r_buf, "ERROR"))
-									ch_gsm->gainout = 0;
+									ch_gsm->flags.gainout = 1;
 								break;
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							default:
@@ -12153,7 +12233,6 @@ static void *pg_channel_gsm_workthread(void *data)
 										pg_sms_db_table_create(ch_gsm->iccid, &ch_gsm->lock);
 										ch_gsm->flags.sms_table_needed = 0;
 									}
-									//
 									if (ch_gsm->flags.sim_change) {
 										if (ch_gsm->iccid && ch_gsm->iccid_ban && strcmp(ch_gsm->iccid, ch_gsm->iccid_ban)) {
 											// new SIM
@@ -12172,12 +12251,16 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 												ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 												// wake up SIM
-												pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+												if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+													ch_gsm->flags.restart = 1;
+													ch_gsm->flags.restart_now = 1;
+												} else {
+													pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+												}
 												break;
 											}
 										}
 									}
-									//
 									if (ch_gsm->flags.pin_required) {
 										if (ch_gsm->pin) ast_free(ch_gsm->pin);
 										if ((ch_gsm->pin = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock))) {
@@ -12203,16 +12286,15 @@ static void *pg_channel_gsm_workthread(void *data)
 							}
 					} else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
 						// TEST operations
-						switch (ch_gsm->at_cmd->id)
-						{
+						switch (ch_gsm->at_cmd->id) {
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							default:
 								break;
 						}
 					} else if(ch_gsm->at_cmd->oper == AT_OPER_READ) {
 						// READ operations
-						switch (ch_gsm->at_cmd->id)
-						{
+						switch (ch_gsm->at_cmd->id) {
+#if 0
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM900_CMIC:
 								if (strstr(r_buf, "+CMIC:")) {
@@ -12252,6 +12334,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #endif
 								}
 								break;
+#endif
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM900_CSMINS:
 								if (strstr(r_buf, "+CSMINS:")) {
@@ -12334,10 +12417,11 @@ static void *pg_channel_gsm_workthread(void *data)
 						switch (ch_gsm->at_cmd->id) {
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_SIM900_CMIC:
-								if (is_str_begin_by(r_buf, "OK"))
-									ch_gsm->gainout = ch_gsm->config.gainout;
-								else if (strstr(r_buf, "ERROR"))
-									ch_gsm->gainout = 0;
+								if (is_str_begin_by(r_buf, "OK")) {
+									ch_gsm->flags.gainout = 0;
+								} else if (strstr(r_buf, "ERROR")) {
+									ch_gsm->flags.gainout = 1;
+								}
 								break;
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							default:
@@ -12345,6 +12429,228 @@ static void *pg_channel_gsm_workthread(void *data)
 						}
 					}
 				} // end of SIM900 AT commands
+
+				// SIM5215 AT commands
+				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					// select by operation
+					if (ch_gsm->at_cmd->oper == AT_OPER_EXEC) {
+						// EXEC operations
+						switch (ch_gsm->at_cmd->id) {
+							//++++++++++++++++++++++++++++++++++++++++++++++++++
+							case AT_SIM5215_CICCID:
+								if (is_str_begin_by(r_buf, "+ICCID:")) {
+									if ((str0 = strchr(r_buf, SP))) {
+										str0++;
+										if (is_str_xdigit(str0)) {
+											//
+											if (ch_gsm->iccid) ast_free(ch_gsm->iccid);
+											ch_gsm->iccid = ast_strdup(str0);
+											//
+											if (ch_gsm->flags.sms_table_needed) {
+												pg_sms_db_table_create(ch_gsm->iccid, &ch_gsm->lock);
+												ch_gsm->flags.sms_table_needed = 0;
+											}
+											//
+											if (ch_gsm->flags.sim_change) {
+												if (ch_gsm->iccid && ch_gsm->iccid_ban && strcmp(ch_gsm->iccid, ch_gsm->iccid_ban)) {
+													// new SIM
+													ch_gsm->flags.sim_change = 0;
+													ch_gsm->flags.sim_test = 0;
+												} else {
+													// old SIM
+													if (ch_gsm->flags.sim_test) {
+														ast_verbose("%s: GSM channel=\"%s\": this SIM card used all registration attempts and already inserted\n", AST_MODULE, ch_gsm->alias);
+														ch_gsm->flags.sim_test = 0;
+														// disable GSM module functionality
+														pg_atcommand_insert_spacer(ch_gsm, 3000);
+														pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+														pg_atcommand_insert_spacer(ch_gsm, 2000);
+														// mark this state as suspend
+														ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
+														ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+														// wake up SIM
+														if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+															ch_gsm->flags.restart = 1;
+															ch_gsm->flags.restart_now = 1;
+														} else {
+															pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+														}
+														break;
+													}
+												}
+											}
+											//
+											if (ch_gsm->flags.pin_required) {
+												if (ch_gsm->pin) ast_free(ch_gsm->pin);
+												if ((ch_gsm->pin = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock))) {
+													pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\"", ch_gsm->pin);
+												} else {
+													ast_verbose("%s: GSM channel=\"%s\": SIM ICCID=\"%s\" PIN required\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid);
+												}
+											} else if (ch_gsm->flags.puk_required) {
+												if (ch_gsm->puk) ast_free(ch_gsm->puk);
+												if ((ch_gsm->puk = pg_get_puk_by_iccid(ch_gsm->iccid, &ch_gsm->lock))) {
+													if (!ch_gsm->pin) ch_gsm->pin = pg_get_pin_by_iccid(ch_gsm->iccid, &ch_gsm->lock);
+													if (!ch_gsm->pin) ch_gsm->pin = ast_strdup("0000");
+													pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "\"%s\",\"%s\"", ch_gsm->puk, ch_gsm->pin);
+												} else {
+													ast_verbose("%s: GSM channel=\"%s\": SIM ICCID=\"%s\" PUK required\n", AST_MODULE, ch_gsm->alias, ch_gsm->iccid);
+												}
+											}
+										}
+									}
+								}
+								break;
+							//++++++++++++++++++++++++++++++++++++++++++++++++++
+							default:
+								break;
+							}
+					} else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
+						// TEST operations
+						switch (ch_gsm->at_cmd->id) {
+							//++++++++++++++++++++++++++++++++++++++++++++++++++
+							default:
+								break;
+						}
+					} else if(ch_gsm->at_cmd->oper == AT_OPER_READ) {
+						// READ operations
+						switch (ch_gsm->at_cmd->id) {
+							//++++++++++++++++++++++++++++++++++++++++++++++++++
+// 							case AT_SIM5215_CTXGAIN:
+// 								if (strstr(r_buf, "+CMIC:")) {
+// 									parser_ptrs.sim900_cmic_rd = (struct at_sim900_cmic_read *)tmpbuf;
+// 									if (at_sim900_cmic_read_parse(r_buf, r_buf_len, parser_ptrs.sim900_cmic_rd) < 0) {
+// 										// parsing error
+// 										ast_log(LOG_ERROR, "GSM channel=\"%s\": at_sim900_cmic_read_parse(%.*s) error\n", ch_gsm->alias, r_buf_len, r_buf);
+// 										r_buf[0] = '\0';
+// 										r_cptr = r_buf;
+// 										r_buf_len = 0;
+// 										r_buf_valid = 0;
+// 										r_buf_active = 0;
+// #if 0
+// 										// check for query
+// 										if(chnl->querysig.gainout){
+// 											ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
+// 											chnl->querysig.gainout = 0;
+// 											}
+// #endif
+// 									} else {
+// 										ch_gsm->gainout = parser_ptrs.sim900_cmic_rd->main_hs_mic;
+// #if 0
+// 										// check for query
+// 										if(chnl->querysig.gainout){
+// 											ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): %d\n", ch_gsm->alias, chnl->gainout_curr);
+// 											chnl->querysig.gainout = 0;
+// 											}
+// #endif
+// 									}
+// 								} else if (strstr(r_buf, "ERROR")) {
+// #if 0									
+// 									// check for query
+// 									if(chnl->querysig.gainout){
+// 										ast_verbose("%s: GSM channel=\"%s\": qwery(gainout): error\n", ch_gsm->alias);
+// 										chnl->querysig.gainout = 0;
+// 										}
+// #endif
+// 								}
+// 								break;
+							//++++++++++++++++++++++++++++++++++++++++++++++++++
+// 							case AT_XXX_CSMINS:
+// 								if (strstr(r_buf, "+CSMINS:")) {
+// 									// parse csmins
+// 									parser_ptrs.sim900_csmins_rd = (struct at_sim900_csmins_read *)tmpbuf;
+// 									if (at_sim900_csmins_read_parse(r_buf, r_buf_len, parser_ptrs.sim900_csmins_rd) < 0) {
+// 										ast_log(LOG_ERROR, "GSM channel=\"%s\": at_sim900_csmins_read_parse(%.*s) error\n", ch_gsm->alias, r_buf_len, r_buf);
+// 									} else {
+// 										if (parser_ptrs.sim900_csmins_rd->sim_inserted != ch_gsm->flags.sim_inserted) {
+// 											ast_verbose("%s: GSM channel=\"%s\": SIM %s\n", AST_MODULE, ch_gsm->alias, (parser_ptrs.sim900_csmins_rd->sim_inserted)?("inserted"):("removed"));
+// 											if (!parser_ptrs.sim900_csmins_rd->sim_inserted) {
+// 												// reset channel phone number
+// 												ast_copy_string(ch_gsm->subscriber_number.value, "unknown", MAX_ADDRESS_LENGTH);
+// 												ch_gsm->subscriber_number.length = strlen(ch_gsm->subscriber_number.value);
+// 												ch_gsm->subscriber_number.type.bits.reserved = 1;
+// 												ch_gsm->subscriber_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
+// 												ch_gsm->subscriber_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
+// 												// reset SMS center number
+// 												ast_copy_string(ch_gsm->smsc_number.value, "unknown", MAX_ADDRESS_LENGTH);
+// 												ch_gsm->smsc_number.length = strlen(ch_gsm->smsc_number.value);
+// 												ch_gsm->smsc_number.type.bits.reserved = 1;
+// 												ch_gsm->smsc_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
+// 												ch_gsm->smsc_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
+// 
+// 												if ((tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm->operator_code, PG_TRUNK_GSM_MCCMNC))) {
+// 													if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MCCMNC, ch_gsm->alias))) {
+// 														// remove entry from trunk list
+// 														AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
+// 														// remove entry from channel list
+// 														AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+// 														// reset last used channel
+// 														tr_gsm->channel_gsm_last = NULL;
+// 														// release unused memory
+// 														ast_free(ch_gsm_fold->name);
+// 														ast_free(ch_gsm_fold);
+// 													}
+// 												}
+// 
+// 												if (ch_gsm->operator_name) ast_free(ch_gsm->operator_name); ch_gsm->operator_name = NULL;
+// 												if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
+// 												if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
+// 												if (ch_gsm->iccid) ast_free(ch_gsm->iccid); ch_gsm->iccid = NULL;
+// // 												if (ch_gsm->pin) ast_free(ch_gsm->pin); ch_gsm->pin = NULL;
+// // 												if (ch_gsm->puk) ast_free(ch_gsm->puk); ch_gsm->puk = NULL;
+// 												if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
+// 
+// 												// stop callready timer
+// 												x_timer_stop(ch_gsm->timers.callready);
+// 												// stop smssend timer
+// 												x_timer_stop(ch_gsm->timers.smssend);
+// 												ch_gsm->flags.sms_table_needed = 1;
+// 
+// 												ch_gsm->flags.dcr_table_needed = 1;
+// 
+// 												// reset registaration status
+// 												ch_gsm->reg_stat = REG_STAT_NOTREG_NOSEARCH;
+// 												// reset callwait state
+// 												ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+// 												// reset clir state
+// 												ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+// 												// reset rssi value
+// 												ch_gsm->rssi = 99;
+// 												// reset ber value
+// 												ch_gsm->ber = 99;
+// #if 0
+// 												// reset attempts count
+// 												ch_gsm->reg_try_count = ch_gsm->config.reg_try_count;
+// #endif
+// 												if (ch_gsm->flags.sim_change)
+// 													ch_gsm->flags.sim_test = 1;
+// 											} else {
+// 												// check PIN
+// 												pg_atcommand_queue_append(ch_gsm, AT_CPIN, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
+// 												// next mgmt state -- check for SIM is READY
+// 												if (ch_gsm->state != PG_CHANNEL_GSM_STATE_CHECK_PIN) {
+// 													ch_gsm->state = PG_CHANNEL_GSM_STATE_CHECK_PIN;
+// 													ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+// 												}
+// 											}
+// 										}
+// 										ch_gsm->flags.sim_inserted = parser_ptrs.sim900_csmins_rd->sim_inserted;
+// 									}
+// 								}
+// 								break;
+							//++++++++++++++++++++++++++++++++++++++++++++++++++
+							default:
+								break;
+						}
+					} else if (ch_gsm->at_cmd->oper == AT_OPER_WRITE) {
+						// WRITE operations
+						switch (ch_gsm->at_cmd->id) {
+							//++++++++++++++++++++++++++++++++++++++++++++++++++
+							default:
+								break;
+						}
+					}
+				} // end of SIM5215 AT commands
 
 				// M10 AT commands
 				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
@@ -12382,7 +12688,12 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 												ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 												// wake up SIM
-												pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+												if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+													ch_gsm->flags.restart = 1;
+													ch_gsm->flags.restart_now = 1;
+												} else {
+													pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+												}
 												break;
 											}
 										}
@@ -12411,20 +12722,17 @@ static void *pg_channel_gsm_workthread(void *data)
 							default:
 								break;
 						}
-					}
-					else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
+					} else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
 						// TEST operations
-						switch (ch_gsm->at_cmd->id)
-						{
+						switch (ch_gsm->at_cmd->id) {
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							default:
 								break;
 						}
-					}
-					else if (ch_gsm->at_cmd->oper == AT_OPER_READ) {
+					} else if (ch_gsm->at_cmd->oper == AT_OPER_READ) {
 						// READ operations
-						switch (ch_gsm->at_cmd->id)
-						{
+						switch (ch_gsm->at_cmd->id) {
+#if 0
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_M10_QMIC:
 								if (strstr(r_buf, "+QMIC:")) {
@@ -12439,7 +12747,6 @@ static void *pg_channel_gsm_workthread(void *data)
 											}
 #endif
 									} else {
-										ch_gsm->gainout = parser_ptrs.m10_qmic_rd->headset_mic;
 #if 0
 										// check for query
 										if(chnl->querysig.gainout){
@@ -12458,6 +12765,7 @@ static void *pg_channel_gsm_workthread(void *data)
 #endif
 								}
 								break;
+#endif
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_M10_QSIMSTAT:
 								if (strstr(r_buf, "+QSIMSTAT:")) {
@@ -12532,14 +12840,14 @@ static void *pg_channel_gsm_workthread(void *data)
 						}
 					} else if (ch_gsm->at_cmd->oper == AT_OPER_WRITE) {
 						// WRITE operations
-						switch (ch_gsm->at_cmd->id)
-						{
+						switch (ch_gsm->at_cmd->id) {
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							case AT_M10_QMIC:
-								if (is_str_begin_by(r_buf, "OK"))
-									ch_gsm->gainout = ch_gsm->config.gainout;
-								else if (strstr(r_buf, "ERROR"))
-									ch_gsm->gainout = 0;
+								if (is_str_begin_by(r_buf, "OK")) {
+									ch_gsm->flags.gainout = 0;
+								} else if (strstr(r_buf, "ERROR")) {
+									ch_gsm->flags.gainout = 1;
+								}
 								break;
 							//++++++++++++++++++++++++++++++++++++++++++++++++++
 							default:
@@ -12888,8 +13196,8 @@ static void *pg_channel_gsm_workthread(void *data)
 				sleep(3);
 				ast_mutex_lock(&ch_gsm->lock);
 			}
-			// RDY
-			else if (is_str_begin_by(r_buf, "RDY")) {
+			// RDY or START
+			else if (is_str_begin_by(r_buf, "RDY") || is_str_begin_by(r_buf, "START")) {
 				// stop waitrdy timer
 				x_timer_stop(ch_gsm->timers.waitrdy);
 				// valid if mgmt state WAIT_RDY
@@ -12919,7 +13227,6 @@ static void *pg_channel_gsm_workthread(void *data)
 						pg_atcommand_insert_spacer(ch_gsm, 3000);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 						pg_atcommand_insert_spacer(ch_gsm, 2000);
-
 						if (ch_gsm->flags.sim_inserted) {
 							ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_SUSPEND;
 							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -12931,11 +13238,89 @@ static void *pg_channel_gsm_workthread(void *data)
 							// perform suspend action
 							pg_channel_gsm_suspend_action(ch_gsm);
 							// wake up SIM
-							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+							if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+								ch_gsm->flags.restart = 1;
+								ch_gsm->flags.restart_now = 1;
+							} else {
+								pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+							}
 						}
 					}
 				}
 			} // end of CFUN
+			// SIM5215 - SIM NOT INSERTED
+			else if (is_str_begin_by(r_buf, "+CME ERROR: SIM failure")) {
+				// stop pinwait timer
+				x_timer_stop(ch_gsm->timers.pinwait);
+				//
+				if ((ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_CFUN) || (ch_gsm->state == PG_CHANNEL_GSM_STATE_CHECK_PIN)) {
+					// - SIM card not inserted
+					if (ch_gsm->flags.sim_inserted) {
+						// reset channel phone number
+						ast_copy_string(ch_gsm->subscriber_number.value, "unknown", MAX_ADDRESS_LENGTH);
+						ch_gsm->subscriber_number.length = strlen(ch_gsm->subscriber_number.value);
+						ch_gsm->subscriber_number.type.bits.reserved = 1;
+						ch_gsm->subscriber_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
+						ch_gsm->subscriber_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
+						// reset SMS center number
+						ast_copy_string(ch_gsm->smsc_number.value, "unknown", MAX_ADDRESS_LENGTH);
+						ch_gsm->smsc_number.length = strlen(ch_gsm->smsc_number.value);
+						ch_gsm->smsc_number.type.bits.reserved = 1;
+						ch_gsm->smsc_number.type.bits.numbplan = NUMBERING_PLAN_UNKNOWN;
+						ch_gsm->smsc_number.type.bits.typenumb = TYPE_OF_NUMBER_SUBSCRIBER;
+							if ((tr_gsm = pg_get_trunk_gsm_by_name(ch_gsm->operator_code, PG_TRUNK_GSM_MCCMNC))) {
+							if ((ch_gsm_fold = pg_get_channel_gsm_fold_from_trunk_by_name(tr_gsm, PG_TRUNK_GSM_MCCMNC, ch_gsm->alias))) {
+								// remove entry from trunk list
+								AST_LIST_REMOVE(&tr_gsm->channel_gsm_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_trunk_list_entry);
+								// remove entry from channel list
+								AST_LIST_REMOVE(&ch_gsm->trunk_list, ch_gsm_fold, pg_trunk_gsm_channel_gsm_fold_channel_list_entry);
+								// reset last used channel
+								tr_gsm->channel_gsm_last = NULL;
+								// release unused memory
+								ast_free(ch_gsm_fold->name);
+								ast_free(ch_gsm_fold);
+							}
+						}
+						if (ch_gsm->operator_name) ast_free(ch_gsm->operator_name); ch_gsm->operator_name = NULL;
+						if (ch_gsm->operator_code) ast_free(ch_gsm->operator_code); ch_gsm->operator_code = NULL;
+						if (ch_gsm->imsi) ast_free(ch_gsm->imsi); ch_gsm->imsi = NULL;
+						if (ch_gsm->iccid) ast_free(ch_gsm->iccid); ch_gsm->iccid = NULL;
+						if (ch_gsm->config.balance_request) ast_free(ch_gsm->config.balance_request); ch_gsm->config.balance_request = NULL;
+
+						ch_gsm->flags.sms_table_needed = 1;
+						x_timer_stop(ch_gsm->timers.smssend);
+
+						ch_gsm->flags.dcr_table_needed = 1;
+
+						ch_gsm->callwait = PG_CALLWAIT_STATE_UNKNOWN;
+						ch_gsm->clir = PG_CLIR_STATE_UNKNOWN;
+						ast_verbose("%s: GSM channel=\"%s\": SIM removed\n", AST_MODULE, ch_gsm->alias);
+					} else if (!ch_gsm->flags.sim_startup) {
+						ast_verbose("%s: GSM channel=\"%s\": SIM not inserted\n", AST_MODULE, ch_gsm->alias);
+					}
+					ch_gsm->flags.sim_startup = 1;
+					ch_gsm->flags.sim_inserted = 0;
+					if (ch_gsm->flags.sim_change) {
+						ch_gsm->flags.sim_test = 1;
+					}
+					// disable GSM module functionality
+					pg_atcommand_insert_spacer(ch_gsm, 3000);
+					pg_atcommand_queue_prepend(ch_gsm, AT_CFUN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+					pg_atcommand_insert_spacer(ch_gsm, 2000);
+					// mark this state as suspend
+					ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
+					ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+					// perform suspend action
+					pg_channel_gsm_suspend_action(ch_gsm);
+					// wake up SIM
+					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						ch_gsm->flags.restart = 1;
+						ch_gsm->flags.restart_now = 1;
+					} else {
+						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+					}
+				}
+			} // end of SIM5215 - SIM NOT INSERTED
 			// CPIN
 			else if (is_str_begin_by(r_buf, "+CPIN:")) {
 				// stop pinwait timer
@@ -12960,11 +13345,11 @@ static void *pg_channel_gsm_workthread(void *data)
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QSIMSTAT, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 					}
 					// get imei
-					pg_atcommand_queue_append(ch_gsm, AT_GSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+					pg_atcommand_queue_append(ch_gsm, AT_CGSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					// get model
-					pg_atcommand_queue_append(ch_gsm, AT_GMM, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+					pg_atcommand_queue_append(ch_gsm, AT_CGMM, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					// get firmware
-					pg_atcommand_queue_append(ch_gsm, AT_GMR, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+					pg_atcommand_queue_append(ch_gsm, AT_CGMR, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					//
 					if (!strcasecmp(r_buf, "+CPIN: NOT INSERTED") || !strcasecmp(r_buf, "+CPIN: NOT READY")) {
 						// - SIM card not inserted
@@ -13024,7 +13409,12 @@ static void *pg_channel_gsm_workthread(void *data)
 						// perform suspend action
 						pg_channel_gsm_suspend_action(ch_gsm);
 						// wake up SIM
-						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							ch_gsm->flags.restart = 1;
+							ch_gsm->flags.restart_now = 1;
+						} else {
+							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+						}
 					} else if (!strcasecmp(r_buf, "+CPIN: READY")) {
 						// - PIN ready
 						if (!ch_gsm->flags.sim_inserted) {
@@ -13044,6 +13434,8 @@ static void *pg_channel_gsm_workthread(void *data)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 							pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						}
@@ -13057,7 +13449,12 @@ static void *pg_channel_gsm_workthread(void *data)
 							ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 							// wake up SIM
-							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+							if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+								ch_gsm->flags.restart = 1;
+								ch_gsm->flags.restart_now = 1;
+							} else {
+								pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+							}
 						} else {
 							ch_gsm->state = PG_CHANNEL_GSM_STATE_WAIT_CALL_READY;
 							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -13081,6 +13478,8 @@ static void *pg_channel_gsm_workthread(void *data)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 							// M10 can't got iccid
 							if (ch_gsm->pin) {
@@ -13105,6 +13504,8 @@ static void *pg_channel_gsm_workthread(void *data)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 							pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						}
@@ -13117,7 +13518,12 @@ static void *pg_channel_gsm_workthread(void *data)
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 						// wake up SIM
-						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							ch_gsm->flags.restart = 1;
+							ch_gsm->flags.restart_now = 1;
+						} else {
+							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+						}
 					}
 				} else if (ch_gsm->state == PG_CHANNEL_GSM_STATE_WAIT_SUSPEND) {
 					if (!strcasecmp(r_buf, "+CPIN: NOT READY")) {
@@ -13175,7 +13581,12 @@ static void *pg_channel_gsm_workthread(void *data)
 						// perform suspend action
 						pg_channel_gsm_suspend_action(ch_gsm);
 						// wake up SIM
-						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							ch_gsm->flags.restart = 1;
+							ch_gsm->flags.restart_now = 1;
+						} else {
+							pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+						}
 					}
 				}
 			} // end of CPIN
@@ -13930,7 +14341,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					// get subscriber number
 					pg_atcommand_queue_append(ch_gsm, AT_CNUM, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					// get imei
-					pg_atcommand_queue_append(ch_gsm, AT_GSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+					pg_atcommand_queue_append(ch_gsm, AT_CGSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					// get imsi
 					pg_atcommand_queue_append(ch_gsm, AT_CIMI, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					// get iccid
@@ -13938,6 +14349,8 @@ static void *pg_channel_gsm_workthread(void *data)
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					}
@@ -13988,7 +14401,12 @@ static void *pg_channel_gsm_workthread(void *data)
 				ast_log(LOG_ERROR, "GSM channel=\"%s\": can't switch in suspend mode\n", ch_gsm->alias);
 				if (!ch_gsm->flags.sim_inserted) {
 					// wake up SIM
-					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						ch_gsm->flags.restart = 1;
+						ch_gsm->flags.restart_now = 1;
+					} else {
+						pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+					}
 				} else {
 					x_timer_set(ch_gsm->timers.pinwait, pinwait_timeout);
 				}
@@ -14011,7 +14429,10 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
+						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						} else {
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
@@ -14033,7 +14454,10 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
+						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
+							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
+						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						} else {
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
@@ -14081,7 +14505,12 @@ static void *pg_channel_gsm_workthread(void *data)
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 				// wake up SIM
-				pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					ch_gsm->flags.restart = 1;
+					ch_gsm->flags.restart_now = 1;
+				} else {
+					pg_atcommand_queue_append(ch_gsm, AT_CFUN, AT_OPER_WRITE, PG_AT_SUBCMD_CFUN_ENABLE, pg_at_response_timeout, 0, "1");
+				}
 			}
 		}
 		// smssend
@@ -14223,21 +14652,20 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (pdu) {
 						curr = pdu;
 						i=0;
-						while (curr)
-						{
+						while (curr) {
 							i++;
 							curr = curr->next;
 						}
 						// check for max parts count
 						if ((i <= ch_gsm->config.sms_max_part) && (is_address_string(o2p_msgdest))) {
 							curr = pdu;
-							while (curr)
-							{
+							while (curr) {
 								// enqueue new pdu into queue sent
 								memset(tmpbuf, 0, 512);
 								res = 0;
-								for (i=0; i<curr->full_len; i++)
+								for (i = 0; i < curr->full_len; i++) {
 									res += sprintf(tmpbuf+res, "%02X", (unsigned char)curr->buf[i]);
+								}
 								// insert new pdu
 								ast_mutex_lock(&pg_sms_db_lock);
 								str0 = sqlite3_mprintf("INSERT INTO '%q-preparing' ("
@@ -14478,10 +14906,11 @@ static void *pg_channel_gsm_workthread(void *data)
 											// send message command
 											pg_atcommand_insert_spacer(ch_gsm, 1000);
 											pg_atcommand_queue_prepend(ch_gsm, AT_CMGS, AT_OPER_WRITE, 0, 30000, 0, "%d", sqlite3_column_int(sql0, 3));
+											pg_atcommand_queue_prepend(ch_gsm, AT_CMGF, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 											ast_verb(4, "GSM channel=\"%s\": send pdu to \"%s%s\"\n", ch_gsm->alias, (sqlite3_column_int(sql0, 4) == 145)?("+"):(""), sqlite3_column_text(sql0, 5));
 										}
 									}
-								} else if(res == SQLITE_DONE) {
+								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
 									ast_mutex_unlock(&pg_sms_db_lock);
@@ -14857,11 +15286,11 @@ static void *pg_channel_gsm_workthread(void *data)
 				ast_verb(4, "GSM channel=\"%s\": serial port work at speed = %d baud\n", ch_gsm->alias, ch_gsm->baudrate);
 				pg_atcommand_queue_append(ch_gsm, AT_UNKNOWN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "AT+IPR=%d;&W", ch_gsm->baudrate);
 				// get imei
-				pg_atcommand_queue_append(ch_gsm, AT_GSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+				pg_atcommand_queue_append(ch_gsm, AT_CGSN, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				// get model
-				pg_atcommand_queue_append(ch_gsm, AT_GMM, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+				pg_atcommand_queue_append(ch_gsm, AT_CGMM, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				// get firmware
-				pg_atcommand_queue_append(ch_gsm, AT_GMR, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+				pg_atcommand_queue_append(ch_gsm, AT_CGMR, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 				// check SIM status
 				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
 					pg_atcommand_queue_append(ch_gsm, AT_SIM300_CSMINS, AT_OPER_READ, 0, pg_at_response_timeout, 0, NULL);
@@ -14886,7 +15315,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					break;
 				}
 				if (ch_gsm->init.cscs) {
-					pg_atcommand_queue_append(ch_gsm, AT_CSCS, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%s", "\"HEX\"");
+					pg_atcommand_queue_append(ch_gsm, AT_CSCS, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%s", "\"UCS2\"");
 					ch_gsm->init.cscs = 0;
 					break;
 				}
@@ -14900,6 +15329,8 @@ static void *pg_channel_gsm_workthread(void *data)
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 2);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 					}
@@ -14907,7 +15338,15 @@ static void *pg_channel_gsm_workthread(void *data)
 					break;
 				}
 				if (ch_gsm->init.clvl) {
-					pg_atcommand_queue_append(ch_gsm, AT_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", ch_gsm->config.gainin);
+					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CRXGAIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 16384);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CRXVOL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 16384);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CVLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 1, ((ch_gsm->config.gainin * 10000) / 100) - 5000);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+					} else {
+						pg_atcommand_queue_append(ch_gsm, AT_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", ch_gsm->config.gainin);
+					}
 					ch_gsm->init.clvl = 0;
 					break;
 				}
@@ -14916,6 +15355,10 @@ static void *pg_channel_gsm_workthread(void *data)
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CMICAMP1, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CTXGAIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 16384);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CTXVOL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", (ch_gsm->config.gainout * 65535) / 15);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1,%d", ch_gsm->config.gainout);
 					}
@@ -15022,38 +15465,57 @@ static void *pg_channel_gsm_workthread(void *data)
 					}
 					// get balance
 					if ((ch_gsm->flags.balance_req) && (ch_gsm->config.balance_request) && (strlen(ch_gsm->config.balance_request))) {
-						memset(tmpbuf, 0, 256);
+						// convert string to UCS-2
 						ip = ch_gsm->config.balance_request;
 						ilen = strlen(ch_gsm->config.balance_request);
-						op = tmpbuf;
-						olen = 256;
-						if (!str_bin_to_hex(&ip, &ilen, &op, &olen)) {
-							ch_gsm->state = PG_CHANNEL_GSM_STATE_SERVICE;
-							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
-							ch_gsm->ussd_sub_cmd = PG_AT_SUBCMD_CUSD_GET_BALANCE;
-							pg_atcommand_queue_append(ch_gsm, AT_CUSD, AT_OPER_WRITE, PG_AT_SUBCMD_CUSD_GET_BALANCE, 30000, 0, "%d,\"%s\"", 1, tmpbuf);
+						op = immbuf;
+						olen = sizeof(immbuf);
+						if (str_from_set_to_ucs2("UTF-8", &ip, &ilen, &op, &olen) != (size_t)-1) {
+							// convert from binary to hex presentation
+							ip = immbuf;
+							ilen = sizeof(immbuf) - olen;
+							op = tmpbuf;
+							olen = sizeof(tmpbuf);
+							if (str_from_bin_to_hex(&ip, &ilen, &op, &olen) != (size_t)-1) {
+								ch_gsm->state = PG_CHANNEL_GSM_STATE_SERVICE;
+								ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
+								ch_gsm->ussd_sub_cmd = PG_AT_SUBCMD_CUSD_GET_BALANCE;
+								pg_atcommand_queue_append(ch_gsm, AT_CUSD, AT_OPER_WRITE, PG_AT_SUBCMD_CUSD_GET_BALANCE, 30000, 0, "%d,\"%.*s\"", 1, (int)(sizeof(tmpbuf) - olen), tmpbuf);
+							} else {
+								ast_log(LOG_ERROR, "GSM channel=\"%s\": fail convert USSD \"%s\" from binary to hex\n", ch_gsm->alias, ch_gsm->config.balance_request);
+							}
 						} else {
-							ast_log(LOG_ERROR, "GSM channel=\"%s\": fail convert USSD \"%s\" to hex\n", ch_gsm->alias, ch_gsm->config.balance_request);
+							ast_log(LOG_ERROR, "GSM channel=\"%s\": fail convert USSD \"%s\" from UTF-8 to UCS-2\n", ch_gsm->alias, ch_gsm->config.balance_request);
 						}
 						ch_gsm->flags.balance_req = 0;
 						break;
 					}
 				}
 				// adjust gainin
-				if ((ch_gsm->gainin >= 0) && (ch_gsm->gainin != ch_gsm->config.gainin)) {
-					pg_atcommand_queue_append(ch_gsm, AT_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", ch_gsm->config.gainin);
-					ch_gsm->gainin = -1;
+				if (ch_gsm->flags.gainin) {
+					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CVLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 1, ((ch_gsm->config.gainin * 10000) / 100) - 5000);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+					} else {
+						pg_atcommand_queue_append(ch_gsm, AT_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", ch_gsm->config.gainin);
+					}
+					ch_gsm->flags.gainin = 0;
 				}
 				// adjust gainout
-				if ((ch_gsm->gainout >= 0) && (ch_gsm->gainout != ch_gsm->config.gainout)) {
+				if (ch_gsm->flags.gainout) {
 					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CTXVOL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", (ch_gsm->config.gainout * 65535) / 15);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1,%d", ch_gsm->config.gainout);
 					}
-					ch_gsm->gainout = -1;
+					ch_gsm->flags.gainout = 0;
 				}
 				break;
 			//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -25815,6 +26277,7 @@ static char *pg_cli_show_channel_gsm(struct ast_cli_entry *e, int cmd, struct as
 			ast_cli(a->fd, "  -- operator = %s (%s)\n", ch_gsm->operator_name?ch_gsm->operator_name:"unknown", ch_gsm->operator_code?ch_gsm->operator_code:"unknown");
 			ast_cli(a->fd, "  -- registration status = %s\n", ch_gsm->flags.sim_inserted?reg_status_print(ch_gsm->reg_stat):"unknown");
 			ast_cli(a->fd, "  -- number = %s\n", ch_gsm->flags.sim_inserted?address_show(buf, &ch_gsm->subscriber_number, 1):"unknown");
+			ast_cli(a->fd, "  -- SMS Center Address = %s\n", ch_gsm->flags.sim_inserted?address_show(buf, &ch_gsm->smsc_number, 1):"unknown");
 			ast_cli(a->fd, "  -- RSSI = %s\n", ch_gsm->flags.sim_inserted?rssi_print(buf, ch_gsm->rssi):"unknown");
 			ast_cli(a->fd, "  -- BER = %s\n", ch_gsm->flags.sim_inserted?ber_print(ch_gsm->ber):"unknown");
 			ast_cli(a->fd, "  -- call wait state = %s\n", ch_gsm->flags.sim_inserted?pg_callwait_state_to_string(ch_gsm->callwait):"unknown");
@@ -27002,7 +27465,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									ast_cli(a->fd, " - value %d greater than 100 - set gainin to 100\n", tmpi);
 								}
 								ch_gsm->config.gainin = tmpi;
-								ch_gsm->gainin = 0;
+								ch_gsm->flags.gainin = 1;
 								ast_cli(a->fd, " - ok\n");
 							} else {
 								ast_cli(a->fd, " - bad param - must be digit in range 0-100\n");
@@ -27021,7 +27484,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 									ast_cli(a->fd, " - value %d greater than 15 - set gainin to 15\n", tmpi);
 								}
 								ch_gsm->config.gainout = tmpi;
-								ch_gsm->gainout = 0;
+								ch_gsm->flags.gainout = 1;
 								ast_cli(a->fd, " - ok\n");
 							} else {
 								ast_cli(a->fd, " - bad param - must be digit in range 0-15\n");
@@ -28031,12 +28494,13 @@ static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, st
 {
 	struct pg_channel_gsm *ch_gsm;
 	
-	char buf[1024];
-	char *buf_ptr;
-	int buf_len;
+	char buf[512];
+	char immbuf[512];
 	
-	char *in_ptr;
-	int in_len;
+	char *ip;
+	size_t ilen;
+	char *op;
+	size_t olen;
 
 	char resp_databuf[1024];
 	int resp_datalen;
@@ -28092,20 +28556,28 @@ static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, st
 			((ch_gsm->ussd_pipe[0] == -1) && (ch_gsm->ussd_pipe[1] == -1))) {
 			// check for end USSD session
 			if (strcasecmp(a->argv[5], "end")) {
-				// convert string to hex presentation
-				in_len = strlen(a->argv[5]);
-				in_ptr = (char *)a->argv[5];
-				memset(buf, 0, sizeof(buf));
-				buf_ptr = buf;
-				buf_len = sizeof(buf);
-				if (!str_bin_to_hex(&in_ptr, &in_len, &buf_ptr, &buf_len)) {
-					ch_gsm->ussd_sub_cmd = PG_AT_SUBCMD_CUSD_USER;
-					pg_atcommand_queue_append(ch_gsm, AT_CUSD, AT_OPER_WRITE, PG_AT_SUBCMD_CUSD_USER, 60000, 0, "%d,\"%s\"", 1, buf);
-					ast_cli(a->fd, "send USSD \"%s\"...\n", a->argv[5]);
-					is_ussd_send = 1;
-					ch_gsm->state = PG_CHANNEL_GSM_STATE_SERVICE;
+				// convert string to UCS-2
+				ip = (char *)a->argv[5];
+				ilen = strlen(a->argv[5]);
+				op = immbuf;
+				olen = sizeof(immbuf);
+				if (str_from_set_to_ucs2("UTF-8", &ip, &ilen, &op, &olen) != (size_t)-1) {
+					// convert from binary to hex presentation
+					ip = immbuf;
+					ilen = sizeof(immbuf) - olen;
+					op = buf;
+					olen = sizeof(buf);
+					if (str_from_bin_to_hex(&ip, &ilen, &op, &olen) != (size_t)-1) {
+						ch_gsm->ussd_sub_cmd = PG_AT_SUBCMD_CUSD_USER;
+						pg_atcommand_queue_append(ch_gsm, AT_CUSD, AT_OPER_WRITE, PG_AT_SUBCMD_CUSD_USER, 60000, 0, "%d,\"%.*s\"", 1, (int)(sizeof(buf) - olen), buf);
+						ast_cli(a->fd, "send USSD \"%s\"...\n", a->argv[5]);
+						is_ussd_send = 1;
+						ch_gsm->state = PG_CHANNEL_GSM_STATE_SERVICE;
+					} else {
+						ast_cli(a->fd, "send USSD \"%s\" - fail convert from binary to hex\n", a->argv[5]);
+					}
 				} else {
-					ast_cli(a->fd, "send USSD \"%s\" - fail convert to hex\n", a->argv[5]);
+					ast_cli(a->fd, "send USSD \"%s\" - fail convert from UTF-8 to UCS-2\n", a->argv[5]);
 				}
 			} else {
 				// end USSD session
@@ -32524,7 +32996,6 @@ static int pg_load(void)
 						ch_gsm->config.gainin = 100;
 					}
 				}
-				ch_gsm->gainin = ch_gsm->config.gainin;
 				// gainout
 				ch_gsm->config.gainout = 5;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gainout")) && (is_str_digit(cvar))) {
@@ -32536,7 +33007,6 @@ static int pg_load(void)
 						ch_gsm->config.gainout = 15;
 					}
 				}
-				ch_gsm->gainout = ch_gsm->config.gainout;
 				// gain1 - level voice channel CODER: sig -> host
 				ch_gsm->config.gain1 = 0x60;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_gsm->device, "gain1")) && (sscanf(cvar, "%f", &tmpf) == 1)) {

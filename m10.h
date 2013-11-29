@@ -1,10 +1,6 @@
 /******************************************************************************/
 /* m10.h                                                                      */
 /******************************************************************************/
-/* $Rev:: 140                        $                                        */
-/* $Author:: maksym                  $                                        */
-/* $Date:: 2012-03-20 18:19:44 +0200#$                                        */
-/******************************************************************************/
 
 #ifndef __M10_H__
 #define __M10_H__
@@ -15,7 +11,7 @@
 
 //------------------------------------------------------------------------------
 // at command id
-enum{
+enum {
 	AT_M10_UNKNOWN = AT_UNKNOWN,
 	// M10 V.25TER V1.04
 	AT_M10_A_SLASH = AT_A_SLASH,		// A/ - Re-issues last AT command given
@@ -199,7 +195,7 @@ enum{
 
 	//
 	AT_M10_MAXNUM,
-	};
+};
 //------------------------------------------------------------------------------
 // m10 AT command parameters
 // read
@@ -220,10 +216,10 @@ struct at_m10_qsimstat_read{
 	int sim_inserted;	// SIM inserted status
 	};
 //------------------------------------------------------------------------------
-// extern
-extern const struct at_command m10_at_com_list[AT_M10_MAXNUM];
-// prototype parse function
-// read
+
+extern const struct at_command m10_at_com_list[];
+extern size_t m10_at_com_list_length();
+
 extern int at_m10_qmic_read_parse(const char *fld, int fld_len, struct at_m10_qmic_read *qmic);
 extern int at_m10_qsimstat_read_parse(const char *fld, int fld_len, struct at_m10_qsimstat_read *qsimstat);
 //------------------------------------------------------------------------------
