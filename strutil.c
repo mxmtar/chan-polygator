@@ -10,6 +10,7 @@
 #include <langinfo.h>
 #include <locale.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "strutil.h"
@@ -157,9 +158,10 @@ int is_str_printable(const char *buf)
 //------------------------------------------------------------------------------
 void str_digit_to_bcd(const char *instr, int inlen, char *out)
 {
-	if (inlen%2) inlen--;
+	if (inlen % 2) inlen--;
+
 	do {
-		if (inlen%2) {
+		if (inlen % 2) {
 			*out ^= 0x0f;
 			*out++ |= ((*instr) - 0x30);
 		} else {
@@ -167,7 +169,7 @@ void str_digit_to_bcd(const char *instr, int inlen, char *out)
 		}
 		inlen--;
 		instr++;
-	} while(inlen > 0);
+	} while (inlen > 0);
 }
 //------------------------------------------------------------------------------
 // end of str_digit_to_bcd()
@@ -376,13 +378,13 @@ size_t str_from_ucs2_to_set(const char *set, char **ibuf, size_t *ilen, char **o
 
 	// check params
 	if ((!set) || (!ibuf) || (!*ibuf) || (!ilen) || (!obuf) || (!*obuf) || (!olen)) {
-		return -1;
+		return (size_t)-1;
 	}
 
 	len = *ilen;
 	locbuf = malloc(len + 2);
 	if (!locbuf) {
-		return -1;
+		return (size_t)-1;
 	}
 
 	memcpy(locbuf, *ibuf, len);
@@ -397,7 +399,7 @@ size_t str_from_ucs2_to_set(const char *set, char **ibuf, size_t *ilen, char **o
 	if (tc == (iconv_t)-1) {
 		// converter not created
 		free(locbuf);
-		return -1;
+		return (size_t)-1;
 	}
 
 	while (len > 2) {
@@ -444,18 +446,18 @@ size_t str_from_set_to_ucs2(const char *set, char **ibuf, size_t *ilen, char **o
 	iconv_t tc;
 
 	if ((!set) || (!ibuf) || (!*ibuf) || (!ilen) || (!obuf) || (!*obuf) || (!olen)) {
-		return -1;
+		return (size_t)-1;
 	}
 
 	tc = iconv_open("UCS-2BE", set);
 	if (tc == (iconv_t)-1) {
-		return -1;
+		return (size_t)-1;
 	}
 
 	res = iconv(tc, ibuf, ilen, obuf, olen);
 	if (res == (size_t)-1) {
 		iconv_close(tc);
-		return -1;
+		return (size_t)-1;
 	}
 
 	iconv_close(tc);

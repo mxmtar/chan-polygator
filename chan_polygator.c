@@ -1574,11 +1574,12 @@ void pg_printf(int type, uintptr_t dst, const char *fmt, ...)
 	va_list va;
 	FILE *fp;
 	int out;
+	unsigned long addr = dst;
 	char buff[1024];
 
 	switch (type) {
 		case PG_PRINT_FILE:
-			fp = (FILE *)dst;
+			fp = (FILE *)addr;
 			va_start(va, fmt);
 			vfprintf(fp, fmt, va);
 			va_end(va);
@@ -10629,10 +10630,6 @@ static void *pg_channel_gsm_workthread(void *data)
 													x_timer_set(ch_gsm->timers.runoneminute, onesec_timeout);
 													// start runvifesecond timer
 													x_timer_set(ch_gsm->timers.runfivesecond, runfivesecond_timeout);
-#if 0
-													// start smssend timer
-													x_timer_set(ch_gsm->timers.smssend, halfminute_timeout);
-#endif
 													// set run state
 													ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
 													ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -10707,16 +10704,22 @@ static void *pg_channel_gsm_workthread(void *data)
 									} else if (is_str_xdigit(parser_ptrs.csca_rd->sca)) {
 										ip = parser_ptrs.csca_rd->sca;
 										ilen = parser_ptrs.csca_rd->sca_len;
-										op = ch_gsm->smsc_number.value;
-										olen = MAX_ADDRESS_LENGTH;
-										memset(ch_gsm->smsc_number.value, 0 , MAX_ADDRESS_LENGTH);
-										if (!str_from_hex_to_bin(&ip, &ilen, &op, &olen)) {
-											ch_gsm->smsc_number.length = strlen(ch_gsm->smsc_number.value);
-											ch_gsm->smsc_number.type.full = parser_ptrs.csca_rd->tosca;
-											address_normalize(&ch_gsm->smsc_number);
-											// check smssend timer
-											if (!is_x_timer_enable(ch_gsm->timers.smssend) && ch_gsm->iccid) {
-												x_timer_set(ch_gsm->timers.smssend, zero_timeout);
+										op = immbuf;
+										olen = sizeof(immbuf);
+										if (str_from_hex_to_bin(&ip, &ilen, &op, &olen) != (size_t)-1) {
+											ip = immbuf;
+											ilen = sizeof(immbuf) - olen;
+											op = ch_gsm->smsc_number.value;
+											olen = MAX_ADDRESS_LENGTH;
+											memset(ch_gsm->smsc_number.value, 0 , MAX_ADDRESS_LENGTH);
+											if (str_from_ucs2_to_set("UTF-8", &ip, &ilen, &op, &olen) != (size_t)-1) {
+												ch_gsm->smsc_number.length = strlen(ch_gsm->smsc_number.value);
+												ch_gsm->smsc_number.type.full = parser_ptrs.csca_rd->tosca;
+												address_normalize(&ch_gsm->smsc_number);
+												// check smssend timer
+												if (!is_x_timer_enable(ch_gsm->timers.smssend) && ch_gsm->iccid) {
+													x_timer_set(ch_gsm->timers.smssend, zero_timeout);
+												}
 											}
 										}
 									}
@@ -13619,10 +13622,6 @@ static void *pg_channel_gsm_workthread(void *data)
 						x_timer_set(ch_gsm->timers.runfivesecond, runfivesecond_timeout);
 						// start registering timer
 						x_timer_set(ch_gsm->timers.registering, registering_timeout);
-#if 0
-						// start smssend timer
-						x_timer_set(ch_gsm->timers.smssend, halfminute_timeout);
-#endif
 						// set run state
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -15371,7 +15370,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					break;
 				}
 				if (ch_gsm->init.cnmi) {
-					pg_atcommand_queue_append(ch_gsm, AT_CNMI, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d,%d,%d,%d", 2, 2, 0, 1, 0);
+					pg_atcommand_queue_append(ch_gsm, AT_CNMI, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d,%d,%d,%d", 1, 2, 0, 1, 0);
 					ch_gsm->init.cnmi = 0;
 					break;
 				}
@@ -15419,10 +15418,6 @@ static void *pg_channel_gsm_workthread(void *data)
 				x_timer_set(ch_gsm->timers.runfivesecond, runfivesecond_timeout);
 				// start registering timer
 				x_timer_set(ch_gsm->timers.registering, registering_timeout);
-#if 0
-				// start smssend timer
-				x_timer_set(ch_gsm->timers.smssend, halfminute_timeout);
-#endif
 				// set run state
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -28569,7 +28564,7 @@ static char *pg_cli_channel_gsm_action_ussd(struct ast_cli_entry *e, int cmd, st
 					olen = sizeof(buf);
 					if (str_from_bin_to_hex(&ip, &ilen, &op, &olen) != (size_t)-1) {
 						ch_gsm->ussd_sub_cmd = PG_AT_SUBCMD_CUSD_USER;
-						pg_atcommand_queue_append(ch_gsm, AT_CUSD, AT_OPER_WRITE, PG_AT_SUBCMD_CUSD_USER, 60000, 0, "%d,\"%.*s\"", 1, (int)(sizeof(buf) - olen), buf);
+						pg_atcommand_queue_append(ch_gsm, AT_CUSD, AT_OPER_WRITE, PG_AT_SUBCMD_CUSD_USER, 60000, 0, "%d,\"%.*s\",15", 1, (int)(sizeof(buf) - olen), buf);
 						ast_cli(a->fd, "send USSD \"%s\"...\n", a->argv[5]);
 						is_ussd_send = 1;
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SERVICE;

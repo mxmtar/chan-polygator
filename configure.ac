@@ -4,7 +4,7 @@
 AC_PREREQ([2.60])
 
 # set project attribute
-AC_INIT([chan-polygator], [1.7.0])
+AC_INIT([chan-polygator], [1.7.1])
 
 # init automake
 AM_INIT_AUTOMAKE([-Wall -Werror])
@@ -27,7 +27,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([chan_polygator.c])
 
 AC_COPYRIGHT("Polygator")
-AC_REVISION(1.7.0)
+AC_REVISION(1.7.1)
 
 # prepare autoconfig header data
 AC_CONFIG_HEADER([autoconfig.h])

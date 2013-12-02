@@ -1,30 +1,100 @@
-18.10.12
-Stop execution of GSM channel thread when GSM module type is unknown.
-19.10.12
-Add control interface for VINETIC NE-LEC.
-23.10.12
-Add initial support of call stat info.
-shown by command
-CLI> polygator show gsm call stat out
-24.10.12
-Improved call stat info getting command
-CLI> polygator show gsm call stat out - total stat
-CLI> polygator show gsm call stat out hour - last hour stat
-CLI> polygator show gsm call stat out day - last day stat
-CLI> polygator show gsm call stat out - last week stat
-CLI> polygator show gsm call stat out begin - stat of period from begin time to yet time.
-CLI> polygator show gsm call stat out begin end - stat of period from begin time to end time.
-begin, end format is y-m-d h:m:s or shorter.
-25.10.12
-Fix SMS PDU receiving function.
-26.10.12
-Add SMS management command support.
-CLI> polygator channel gsm <alias> sms ...
-12.11.12
-Improved SIM card poll functionality - preparing to SIM bank/server.
-13.11.12
-Fix SMS corruption on AT+CMD and +CMT +CDS send/recv simultaneously.
-19.11.12
+2013-12-02
+1. Default CNMI settings is "1,2,0,1,0".
+2. Fixed read function for SMS Center address.
+3. Fixed USSD decoder (UCS-2BE to UTF-8 conversion).
+2013-11-21
+1. SIM5215. Added SIM hot change.
+2013-11-14
+Bug fixes. Old M10 (05) firmware insert whitespace in CUSD respose.
+2013-10-25
+Fix address_classify() function - set numbering plan always as ISDN. Resolve
+problem on sent SMS to short number.
+2013-07-19
+Adjust codec to best for GSM calls on PROCEEDING and RONGING events.
+Set VINETIC firmware verison RTP_20_15_264 as default.
+2013-06-03
+Add permanent clip routing table functionality.
+On routing incoming GSM call in "dyn" mode, call control look-up first
+permanent routing table. If no match entry found it look-up dynamic
+routing table.
+2013-03-26
+Added ability to customize some default parameters. See file "defaults".
+2013-03-22
+Change default state of GSM channels.
+1) channel enabled.
+2) outgoing calls allowed.
+3) incoming call type set "spec".
+4) incomingto value is "s".
+5) context is "default".
+2013-03-21
+Fix configuration save builder. Removed automatic trunk from configuration.
+2013-03-07
+Fix crash in translation path on pf_xxx_read() out to big samples count.
+2013-03-06
+Add all supported VINETIC formats to channel native format list.
+2013-03-04
+Improved USSD response analyzer.
+2013-02-28
+FXS support rc1.
+FLASH HOOK detection, and CID Sender still under working.
+2013-02-05
+Fix polygator show vinetic CLI command.
+2013-01-23
+Added "done." string at the end of USSD communication.
+For complete indication in case USSD has non-ASCII characters that
+not displayed by ast_cli().
+2013-01-10
+Reset Vinetics Timestamp on new call create.
+2013-01-15
+Allow '+', '*', '#', 'p', 'w' and '0 - 9' in dialed number.
+2013-01-09
+Fix PDU data corruption on receiving with DCS 8-bit.
+2013-01-08
+Add asterisk manager interface command PolygatorShowGSMDevinfo,
+PolygatorChannelGSMEnable, PolygatorChannelGSMDisable.
+2013-01-04
+Add SIM900 IMEI change code.
+Supported SIM900 Firmware:
+a) 1137B08SIM900M64_ST_DTMF_JD_MMS,
+b) 1137B09SIM900M64_ST_DTMF_JD_MMS.
+Removed gsm channel commands "suspend" "resume".
+2013-01-03
+Add support asterisk version 11.
+Change configure macro for retrieve asterisk version by calling asterisk executable with option -V.
+2012-12-27
+Fix trunk last used channel on channel removing.
+2012-12-24
+Use ast_queue_hangup_with_cause(ast, cause) instead ast_queue_control(ast, AST_CONTROL_HANGUP)
+without lock asterisk channel.
+2012-12-20
+Use clock realtime library for internal timers.
+2012-12-19
+Limit field length of Dial PGGSM arguments string for prevent stack corruption in sscanf call.
+2012-12-18
+Add asterisk manager interface command PolygatorShowGSMNetinfo.
+Add PLMN virtual trunks.
+2012-11-30
+Fix segfault on parsing corrupted PDU.
+Add sanity check for maximum length of Recipent Address(SMS-STATUS-REPORT type).
+Add proceeding timer for drop bad incoming call,
+which occurred on corrupted RING CLIP CLCC responses.
+2012-11-29
+Fix segfault on parsing corrupted PDU.
+Add sanity check for maximum length of User Data and actual PDU length.
+Set timer for registering timeout after transition from registered state to searching state.
+Add aditional modifiers to Dial application to specify requested channels for
+outgoing GSM calls.
+PLMN - request channels with specified PLMN (MCC, MNC). (May work as trunk)
+IMSI - request channels with specified IMSI.
+ICCID - request channels with specified ICCID.
+2012-11-28
+Fix segfault on parsing corrupted PDU.
+Add sanity check for maximum length of Originating Address.
+Add sanity check for maximum length of User Data.
+Fix Alignment trap on ARM architecture in gsm7_to_ucs2().
+2012-11-22
+Improved SIM removing detection.
+2012-11-19
 Change CLI command interface gsm call stat info.
 CLI> polygator show gsm call stat out - total stat
 CLI> polygator show gsm call stat out last hour - last hour stat
@@ -39,95 +109,29 @@ CLI> polygator show gsm call stat out to end - stat of period from stat begin ti
 CLI> polygator show gsm call stat out from begin to end - stat of period from begin time to end time.
 n is integer value,
 begin, end format is y-m-d h:m:s or shorter.
-22.11.12
-Improved SIM removing detection.
-28.11.12
-Fix segfault on parsing corrupted PDU.
-Add sanity check for maximum length of Originating Address.
-Add sanity check for maximum length of User Data.
-Fix Alignment trap on ARM architecture in gsm7_to_ucs2().
-29.11.12
-Fix segfault on parsing corrupted PDU.
-Add sanity check for maximum length of User Data and actual PDU length.
-Set timer for registering timeout after transition from registered state to searching state.
-Add aditional modifiers to Dial application to specify requested channels for
-outgoing GSM calls.
-PLMN - request channels with specified PLMN (MCC, MNC). (May work as trunk)
-IMSI - request channels with specified IMSI.
-ICCID - request channels with specified ICCID.
-30.11.12
-Fix segfault on parsing corrupted PDU.
-Add sanity check for maximum length of Recipent Address(SMS-STATUS-REPORT type).
-Add proceeding timer for drop bad incoming call,
-which occurred on corrupted RING CLIP CLCC responses.
-18.12.12
-Add asterisk manager interface command PolygatorShowGSMNetinfo.
-Add PLMN virtual trunks.
-19.12.12
-Limit field length of Dial PGGSM arguments string for prevent stack corruption in sscanf call.
-20.12.12
-Use clock realtime library for internal timers.
-24.12.12
-Use ast_queue_hangup_with_cause(ast, cause) instead ast_queue_control(ast, AST_CONTROL_HANGUP)
-without lock asterisk channel.
-27.12.12
-Fix trunk last used channel on channel removing.
-03.01.13
-Add support asterisk version 11.
-Change configure macro for retrieve asterisk version by calling asterisk executable with option -V.
-04.01.13
-Add SIM900 IMEI change code.
-Supported SIM900 Firmware:
-a) 1137B08SIM900M64_ST_DTMF_JD_MMS,
-b) 1137B09SIM900M64_ST_DTMF_JD_MMS.
-Removed gsm channel commands "suspend" "resume".
-08.01.13
-Add asterisk manager interface command PolygatorShowGSMDevinfo,
-PolygatorChannelGSMEnable, PolygatorChannelGSMDisable.
-09.01.13
-Fix PDU data corruption on receiving with DCS 8-bit.
-15.01.13
-Allow '+', '*', '#', 'p', 'w' and '0 - 9' in dialed number.
-10.01.13
-Reset Vinetics Timestamp on new call create.
-23.01.13
-Added "done." string at the end of USSD communication.
-For complete indication in case USSD has non-ASCII characters that
-not displayed by ast_cli().
-05.02.13
-Fix polygator show vinetic CLI command.
-28.02.13
-FXS support rc1.
-FLASH HOOK detection, and CID Sender still under working.
-04.03.13
-Improved USSD response analyzer.
-06.03.13
-Add all supported VINETIC formats to channel native format list.
-07.03.13
-Fix crash in translation path on pf_xxx_read() out to big samples count.
-21.03.13
-Fix configuration save builder. Removed automatic trunk from configuration.
-22.03.13
-Change default state of GSM channels.
-1) channel enabled.
-2) outgoing calls allowed.
-3) incoming call type set "spec".
-4) incomingto value is "s".
-5) context is "default".
-26.03.13
-Added ability to customize some default parameters. See file "defaults".
-03.06.13
-Add permanent clip routing table functionality.
-On routing incoming GSM call in "dyn" mode, call control look-up first
-permanent routing table. If no match entry found it look-up dynamic
-routing table.
-19.07.13
-Adjust codec to best for GSM calls on PROCEEDING and RONGING events.
-Set VINETIC firmware verison RTP_20_15_264 as default.
-25.10.13
-Fix address_classify() function - set numbering plan always as ISDN. Resolve
-problem on sent SMS to short number.
-14.11.13
-Bug fixes. Old M10 (05) firmware insert whitespace in CUSD respose.
-21.11.13
-1. SIM5215. Added SIM hot change.
+2012-11-13
+Fix SMS corruption on AT+CMD and +CMT +CDS send/recv simultaneously.
+2012-11-12
+Improved SIM card poll functionality - preparing to SIM bank/server.
+2012-10-26
+Add SMS management command support.
+CLI> polygator channel gsm <alias> sms ...
+2012-10-25
+Fix SMS PDU receiving function.
+2012-10-24
+Improved call stat info getting command
+CLI> polygator show gsm call stat out - total stat
+CLI> polygator show gsm call stat out hour - last hour stat
+CLI> polygator show gsm call stat out day - last day stat
+CLI> polygator show gsm call stat out - last week stat
+CLI> polygator show gsm call stat out begin - stat of period from begin time to yet time.
+CLI> polygator show gsm call stat out begin end - stat of period from begin time to end time.
+begin, end format is y-m-d h:m:s or shorter.
+2012-10-23
+Add initial support of call stat info.
+shown by command
+CLI> polygator show gsm call stat out
+2012-10-19
+Add control interface for VINETIC NE-LEC.
+2012-10-18
+Stop execution of GSM channel thread when GSM module type is unknown.

@@ -343,7 +343,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 	ilen = tlen;
 	op = pdu->buf;
 	olen = MAX_PDU_BIN_SIZE;
-	if (str_from_hex_to_bin(&ip, &ilen, &op, &olen)) {
+	if (str_from_hex_to_bin(&ip, &ilen, &op, &olen) == (size_t)-1) {
 		if (err) {
 			*err = __LINE__;
 		}
@@ -454,7 +454,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			if (pdu->raddr.type.bits.typenumb == TYPE_OF_NUMBER_ALPHANUMGSM7) {
 				//
 				ip = cp;
-				ilen = (tlen * 4)/7;
+				ilen = (tlen * 4) / 7;
 				op = pdu->raddr.value;
 				olen = MAX_ADDRESS_LENGTH;
 				//
@@ -541,7 +541,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		gettimeofday(&tv, NULL);
 		if ((tml = localtime(&tv.tv_sec))) {
 			// year
-			tmc.tm_year = (tml->tm_year/100)*100 + (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_year = (tml->tm_year / 100) * 100 + (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -550,7 +550,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// month
-			tmc.tm_mon = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f)) - 1;
+			tmc.tm_mon = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f)) - 1;
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -559,7 +559,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// day of the month
-			tmc.tm_mday = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_mday = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -568,7 +568,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// hours
-			tmc.tm_hour = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_hour = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -577,7 +577,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// minutes
-			tmc.tm_min = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_min = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -586,7 +586,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// seconds
-			tmc.tm_sec = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_sec = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -749,7 +749,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		gettimeofday(&tv, NULL);
 		if ((tml = localtime(&tv.tv_sec))) {
 			// year
-			tmc.tm_year = (tml->tm_year/100)*100 + (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_year = (tml->tm_year / 100) * 100 + (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			// check PDU length
 			if ((cp - pdu->buf) > pdu->full_len) {
@@ -759,7 +759,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// month
-			tmc.tm_mon = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f)) - 1;
+			tmc.tm_mon = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f)) - 1;
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -768,7 +768,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// day of the month
-			tmc.tm_mday = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_mday = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -777,7 +777,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// hours
-			tmc.tm_hour = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_hour = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -786,7 +786,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// minutes
-			tmc.tm_min = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_min = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -795,7 +795,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// seconds
-			tmc.tm_sec = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_sec = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -827,7 +827,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		// discharge time
 		if ((tml = localtime(&tv.tv_sec))) {
 			// year
-			tmc.tm_year = (tml->tm_year/100)*100 + (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_year = (tml->tm_year / 100) * 100 + (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			// check PDU length
 			if ((cp - pdu->buf) > pdu->full_len) {
@@ -837,7 +837,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// month
-			tmc.tm_mon = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f)) - 1;
+			tmc.tm_mon = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f)) - 1;
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -846,7 +846,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// day of the month
-			tmc.tm_mday = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_mday = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -855,7 +855,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// hours
-			tmc.tm_hour = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_hour = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -864,7 +864,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// minutes
-			tmc.tm_min = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_min = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -873,7 +873,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 				goto pdu_parser_error;
 			}
 			// seconds
-			tmc.tm_sec = (((*cp) & 0x0f)*10 + ((*cp >> 4) & 0x0f));
+			tmc.tm_sec = (((*cp) & 0x0f) * 10 + ((*cp >> 4) & 0x0f));
 			cp++;
 			if ((cp - pdu->buf) > pdu->full_len) {
 				if (err) {
@@ -975,21 +975,21 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 		// processing user data header
 		if (pdu->fb.general.udhi) {
 			tlen = (unsigned char)(*cp & 0xff);
-			tp = cp+1;
+			tp = cp + 1;
 			while (tlen > 0) {
 				switch ((unsigned char)(*tp & 0xff)) {
 					//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 					case 0x00:
-						pdu->concat_ref = *(tp+2);
-						pdu->concat_cnt = *(tp+3);
-						pdu->concat_num = *(tp+4);
+						pdu->concat_ref = *(tp + 2);
+						pdu->concat_cnt = *(tp + 3);
+						pdu->concat_num = *(tp + 4);
 						break;
 					//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 					default:
 						break;
 				}
-				tlen -= (*(tp+1) + 2);
-				tp += (*(tp+1) + 2);
+				tlen -= (*(tp + 1) + 2);
+				tp += (*(tp + 1) + 2);
 			}
 		}
 		// get user data
@@ -999,9 +999,9 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			tlen = 0;
 			if (pdu->fb.general.udhi) {
 				ilen = (unsigned char)(*cp & 0xff);
-				tlen = ((ilen+1)/7)*8;
-				if ((ilen+1) % 7) {
-					tlen += ((ilen+1)%7) + 1;
+				tlen = ((ilen + 1) / 7) * 8;
+				if ((ilen + 1) % 7) {
+					tlen += ((ilen + 1) % 7) + 1;
 				}
 				pdu->udl -= tlen;
 			} // end udhi
@@ -1038,7 +1038,7 @@ struct pdu *pdu_parser(const char *pduhex, int pduhexlen, int pdulen, time_t lti
 			}
 			olen = 0;
 			for (tlen = 0; tlen < pdu->udl; tlen++) {
-				olen += sprintf(pdu->ud + olen, "%02x", (unsigned char)*(cp+tlen));
+				olen += sprintf(pdu->ud + olen, "%02x", (unsigned char)*(cp + tlen));
 			}
 		} else if (pdu->dcs.charset == DCS_CS_UCS2) {
 			// ucs2
@@ -1189,12 +1189,12 @@ int gsm7_to_ucs2(char **instr, size_t *inlen, int start, char **outstr, size_t *
 	i = start;
 	while (len > 0) {
 		if ((i % 8) < 4) {
-			memcpy(&sym4grp, (rdpos+((i/8)*7)), 4);
-			chridx = (sym4grp >> ((i%4)*7)) & 0x7f;
+			memcpy(&sym4grp, (rdpos + ((i / 8) * 7)), 4);
+			chridx = (sym4grp >> ((i % 4) * 7)) & 0x7f;
 		} else {
-			memcpy(&sym4grp, (rdpos+((i/8)*7)+3), 4);
+			memcpy(&sym4grp, (rdpos + ((i / 8) * 7) + 3), 4);
 			sym4grp >>= 4;
-			chridx = (sym4grp >> ((i%4)*7)) & 0x7f;
+			chridx = (sym4grp >> ((i % 4) * 7)) & 0x7f;
 		}
 		memcpy(wrpos, &gsm_to_unicode_be[chridx], 2);
 		rest -= 2;
@@ -1237,15 +1237,15 @@ int ucs2_to_gsm7(char **instr, int *inlen, int start, char **outstr, int *outlen
 	wrpos = *outstr;
 
 	// create temp buffer
-	if (!(tbuf = malloc(len/2))) {
+	if (!(tbuf = malloc(len / 2))) {
 		return -1;
 	}
-	memset(tbuf, 0, len/2);
+	memset(tbuf, 0, len / 2);
 	// get gsm7 alphabet symbols
 	for (i = 0; i < (len / 2); i++) {
 		for (j = 0; j < 128; j++) {
-			if (*(rdpos+i) == gsm_to_unicode_be[j]) {
-				*(tbuf+i) = (char)j;
+			if (*(rdpos + i) == gsm_to_unicode_be[j]) {
+				*(tbuf + i) = (char)j;
 				break;
 			}
 		}
@@ -1255,22 +1255,22 @@ int ucs2_to_gsm7(char **instr, int *inlen, int start, char **outstr, int *outlen
 	i=start;
 	while (len) {
 		if ((i % 8) < 4) {
-			memcpy(&sym4grp, (wrpos+((i/8)*7)), 4);
-			sym4grp |= ((*(tbuf+(i-start)) & 0x7f) << ((i%4)*7));
-			memcpy((wrpos+((i/8)*7)), &sym4grp, 4);
+			memcpy(&sym4grp, (wrpos+((i / 8) * 7)), 4);
+			sym4grp |= ((*(tbuf + (i - start)) & 0x7f) << ((i % 4) * 7));
+			memcpy((wrpos + ((i / 8) * 7)), &sym4grp, 4);
 		} else {
-			memcpy(&sym4grp, (wrpos+((i/8)*7)+3), 4);
-			sym4grp |= ((*(tbuf+(i-start)) & 0x7f) << (((i%4)*7) + 4));
-			memcpy((wrpos+((i/8)*7)+3), &sym4grp, 4);
+			memcpy(&sym4grp, (wrpos + ((i / 8) * 7) + 3), 4);
+			sym4grp |= ((*(tbuf + (i - start)) & 0x7f) << (((i % 4) * 7) + 4));
+			memcpy((wrpos+((i / 8) * 7) + 3), &sym4grp, 4);
 		}
 		len--;
 		i++;
 	}
 	// insert stuff CR symbol
-	if ((i&7) == 7) {
-		memcpy(&sym4grp, (wrpos+((i/8)*7)+3), 4);
-		sym4grp |= ( 0x0d << (((i%4)*7) + 4));
-		memcpy((wrpos+((i/8)*7)+3), &sym4grp, 4);
+	if ((i & 7) == 7) {
+		memcpy(&sym4grp, (wrpos+((i / 8) * 7) + 3), 4);
+		sym4grp |= ( 0x0d << (((i % 4) * 7) + 4));
+		memcpy((wrpos+((i / 8) * 7) + 3), &sym4grp, 4);
 	}
 	//
 	*instr = (char *)rdpos;
@@ -1364,7 +1364,6 @@ int get_parts_count(char *buf)
 	int ucs2len;
 	int i, j;
 
-	//
 	ibuf = buf;
 	ilen = strlen(ibuf);
 	ucs2len = olen = ilen * 2;
@@ -1546,7 +1545,7 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 		// sms center address
 		if (sca) {
 			memcpy(&curr->scaddr, sca, sizeof(struct address));
-			*bldp++ = (unsigned char)((curr->scaddr.length/2) + (curr->scaddr.length%2) + 1);
+			*bldp++ = (unsigned char)((curr->scaddr.length / 2) + (curr->scaddr.length % 2) + 1);
 			*bldp++ = (unsigned char)curr->scaddr.type.full;
 			for (i = 0; i < curr->scaddr.length; i++) {
 				if (i % 2) {
@@ -1607,7 +1606,7 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 			// gsm7 default alphabet
 			if (part_count > 1) {
 				// set user data length
-				curr->udl = ((symcnt/153)?(153):(symcnt%153)) + 7;
+				curr->udl = ((symcnt / 153)?(153):(symcnt % 153)) + 7;
 				*bldp++ = curr->udl;
 				// set user data header
 				*(bldp + 0) = 5; // udhi length
@@ -1615,11 +1614,11 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 				*(bldp + 2) = 3; // ie length - concatenated message
 				*(bldp + 3) = (unsigned char)((id & 0xff)?(id & 0xff):(0x5a)); // concatenated message - message reference
 				*(bldp + 4) = part_count; // concatenated message - parts count
-				*(bldp + 5) = part+1; // concatenated message - current part
+				*(bldp + 5) = part + 1; // concatenated message - current part
 				*(bldp + 6) = 0x00; // fill bits
 				// set user data
-				ibuf = (char *)(ucs2buf + part*153);
-				ilen = ((symcnt/153)?(153):(symcnt%153)) * 2;
+				ibuf = (char *)(ucs2buf + part * 153);
+				ilen = ((symcnt / 153)?(153):(symcnt % 153)) * 2;
 				obuf = curr->ud;
 				olen = 640;
 				if (str_from_ucs2_to_set("UTF-8", &ibuf, &ilen, &obuf, &olen) == (size_t)-1) {
@@ -1627,8 +1626,8 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 					pdu_free(pdu);
 					return NULL;
 				}
-				ibuf = (char *)(ucs2buf + part*153);
-				ilen = ((symcnt/153)?(153):(symcnt%153)) * 2;
+				ibuf = (char *)(ucs2buf + part * 153);
+				ilen = ((symcnt / 153)?(153):(symcnt % 153)) * 2;
 				obuf = bldp;
 				olen = 153;
 				if (ucs2_to_gsm7(&ibuf, (int *)&ilen, 7, &obuf, (int *)&olen)) {
@@ -1673,7 +1672,7 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 			// ucs2
 			if (part_count > 1) {
 				// set user data length
-				curr->udl = ((ucs2len/134)?(134):(ucs2len%134)) + 6;
+				curr->udl = ((ucs2len / 134)?(134):(ucs2len % 134)) + 6;
 				*bldp++ = curr->udl;
 				// set user data header
 				*(bldp + 0) = 5; // udhi length
@@ -1683,8 +1682,8 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 				*(bldp + 4) = part_count; // concatenated message - parts count
 				*(bldp + 5) = part+1; // concatenated message - current part
 				// set user data
-				ibuf = (char *)(ucs2buf + part*67);
-				ilen = (ucs2len/134)?(134):(ucs2len%134);
+				ibuf = (char *)(ucs2buf + part * 67);
+				ilen = (ucs2len / 134)?(134):(ucs2len % 134);
 				obuf = curr->ud;
 				olen = 640;
 				if (str_from_ucs2_to_set("UTF-8", &ibuf, &ilen, &obuf, &olen) == (size_t)-1) {
@@ -1693,7 +1692,7 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 					return NULL;
 				}
 				//
-				memcpy(bldp+6, (ucs2buf + part*67), (ucs2len/134)?(134):(ucs2len%134));
+				memcpy(bldp + 6, (ucs2buf + part * 67), (ucs2len / 134)?(134):(ucs2len % 134));
 				ucs2len -= 134;
 				curr->len = (int)(bldp - curr->buf) + curr->udl;
 			} else {
@@ -1727,7 +1726,7 @@ struct pdu *calc_submit_pdu(char *content, char *destination, int flash, struct 
 		// set full length
 		curr->full_len = curr->len;
 		if (curr->scaddr.length) {
-			curr->len -= ((curr->scaddr.length/2) + (curr->scaddr.length%2) + 2);
+			curr->len -= ((curr->scaddr.length / 2) + (curr->scaddr.length % 2) + 2);
 		}
 	}
 
@@ -1778,31 +1777,13 @@ char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs)
 	ip = ussdhex;
 	ilen = ussdhexlen;
 	op = ussdbin;
-	olen = 256;
-	if (str_from_hex_to_bin(&ip, &ilen, &op, &olen)) {
+	olen = sizeof(ussdbin);
+	if (str_from_hex_to_bin(&ip, &ilen, &op, &olen) == (size_t)-1) {
 		return NULL;
 	}
-	ussdbinlen = 256 - olen;
-#if 0
-	// sim300 ucs2 or gsm7
-	if ((dcs == 0x11) ||
-		(((dcs & 0xc0) == 0x40) && ((dcs & 0x0c) == 0x08)) ||
-		(((dcs & 0xf0) == 0x90) && ((dcs & 0x0c) == 0x08))) {
-		// ucs2
-		ip = ussdbin;
-		ilen = ussdbinlen;
-		op = res;
-		olen = 512;
-		if (str_from_ucs2_to_set("UTF-8", &ip, &ilen, &op, &olen) == (size_t)-1) {
-			free(res);
-			return NULL;
-		}
-	} else {
-		// gsm7
-		memcpy(res, ussdbin, ussdbinlen);
-	}
-#else
-	// ucs2
+	ussdbinlen = sizeof(ussdbin) - olen;
+
+	// convert from ucs2
 	ip = ussdbin;
 	ilen = ussdbinlen;
 	op = res;
@@ -1811,7 +1792,6 @@ char *get_ussd_decoded(char *ussdhex, int ussdhexlen, int dcs)
 		free(res);
 		return NULL;
 	}
-#endif
 	return res;
 }
 //------------------------------------------------------------------------------

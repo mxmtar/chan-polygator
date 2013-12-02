@@ -15,8 +15,8 @@ chan_polygator_la_SOURCES = \
 		sim900.c \
 		sim5215.c
 
-chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
-chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -lsqlite3 -lvinetic -lrt
+chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall 
+chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -avoid-version -shared -lsqlite3 -lvinetic -lrt
 
 noinst_HEADERS = \
 		address.h \
@@ -54,8 +54,4 @@ dist_firmware_DATA = \
 CLEANFILES = *~
 
 install-data-hook:
-	@rm $(DESTDIR)$(astmoddir)/chan_polygator.so
-	@mv $(DESTDIR)$(astmoddir)/chan_polygator.so.0.0.0 $(DESTDIR)$(astmoddir)/chan_polygator.so
-	@rm $(DESTDIR)$(astmoddir)/chan_polygator.so.0
-	@rm $(DESTDIR)$(astmoddir)/chan_polygator.a
-	@rm $(DESTDIR)$(astmoddir)/chan_polygator.la
+	@rm -f $(DESTDIR)$(astmoddir)/chan_polygator.la
