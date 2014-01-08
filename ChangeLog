@@ -1,3 +1,5 @@
+2013-12-27
+1. Fixed CNUM execution command parser for support unknown number type.
 2013-12-02
 1. Default CNMI settings is "1,2,0,1,0".
 2. Fixed read function for SMS Center address.

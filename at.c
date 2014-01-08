@@ -1224,19 +1224,21 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 	int param_cnt;
 
 	// check params
-	if (!fld) return -1;
-
-	if ((fld_len <= 0) || (fld_len > 256)) return -1;
-
-	if (!cnum) return -1;
-
+	if (!fld) {
+		return -1;
+	}
+	if ((fld_len <= 0) || (fld_len > 256)) {
+		return -1;
+	}
+	if (!cnum) {
+		return -1;
+	}
 	// init params
 	for (param_cnt=0; param_cnt<MAX_CNUM_EXEC_PARAM; param_cnt++) {
 		params[param_cnt].type = PRM_TYPE_UNKNOWN;
 		params[param_cnt].buf = NULL;
 		params[param_cnt].len = -1;
 	}
-
 	// init at_gen_cnum_exec
 	cnum->alpha = NULL;
 	cnum->alpha_len = -1;
@@ -1246,8 +1248,6 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 	cnum->speed = -1;
 	cnum->service = -1;
 	cnum->itc = -1;
-
-
 	// init ptr
 	if (!(sp = strchr(fld, ' '))) {
 		return -1;
@@ -1267,10 +1267,10 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 			params[param_cnt].buf = tp;
 		}
 		sp = tp;
-
 		// search delimiter and put terminated null-symbol
-		if (!(tp = strchr(sp, ',')))
+		if (!(tp = strchr(sp, ','))) {
 			tp = ep;
+		}
 		*tp = '\0';
 		// set param len
 		if (params[param_cnt].type == PRM_TYPE_STRING) {
@@ -1280,14 +1280,13 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 			params[param_cnt].len = tp - sp;
 		}
 		param_cnt++;
-		if (tp == ep) break;
+		if (tp == ep) {
+			break;
+		}
 		tp++;
 	}
 
-	if ((param_cnt >= 2) &&
-			((params[0].type == PRM_TYPE_STRING) || (params[0].type == PRM_TYPE_UNKNOWN)) &&
-				(params[1].type == PRM_TYPE_INTEGER)) {
-
+	if ((param_cnt >= 2) && ((params[0].type == PRM_TYPE_STRING) || (params[0].type == PRM_TYPE_UNKNOWN)) && ((params[1].type == PRM_TYPE_UNKNOWN) || (params[1].type == PRM_TYPE_INTEGER))) {
 		// check if alpha (optional) not present
 		// get number
 		cnum->number = params[0].buf;
@@ -1307,9 +1306,7 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 			return -1;
 		}
 		// check for speed service
-		if ((param_cnt >= 4) &&
-			(params[2].type == PRM_TYPE_INTEGER) &&
-				(params[3].type == PRM_TYPE_INTEGER)) {
+		if ((param_cnt >= 4) && (params[2].type == PRM_TYPE_INTEGER) && (params[3].type == PRM_TYPE_INTEGER)) {
 			// get speed
 			if (params[2].len > 0) {
 				tp = params[2].buf;
@@ -1345,11 +1342,7 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 				}
 			}
 		}
-	} else if ((param_cnt >= 3) &&
-				((params[0].type == PRM_TYPE_STRING) || (params[0].type == PRM_TYPE_UNKNOWN)) &&
-					(params[1].type == PRM_TYPE_STRING) &&
-						(params[2].type == PRM_TYPE_INTEGER)) {
-
+	} else if ((param_cnt >= 3) && ((params[0].type == PRM_TYPE_STRING) || (params[0].type == PRM_TYPE_UNKNOWN)) && (params[1].type == PRM_TYPE_STRING) && ((params[2].type == PRM_TYPE_UNKNOWN) || (params[2].type == PRM_TYPE_INTEGER))) {
 		// check if alpha (optional) present
 		// get alpha
 		cnum->alpha = params[0].buf;
@@ -1372,9 +1365,7 @@ int at_gen_cnum_exec_parse(const char *fld, int fld_len, struct at_gen_cnum_exec
 			return -1;
 		}
 		// check for speed service
-		if ((param_cnt >= 5) &&
-			(params[3].type == PRM_TYPE_INTEGER) &&
-				(params[4].type == PRM_TYPE_INTEGER)) {
+		if ((param_cnt >= 5) && (params[3].type == PRM_TYPE_INTEGER) && (params[4].type == PRM_TYPE_INTEGER)) {
 			// get speed
 			if (params[3].len > 0) {
 				tp = params[3].buf;
