@@ -764,10 +764,10 @@ struct pg_channel_fxs {
 		int ali_nelec_as;
 		int ali_nelec_nlp;
 		int ali_nelec_nlpm;
-		int offhook_min;
-		int onhook_min;
-		int flashhook_min;
-		int flashhook_max;
+		int off_hook_min;
+		int on_hook_min;
+		int flash_hook_min;
+		int flash_hook_max;
 		int digit_pulse_min;
 		int digit_pulse_max;
 		int digit_pause_min;
@@ -15626,6 +15626,7 @@ pg_channel_gsm_workthread_end:
 //------------------------------------------------------------------------------
 static void *pg_vinetic_workthread(void *data)
 {
+	int restart;
 	size_t i;
 	struct pg_vinetic *vin = (struct pg_vinetic *)data;
 
@@ -15728,7 +15729,9 @@ static void *pg_vinetic_workthread(void *data)
 				}
 				// check rdyq status
 				for (i = 0; i < 5000; i++) {
-					if (!vin_is_not_ready(&vin->context)) break;
+					if (!vin_is_not_ready(&vin->context)) {
+						break;
+					}
 					usleep(1000);
 				}
 				if (i == 5000) {
@@ -15799,8 +15802,7 @@ static void *pg_vinetic_workthread(void *data)
 #else
 				vin->capabilities = 0;
 #endif
-				if ((vin->context.edsp_sw_version_register.mv == 0) &&
-						(vin->context.edsp_sw_version_register.prt == 0)) {
+				if ((vin->context.edsp_sw_version_register.mv == 0) && (vin->context.edsp_sw_version_register.prt == 0)) {
 #if ASTERISK_VERSION_NUMBER >= 100000
 					struct ast_format tmpfmt;
 					vin->capabilities = ast_format_cap_alloc();
@@ -15835,19 +15837,27 @@ static void *pg_vinetic_workthread(void *data)
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G729A, 0));
 							break;
 						case 24:
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ULAW, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_ALAW, 0));
 							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G726, 0));
+							ast_format_cap_add(vin->capabilities, ast_format_set(&tmpfmt, AST_FORMAT_G723_1, 0));
 							break;
 						default:
 							break;
 					}
 					if (vin->capabilities) {
-						if (pg_gsm_tech.capabilities) ast_format_cap_append(pg_gsm_tech.capabilities, vin->capabilities);
-						if (pg_fxs_tech.capabilities) ast_format_cap_append(pg_fxs_tech.capabilities, vin->capabilities);
-						if (pg_fxo_tech.capabilities) ast_format_cap_append(pg_fxo_tech.capabilities, vin->capabilities);
+						if (pg_gsm_tech.capabilities) {
+							ast_format_cap_append(pg_gsm_tech.capabilities, vin->capabilities);
+						}
+						if (pg_fxs_tech.capabilities) {
+							ast_format_cap_append(pg_fxs_tech.capabilities, vin->capabilities);
+						}
+						if (pg_fxo_tech.capabilities) {
+							ast_format_cap_append(pg_fxo_tech.capabilities, vin->capabilities);
+						}
 					}
 #else
 					switch (vin->context.edsp_sw_version_register.features) {
@@ -15926,11 +15936,12 @@ static void *pg_vinetic_workthread(void *data)
 					break;
 				}
 				// download CRAM
-				for (i = 0; i < 4; i++) {
+				for (i = 0, restart = 0; i < 4; i++) {
 					if (vin_download_cram(&vin->context, i, vin->context.cram_path) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 						}
+						restart = 1;
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
@@ -15938,6 +15949,7 @@ static void *pg_vinetic_workthread(void *data)
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 						}
+						restart = 1;
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
@@ -15945,17 +15957,22 @@ static void *pg_vinetic_workthread(void *data)
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 						}
+						restart = 1;
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
 				}
+				if (restart) {
+					break;
+				}
 				// patch ALM to work with GSM module direct
-				for (i = 0; i < 4; i++) {
+				for (i = 0, restart = 0; i < 4; i++) {
 					if (vin->patch_alm_gsm[i]) {
 						if (vin_write_sop_generic(&vin->context, i, 0x07, 0x2011) < 0) {
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 							}
+							restart = 1;
 							vin->state = PG_VINETIC_STATE_IDLE;
 							break;
 						}
@@ -15963,6 +15980,7 @@ static void *pg_vinetic_workthread(void *data)
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 							}
+							restart = 1;
 							vin->state = PG_VINETIC_STATE_IDLE;
 							break;
 						}
@@ -15970,6 +15988,7 @@ static void *pg_vinetic_workthread(void *data)
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 							}
+							restart = 1;
 							vin->state = PG_VINETIC_STATE_IDLE;
 							break;
 						}
@@ -15977,6 +15996,7 @@ static void *pg_vinetic_workthread(void *data)
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 							}
+							restart = 1;
 							vin->state = PG_VINETIC_STATE_IDLE;
 							break;
 						}
@@ -15984,6 +16004,7 @@ static void *pg_vinetic_workthread(void *data)
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 							}
+							restart = 1;
 							vin->state = PG_VINETIC_STATE_IDLE;
 							break;
 						}
@@ -15991,6 +16012,7 @@ static void *pg_vinetic_workthread(void *data)
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 							}
+							restart = 1;
 							vin->state = PG_VINETIC_STATE_IDLE;
 							break;
 						}
@@ -15999,6 +16021,7 @@ static void *pg_vinetic_workthread(void *data)
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 							}
+							restart = 1;
 							vin->state = PG_VINETIC_STATE_IDLE;
 							break;
 						}
@@ -16007,10 +16030,14 @@ static void *pg_vinetic_workthread(void *data)
 							while (vin_message_stack_check_line(&vin->context)) {
 								ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 							}
+							restart = 1;
 							vin->state = PG_VINETIC_STATE_IDLE;
 							break;
 						}
 					}
+				}
+				if (restart) {
+					break;
 				}
 				// switch to little endian mode
 				if (vin_set_little_endian_mode(&vin->context) < 0) {
@@ -16026,15 +16053,19 @@ static void *pg_vinetic_workthread(void *data)
 				ast_debug(3, "vinetic=\"%s\": run\n", vin->name);
 				// set vinetic's module state to previous state - for fallback purpose after reset
 				// set SLIC's operation mode
-				for (i = 0; i < 4; i++) {
+				for (i = 0, restart = 0; i < 4; i++) {
 					// restore previous mode
 					if (vin_set_opmode(&vin->context, i, vin->context.ali_opmode[i]) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 						}
+						restart = 1;
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
+				}
+				if (restart) {
+					break;
 				}
 				// ALI module
 				if (vin_is_ali_enabled(&vin->context)) {
@@ -16046,13 +16077,14 @@ static void *pg_vinetic_workthread(void *data)
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
-					for (i = 0; i < 4; i++) {
+					for (i = 0, restart = 0; i < 4; i++) {
 						if (vin_is_ali_channel_enabled(&vin->context, i)) {
 							// enable ALI channel
 							if (vin_ali_channel_enable(&vin->context, i) < 0) {
 								while (vin_message_stack_check_line(&vin->context)) {
 									ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 								}
+								restart = 1;
 								vin->state = PG_VINETIC_STATE_IDLE;
 								break;
 							}
@@ -16061,10 +16093,14 @@ static void *pg_vinetic_workthread(void *data)
 								while (vin_message_stack_check_line(&vin->context)) {
 									ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 								}
+								restart = 1;
 								vin->state = PG_VINETIC_STATE_IDLE;
 								break;
 							}
 						}
+					}
+					if (restart) {
+						break;
 					}
 				}
 				// signaling module
@@ -16077,13 +16113,14 @@ static void *pg_vinetic_workthread(void *data)
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
-					for (i = 0; i < 4; i++) {
+					for (i = 0, restart = 0; i < 4; i++) {
 						if (vin_is_signaling_channel_enabled(&vin->context, i)) {
 							// enable signaling channel
 							if (vin_signaling_channel_enable(&vin->context, i) < 0) {
 								while (vin_message_stack_check_line(&vin->context)) {
 									ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 								}
+								restart = 1;
 								vin->state = PG_VINETIC_STATE_IDLE;
 								break;
 							}
@@ -16092,6 +16129,7 @@ static void *pg_vinetic_workthread(void *data)
 								while (vin_message_stack_check_line(&vin->context)) {
 									ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 								}
+								restart = 1;
 								vin->state = PG_VINETIC_STATE_IDLE;
 								break;
 							}
@@ -16100,10 +16138,14 @@ static void *pg_vinetic_workthread(void *data)
 								while (vin_message_stack_check_line(&vin->context)) {
 									ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 								}
+								restart = 1;
 								vin->state = PG_VINETIC_STATE_IDLE;
 								break;
 							}
 						}
+					}
+					if (restart) {
+						break;
 					}
 				}
 				// coder module
@@ -16124,13 +16166,14 @@ static void *pg_vinetic_workthread(void *data)
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
-					for (i = 0; i < 4; i++) {
+					for (i = 0, restart = 0; i < 4; i++) {
 						if (vin_is_coder_channel_enabled(&vin->context, i)) {
 							// set coder channel RTP
 							if (vin_coder_channel_config_rtp(&vin->context, i) < 0) {
 								while (vin_message_stack_check_line(&vin->context)) {
 									ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 								}
+								restart = 1;
 								vin->state = PG_VINETIC_STATE_IDLE;
 								break;
 							}
@@ -16139,10 +16182,14 @@ static void *pg_vinetic_workthread(void *data)
 								while (vin_message_stack_check_line(&vin->context)) {
 									ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
 								}
+								restart = 1;
 								vin->state = PG_VINETIC_STATE_IDLE;
 								break;
 							}
 						}
+					}
+					if (restart) {
+						break;
 					}
 				}
 				// set status mask
@@ -16790,7 +16837,7 @@ pg_channel_fxs_onhook_action_end:
 // 			ast_verb(4, "FXS channel=\"%s\" %s-HOOK\n", ch_fxs->alias, ch_fxs->off_hook?"OFF":"ON");
 			if (ch_fxs->off_hook) {
 				if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_ON) {
-					x_timer_set_ms(ch_fxs->timers.off_hook, ch_fxs->config.offhook_min);
+					x_timer_set_ms(ch_fxs->timers.off_hook, ch_fxs->config.off_hook_min);
 				} else if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_OFF) {
 					if (is_x_timer_enable(ch_fxs->timers.digit_pulse)) {
 						x_timer_start(ch_fxs->timers.digit_pause);
@@ -16810,7 +16857,7 @@ pg_channel_fxs_onhook_action_end:
 					if (is_x_timer_enable(ch_fxs->timers.flash_hook)) {
 						res = get_x_timer_value_ms(ch_fxs->timers.flash_hook);
 // 						ast_verb(4, "FXS channel=\"%s\" flash=%d ms\n", ch_fxs->alias, res);
-						if ((res <= ch_fxs->config.flashhook_max) && (res >= ch_fxs->config.flashhook_min)) {
+						if ((res <= ch_fxs->config.flash_hook_max) && (res >= ch_fxs->config.flash_hook_min)) {
 							x_timer_stop(ch_fxs->timers.flash_hook);
 							x_timer_stop(ch_fxs->timers.on_hook);
 							// send flash signal
@@ -16822,7 +16869,7 @@ pg_channel_fxs_onhook_action_end:
 				}
 			} else {
 				if (ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_OFF) {
-					x_timer_set_ms(ch_fxs->timers.on_hook, ch_fxs->config.onhook_min);
+					x_timer_set_ms(ch_fxs->timers.on_hook, ch_fxs->config.on_hook_min);
 					x_timer_start(ch_fxs->timers.flash_hook);
 					x_timer_start(ch_fxs->timers.digit_pulse);
 					if (is_x_timer_enable(ch_fxs->timers.digit_pause)) {
@@ -17496,13 +17543,13 @@ static int pg_config_file_build(char *filename)
 			len += fprintf(fp, "ali.nelec.nlpm=%s\n", pg_vinetic_ali_nelec_nlpm_to_string(ch_fxs->config.ali_nelec_nlpm));
 
 			// offhook.min
-			len += fprintf(fp, "offhook.min=%d\n", ch_fxs->config.offhook_min);
+			len += fprintf(fp, "off.hook.min=%d\n", ch_fxs->config.off_hook_min);
 			// onhook.min
-			len += fprintf(fp, "onhook.min=%d\n", ch_fxs->config.onhook_min);
+			len += fprintf(fp, "on.hook.min=%d\n", ch_fxs->config.on_hook_min);
 			// flash.hook.min
-			len += fprintf(fp, "flash.hook.min=%d\n", ch_fxs->config.flashhook_min);
+			len += fprintf(fp, "flash.hook.min=%d\n", ch_fxs->config.flash_hook_min);
 			// flash.hook.max
-			len += fprintf(fp, "flash.hook.max=%d\n", ch_fxs->config.flashhook_max);
+			len += fprintf(fp, "flash.hook.max=%d\n", ch_fxs->config.flash_hook_max);
 			// digit.pulse.min
 			len += fprintf(fp, "digit.pulse.min=%d\n", ch_fxs->config.digit_pulse_min);
 			// digit.pulse.max
@@ -18859,18 +18906,21 @@ static int pg_gsm_call(struct ast_channel *ast_ch, char *dest, int timeout)
 	address_classify(called_name, &call->called_name);
 	// get calling name
 #if ASTERISK_VERSION_NUMBER >= 110000
-	if (ast_channel_connected(ast_ch)->id.number.str)
+	if (ast_channel_connected(ast_ch)->id.number.str) {
 		address_classify(ast_channel_connected(ast_ch)->id.number.str, &call->calling_name);
+	}
 #elif ASTERISK_VERSION_NUMBER >= 10800
-	if (ast_ch->connected.id.number.str)
+	if (ast_ch->connected.id.number.str) {
 		address_classify(ast_ch->connected.id.number.str, &call->calling_name);
+	}
 #else
-	if (ast_ch->cid.cid_num)
+	if (ast_ch->cid.cid_num) {
 		address_classify(ast_ch->cid.cid_num, &call->calling_name);
+	}
 #endif
-	else
+	else {
 		address_classify("s", &call->calling_name);
-
+	}
 	if (pg_call_gsm_sm(call, PG_CALL_GSM_MSG_SETUP_REQ, 0) < 0) {
 		ast_mutex_unlock(&ch_gsm->lock);
 		return -1;
@@ -20135,14 +20185,17 @@ static int pg_fxs_call(struct ast_channel *ast_ch, char *dest, int timeout)
 #if ASTERISK_VERSION_NUMBER >= 110000
 	if (ast_channel_connected(ast_ch)->id.number.str) {
 		address_classify(ast_channel_connected(ast_ch)->id.number.str, &call->calling_name);
+	}
 #elif ASTERISK_VERSION_NUMBER >= 10800
 	if (ast_ch->connected.id.number.str) {
 		address_classify(ast_ch->connected.id.number.str, &call->calling_name);
+	}
 #else
 	if (ast_ch->cid.cid_num) {
 		address_classify(ast_ch->cid.cid_num, &call->calling_name);
+	}
 #endif
-	} else {
+	else {
 		address_classify("s", &call->calling_name);
 	}
 
@@ -21880,14 +21933,17 @@ static int pg_fxo_call(struct ast_channel *ast_ch, char *dest, int timeout)
 #if ASTERISK_VERSION_NUMBER >= 110000
 	if (ast_channel_connected(ast_ch)->id.number.str) {
 		address_classify(ast_channel_connected(ast_ch)->id.number.str, &call->calling_name);
+	}
 #elif ASTERISK_VERSION_NUMBER >= 10800
 	if (ast_ch->connected.id.number.str) {
 		address_classify(ast_ch->connected.id.number.str, &call->calling_name);
+	}
 #else
 	if (ast_ch->cid.cid_num) {
 		address_classify(ast_ch->cid.cid_num, &call->calling_name);
+	}
 #endif
-	} else {
+	else {
 		address_classify("s", &call->calling_name);
 	}
 
@@ -30613,7 +30669,6 @@ static char *pg_cli_channel_fxs_action_param(struct ast_cli_entry *e, int cmd, s
 								ast_copy_string(ch_fxs->config.cid_num, a->argv[6], sizeof(ch_fxs->config.cid_num));
 								ast_cli(a->fd, " - ok\n");
 							}
-							ast_cli(a->fd, " - ok\n");
 							break;
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case PG_CHANNEL_FXS_PARAM_CIDNAME:
@@ -33337,36 +33392,36 @@ static int pg_load(void)
 					}
 				}
 				// offhook.min
-				ch_fxs->config.offhook_min = 50;
-				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "offhook.min")) && (is_str_digit(cvar))) {
-					ch_fxs->config.offhook_min = atoi(cvar);
+				ch_fxs->config.off_hook_min = 50;
+				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "off.hook.min")) && (is_str_digit(cvar))) {
+					ch_fxs->config.off_hook_min = atoi(cvar);
 				}
-				if (ch_fxs->config.offhook_min < 1) {
-					ch_fxs->config.offhook_min = 50;
+				if (ch_fxs->config.off_hook_min < 1) {
+					ch_fxs->config.off_hook_min = 50;
 				}
 				// onhook.min
-				ch_fxs->config.onhook_min = 1000;
+				ch_fxs->config.on_hook_min = 1000;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "on.hook.min")) && (is_str_digit(cvar))) {
-					ch_fxs->config.onhook_min = atoi(cvar);
+					ch_fxs->config.on_hook_min = atoi(cvar);
 				}
-				if (ch_fxs->config.onhook_min < 1) {
-					ch_fxs->config.onhook_min = 1000;
+				if (ch_fxs->config.on_hook_min < 1) {
+					ch_fxs->config.on_hook_min = 1000;
 				}
 				// flashhook.min
-				ch_fxs->config.flashhook_min = 150;
+				ch_fxs->config.flash_hook_min = 150;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "flash.hook.min")) && (is_str_digit(cvar))) {
-					ch_fxs->config.flashhook_min = atoi(cvar);
+					ch_fxs->config.flash_hook_min = atoi(cvar);
 				}
-				if (ch_fxs->config.flashhook_min < 1) {
-					ch_fxs->config.flashhook_min = 150;
+				if (ch_fxs->config.flash_hook_min < 1) {
+					ch_fxs->config.flash_hook_min = 150;
 				}
 				// flashhook.max
-				ch_fxs->config.flashhook_max = 900;
+				ch_fxs->config.flash_hook_max = 900;
 				if ((cvar = pg_get_config_variable(ast_cfg, ch_fxs->device, "flash.hook.max")) && (is_str_digit(cvar))) {
-					ch_fxs->config.flashhook_max = atoi(cvar);
+					ch_fxs->config.flash_hook_max = atoi(cvar);
 				}
-				if (ch_fxs->config.flashhook_max < 1) {
-					ch_fxs->config.flashhook_max = 900;
+				if (ch_fxs->config.flash_hook_max < 1) {
+					ch_fxs->config.flash_hook_max = 900;
 				}
 				// digit.pulse.min
 				ch_fxs->config.digit_pulse_min = 39;
