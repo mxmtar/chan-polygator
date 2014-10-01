@@ -1427,6 +1427,7 @@ static struct pg_generic_param pg_gsm_module_types[] = {
 	PG_GENERIC_PARAM("SIM900", POLYGATOR_MODULE_TYPE_SIM900),
 	PG_GENERIC_PARAM("M10", POLYGATOR_MODULE_TYPE_M10),
 	PG_GENERIC_PARAM("SIM5215", POLYGATOR_MODULE_TYPE_SIM5215),
+	PG_GENERIC_PARAM("SIM5215A2", POLYGATOR_MODULE_TYPE_SIM5215A2),
 };
 // polygator gsm call progress types
 enum {
@@ -5347,7 +5348,7 @@ static int pg_atcommand_queue_prepend(struct pg_channel_gsm* ch_gsm,
 		at = get_at_com_by_id(id, sim900_at_com_list, sim900_at_com_list_length());
 	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 		at = get_at_com_by_id(id, m10_at_com_list, m10_at_com_list_length());
-	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+	} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 		at = get_at_com_by_id(id, sim5215_at_com_list, sim5215_at_com_list_length());
 	}
 	if (!at) {
@@ -5430,7 +5431,7 @@ static int pg_atcommand_queue_append(struct pg_channel_gsm* ch_gsm,
 		at = get_at_com_by_id(id, sim900_at_com_list, sim900_at_com_list_length());
 	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 		at = get_at_com_by_id(id, m10_at_com_list, m10_at_com_list_length());
-	} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+	} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 		at = get_at_com_by_id(id, sim5215_at_com_list, sim5215_at_com_list_length());
 	}
 	if (!at) {
@@ -7263,7 +7264,7 @@ static void pg_channel_gsm_suspend_action(struct pg_channel_gsm* ch_gsm)
 			pg_channel_gsm_write_imei_sim300(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
 		} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 			pg_channel_gsm_write_imei_m10(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
-		} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+		} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 			pg_channel_gsm_write_imei_sim5215(ch_gsm, ch_gsm->imei_new, PG_PRINT_VERB, 4);
 		}
 		ch_gsm->imei_new[0] = '\0';
@@ -7652,7 +7653,9 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 					pg_atcommand_queue_append(ch_gsm, AT_SIM900_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
 				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
-					pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,1", 0);
+					pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 1, 0);
+				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2) {
+					pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 2, 0);
 				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 					pg_atcommand_queue_append(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 				}
@@ -7710,7 +7713,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 					pg_atcommand_insert_spacer(ch_gsm, 500);
 					pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 				} else {
-					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 						pg_atcommand_insert_spacer(ch_gsm, 500);
 						pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 						pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
@@ -7816,7 +7819,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 						pg_atcommand_insert_spacer(ch_gsm, 500);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							pg_atcommand_insert_spacer(ch_gsm, 500);
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
@@ -7839,7 +7842,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 						pg_atcommand_insert_spacer(ch_gsm, 500);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							pg_atcommand_insert_spacer(ch_gsm, 500);
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
@@ -7861,7 +7864,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 						pg_atcommand_insert_spacer(ch_gsm, 500);
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							pg_atcommand_insert_spacer(ch_gsm, 500);
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
@@ -7888,7 +7891,9 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 					pg_atcommand_queue_append(ch_gsm, AT_SIM900_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
 				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
-					pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 2);
+					pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 1, 0);
+				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2) {
+					pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 2, 0);
 				} else if (ch_gsm->gsm_module_type== POLYGATOR_MODULE_TYPE_M10) {
 					pg_atcommand_queue_append(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 				}
@@ -10586,7 +10591,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 											// wake up SIM
-											if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+											if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 												ch_gsm->flags.restart = 1;
 												ch_gsm->flags.restart_now = 1;
 											} else {
@@ -10744,7 +10749,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										pg_atcommand_queue_append(ch_gsm, AT_SIM300_CSMINS, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 									} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 										pg_atcommand_queue_append(ch_gsm, AT_SIM900_CSMINS, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
-									} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+									} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 										/* operation not supported */;
 									} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 										pg_atcommand_queue_append(ch_gsm, AT_M10_QSIMSTAT, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
@@ -10815,7 +10820,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 										// wake up SIM
-										if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+										if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 											ch_gsm->flags.restart = 1;
 											ch_gsm->flags.restart_now = 1;
 										} else {
@@ -10838,7 +10843,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 											pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+										} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 											pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 											pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
@@ -10853,7 +10858,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 											ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 											// wake up SIM
-											if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+											if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 												ch_gsm->flags.restart = 1;
 												ch_gsm->flags.restart_now = 1;
 											} else {
@@ -10882,7 +10887,7 @@ static void *pg_channel_gsm_workthread(void *data)
 												pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 											} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 												pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-											} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+											} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 												pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 											} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 												pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
@@ -10902,7 +10907,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 											pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+										} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 											pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 										} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 											pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
@@ -10916,7 +10921,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 										// wake up SIM
-										if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+										if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 											ch_gsm->flags.restart = 1;
 											ch_gsm->flags.restart_now = 1;
 										} else {
@@ -10961,7 +10966,7 @@ static void *pg_channel_gsm_workthread(void *data)
 									// start simpoll timer
 									x_timer_set(ch_gsm->timers.simpoll, simpoll_timeout);
 								} else if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CFUN_DISABLE) {
-									if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+									if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 										ast_verbose("%s: GSM channel=\"%s\": suspend action\n", AST_MODULE, ch_gsm->alias);
 										// perform suspend action
 										pg_channel_gsm_suspend_action(ch_gsm);
@@ -11034,7 +11039,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 										// wake up SIM
-										if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+										if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 											ch_gsm->flags.restart = 1;
 											ch_gsm->flags.restart_now = 1;
 										} else {
@@ -11063,7 +11068,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 										ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 										// wake up SIM
-										if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+										if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 											ch_gsm->flags.restart = 1;
 											ch_gsm->flags.restart_now = 1;
 										} else {
@@ -12045,7 +12050,7 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 												ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 												// wake up SIM
-												if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+												if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 													ch_gsm->flags.restart = 1;
 													ch_gsm->flags.restart_now = 1;
 												} else {
@@ -12254,7 +12259,7 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 												ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 												// wake up SIM
-												if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+												if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 													ch_gsm->flags.restart = 1;
 													ch_gsm->flags.restart_now = 1;
 												} else {
@@ -12434,7 +12439,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				} // end of SIM900 AT commands
 
 				// SIM5215 AT commands
-				else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+				else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 					// select by operation
 					if (ch_gsm->at_cmd->oper == AT_OPER_EXEC) {
 						// EXEC operations
@@ -12472,7 +12477,7 @@ static void *pg_channel_gsm_workthread(void *data)
 														ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 														ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 														// wake up SIM
-														if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+														if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 															ch_gsm->flags.restart = 1;
 															ch_gsm->flags.restart_now = 1;
 														} else {
@@ -12691,7 +12696,7 @@ static void *pg_channel_gsm_workthread(void *data)
 												ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 												ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 												// wake up SIM
-												if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+												if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 													ch_gsm->flags.restart = 1;
 													ch_gsm->flags.restart_now = 1;
 												} else {
@@ -13241,7 +13246,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							// perform suspend action
 							pg_channel_gsm_suspend_action(ch_gsm);
 							// wake up SIM
-							if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 								ch_gsm->flags.restart = 1;
 								ch_gsm->flags.restart_now = 1;
 							} else {
@@ -13316,7 +13321,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					// perform suspend action
 					pg_channel_gsm_suspend_action(ch_gsm);
 					// wake up SIM
-					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 						ch_gsm->flags.restart = 1;
 						ch_gsm->flags.restart_now = 1;
 					} else {
@@ -13412,7 +13417,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						// perform suspend action
 						pg_channel_gsm_suspend_action(ch_gsm);
 						// wake up SIM
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							ch_gsm->flags.restart = 1;
 							ch_gsm->flags.restart_now = 1;
 						} else {
@@ -13437,7 +13442,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 							pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
@@ -13452,7 +13457,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 							ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 							// wake up SIM
-							if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+							if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 								ch_gsm->flags.restart = 1;
 								ch_gsm->flags.restart_now = 1;
 							} else {
@@ -13481,7 +13486,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 							// M10 can't got iccid
@@ -13507,7 +13512,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 							pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 							pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
@@ -13521,7 +13526,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 						ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 						// wake up SIM
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							ch_gsm->flags.restart = 1;
 							ch_gsm->flags.restart_now = 1;
 						} else {
@@ -13584,7 +13589,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						// perform suspend action
 						pg_channel_gsm_suspend_action(ch_gsm);
 						// wake up SIM
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							ch_gsm->flags.restart = 1;
 							ch_gsm->flags.restart_now = 1;
 						} else {
@@ -14348,7 +14353,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
-					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CICCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QCCID, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
@@ -14400,7 +14405,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				ast_log(LOG_ERROR, "GSM channel=\"%s\": can't switch in suspend mode\n", ch_gsm->alias);
 				if (!ch_gsm->flags.sim_inserted) {
 					// wake up SIM
-					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 						ch_gsm->flags.restart = 1;
 						ch_gsm->flags.restart_now = 1;
 					} else {
@@ -14428,7 +14433,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
@@ -14453,7 +14458,7 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (pg_channel_gsm_get_calls_count(ch_gsm) > 1) {
 						pg_atcommand_queue_prepend(ch_gsm, AT_CHLD, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1%d", call->line);
 					} else {
-						if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+						if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 							pg_atcommand_queue_prepend(ch_gsm, AT_H, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, "0");
 							pg_atcommand_queue_prepend(ch_gsm, AT_CVHU, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0");
 						} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
@@ -14504,7 +14509,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				ch_gsm->state = PG_CHANNEL_GSM_STATE_SUSPEND;
 				ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
 				// wake up SIM
-				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+				if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 					ch_gsm->flags.restart = 1;
 					ch_gsm->flags.restart_now = 1;
 				} else {
@@ -15328,8 +15333,10 @@ static void *pg_channel_gsm_workthread(void *data)
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CHFA, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
-					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
-						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 2);
+					} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 1, 0);
+					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2) {
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 2, 0);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 					}
@@ -15337,12 +15344,12 @@ static void *pg_channel_gsm_workthread(void *data)
 					break;
 				}
 				if (ch_gsm->init.clvl) {
-					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CRXGAIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 16384);
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CRXVOL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 16384);
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CVLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 1, ((ch_gsm->config.gainin * 10000) / 100) - 5000);
-						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 					} else {
 						pg_atcommand_queue_append(ch_gsm, AT_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", ch_gsm->config.gainin);
 					}
@@ -15354,7 +15361,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
-					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CMICAMP1, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CTXGAIN, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 16384);
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CTXVOL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", (ch_gsm->config.gainout * 65535) / 15);
@@ -15488,10 +15495,10 @@ static void *pg_channel_gsm_workthread(void *data)
 				}
 				// adjust gainin
 				if (ch_gsm->flags.gainin) {
-					if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CVLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 1, ((ch_gsm->config.gainin * 10000) / 100) - 5000);
-						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 					} else {
 						pg_atcommand_queue_append(ch_gsm, AT_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", ch_gsm->config.gainin);
 					}
@@ -15503,10 +15510,10 @@ static void *pg_channel_gsm_workthread(void *data)
 						pg_atcommand_queue_append(ch_gsm, AT_SIM300_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM900) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM900_CMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "0,%d", ch_gsm->config.gainout);
-					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) {
+					} else if ((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215) || (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM5215A2)) {
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CTXVOL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", (ch_gsm->config.gainout * 65535) / 15);
-						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 0);
+						pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CLVL, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 					} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 						pg_atcommand_queue_append(ch_gsm, AT_M10_QMIC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1,%d", ch_gsm->config.gainout);
 					}
