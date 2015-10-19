@@ -39,6 +39,7 @@
 #include "asterisk/musiconhold.h"
 #include "asterisk/paths.h"
 #include "asterisk/pbx.h"
+#include "asterisk/app.h"
 
 #include "polygator/polygator-base.h"
 
@@ -1062,6 +1063,7 @@ static void pg_atexit(void);
 static int pg_atexit_registered = 0;
 static int pg_cli_registered = 0;
 static int pg_man_registered = 0;
+static int pg_app_registered = 0;
 static int pg_gsm_tech_neededed = 0;
 static int pg_gsm_tech_registered = 0;
 static int pg_fxs_tech_neededed = 0;
@@ -5293,6 +5295,186 @@ static inline void pg_channel_fxo_put_call(struct pg_channel_fxo *ch_fxo, struct
 //------------------------------------------------------------------------------
 // end of pg_channel_fxo_put_call()
 //------------------------------------------------------------------------------
+
+// ========================= application handlers ==============================
+
+static char *app_pgsmssend = "PgSmsSend";
+static char *app_pgsmssend_synopsys = "PgSmsSend";
+static char *app_pgsmssend_description = "PgSmsSend";
+
+//------------------------------------------------------------------------------
+// pg_smssend_exec()
+//------------------------------------------------------------------------------
+#if ASTERISK_VERSION_NUMBER < 10800
+static int pg_smssend_exec(struct ast_channel *ast, void *data)
+#else
+static int pg_smssend_exec(struct ast_channel *ast, const char *data)
+#endif
+{
+	char *parse;
+	AST_DECLARE_APP_ARGS(smssend_args,
+		AST_APP_ARG(queue);
+		AST_APP_ARG(destination);
+		AST_APP_ARG(content);
+		AST_APP_ARG(flash);
+	);
+
+	char flash[16];
+
+	char *str0;
+	struct sqlite3_stmt *sql0;
+	int res;
+	int row;
+
+	struct timeval time_data;
+
+	char hsec[24];
+	char husec[8];
+	char hash[32];
+	struct MD5Context Md5Ctx;
+	unsigned char hashbin[16];
+
+	struct pg_channel_gsm *ch_gsm;
+
+	if (!data) {
+		ast_log(LOG_ERROR, "Require arguments (queue, destination, content[, flash])\n");
+		pbx_builtin_setvar_helper(ast, "PGSMSREASON", "required arguments not presented");
+		pbx_builtin_setvar_helper(ast, "PGSMSSTATUS", "FAIL");
+		return 0;
+	}
+	parse = ast_strdupa(data);
+	AST_STANDARD_APP_ARGS(smssend_args, parse);
+	if (smssend_args.argc < 3) {
+		ast_log(LOG_ERROR, "Require arguments (queue, destination, content[, flash])\n");
+		pbx_builtin_setvar_helper(ast, "PGSMSREASON", "required arguments not presented");
+		pbx_builtin_setvar_helper(ast, "PGSMSSTATUS", "FAIL");
+		return 0;
+	}
+	// skip leading SPACE
+	while ((*smssend_args.queue == SP) || (*smssend_args.queue == TAB)) {
+		smssend_args.queue++;
+	}
+	while ((*smssend_args.destination == SP) || (*smssend_args.destination == TAB)) {
+		smssend_args.destination++;
+	}
+	while ((*smssend_args.content == SP) || (*smssend_args.content == TAB)) {
+		smssend_args.content++;
+	}
+	if (smssend_args.flash) {
+		while ((*smssend_args.flash == SP) || (*smssend_args.flash == TAB)) {
+			smssend_args.flash++;
+		}
+	}
+
+	// check for default flash value
+	ast_copy_string(flash, S_OR(smssend_args.flash, "no"), 16);
+
+	// check address
+	if (!is_address_string(smssend_args.destination)) {
+		ast_log(LOG_ERROR, "Required ISDN numbering plan address\n");
+		pbx_builtin_setvar_helper(ast, "PGSMSREASON", "required arguments not presented");
+		pbx_builtin_setvar_helper(ast, "PGSMSSTATUS", "FAIL");
+		return 0;
+	}
+
+	// get current time
+	gettimeofday(&time_data, NULL);
+	sprintf(hsec, "%ld", time_data.tv_sec);
+	sprintf(husec, "%ld", time_data.tv_usec);
+
+	MD5Init(&Md5Ctx);
+	MD5Update(&Md5Ctx, (unsigned char *)smssend_args.queue, strlen(smssend_args.queue));
+	MD5Update(&Md5Ctx, (unsigned char *)smssend_args.destination, strlen(smssend_args.destination));
+	MD5Update(&Md5Ctx, (unsigned char *)smssend_args.content, strlen(smssend_args.content));
+	MD5Update(&Md5Ctx, (unsigned char *)hsec, strlen(hsec));
+	MD5Update(&Md5Ctx, (unsigned char *)husec, strlen(husec));
+	MD5Final(hashbin, &Md5Ctx);
+	res = 0;
+	for (row = 0; row < 16; row++) {
+		res += sprintf(hash + res, "%02x", (unsigned char)hashbin[row]);
+	}
+
+	// get channel by name
+	ch_gsm = pg_get_channel_gsm_by_name(smssend_args.queue);
+	if (!ch_gsm) {
+		ast_log(LOG_ERROR, "Required queue=\"%s\" not found\n", smssend_args.queue);
+		pbx_builtin_setvar_helper(ast, "PGSMSREASON", "required queue not found");
+		pbx_builtin_setvar_helper(ast, "PGSMSSTATUS", "FAIL");
+		return 0;
+	}
+
+	// enqueue new message into outbox queue
+	if (ch_gsm->iccid) {
+		ast_mutex_lock(&pg_sms_db_lock);
+		str0 = sqlite3_mprintf("INSERT INTO '%q-outbox' ("
+							"destination, " // TEXT
+							"content, " // TEXT
+							"flash, " // INTEGER
+							"enqueued, " // INTEGER
+							"hash" // VARCHAR(32) UNIQUE
+							") VALUES ("
+							"'%q', " // destination TEXT
+							"'%q', " // content TEXT
+							"%d, " // flash INTEGER
+							"%ld, " // enqueued INTEGER
+							"'%q');", // hash  VARCHAR(32) UNIQUE
+							ch_gsm->iccid,
+							smssend_args.destination, // destination TEXT
+							smssend_args.content, // content TEXT
+							-ast_true(flash), // flash TEXT
+							time_data.tv_sec, // enqueued INTEGER
+							hash); // hash  VARCHAR(32) UNIQUE		
+		while (1) {
+			res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
+			if (res == SQLITE_OK) {
+				row = 0;
+				while (1) {
+					res = sqlite3_step(sql0);
+					if (res == SQLITE_ROW) {
+						row++;
+					} else if (res == SQLITE_DONE) {
+						break;
+					} else if (res == SQLITE_BUSY) {
+						ast_mutex_unlock(&pg_sms_db_lock);
+						usleep(1000);
+						ast_mutex_lock(&pg_sms_db_lock);
+						continue;
+					} else {
+						ast_log(LOG_ERROR, "sqlite3_step(): %d: %s\n", res, sqlite3_errmsg(pg_sms_db));
+						pbx_builtin_setvar_helper(ast, "PGSMSREASON", "eggsm internal error");
+						pbx_builtin_setvar_helper(ast, "PGSMSSTATUS", "FAIL");
+						break;
+					}
+				}
+				sqlite3_finalize(sql0);
+				break;
+			} else if (res == SQLITE_BUSY) {
+				ast_mutex_unlock(&pg_sms_db_lock);
+				usleep(1000);
+				ast_mutex_lock(&pg_sms_db_lock);
+				continue;
+			} else {
+				ast_log(LOG_ERROR, "sqlite3_prepare_fun(): %d: %s\n", res, sqlite3_errmsg(pg_sms_db));
+				pbx_builtin_setvar_helper(ast, "PGSMSREASON", "eggsm internal error");
+				pbx_builtin_setvar_helper(ast, "PGSMSSTATUS", "FAIL");
+				break;
+			}
+		}
+		sqlite3_free(str0);
+		ast_mutex_unlock(&pg_sms_db_lock);
+	} else {
+		ast_log(LOG_ERROR, "SMS queue=\"%s\" not ready\n", smssend_args.queue);
+		pbx_builtin_setvar_helper(ast, "PGSMSREASON", "eggsm internal error");
+		pbx_builtin_setvar_helper(ast, "PGSMSSTATUS", "FAIL");
+	}
+
+	return 0;
+}
+//------------------------------------------------------------------------------
+// end of pg_smssend_exec()
+//------------------------------------------------------------------------------
+
+// ========================= application handlers ==============================
 
 //------------------------------------------------------------------------------
 // pg_atcommand_insert_spacer()
@@ -23645,20 +23827,25 @@ static char *pg_cli_generate_complete_sms_group(const char *begin, int count)
 		res = ast_strdup("sim");
 #endif
 	// sent storage
-	if ((!res) && (!strncmp(begin, "sent", beginlen)) && (++which > count))
+	if ((!res) && (!strncmp(begin, "sent", beginlen)) && (++which > count)) {
 		res = ast_strdup("sent");
+	}
 	// outbox storage
-	if ((!res) && (!strncmp(begin, "outbox", beginlen)) && (++which > count))
+	if ((!res) && (!strncmp(begin, "outbox", beginlen)) && (++which > count)) {
 		res = ast_strdup("outbox");
+	}
 	// inbox storage
-	if ((!res) && (!strncmp(begin, "inbox", beginlen)) && (++which > count))
+	if ((!res) && (!strncmp(begin, "inbox", beginlen)) && (++which > count)) {
 		res = ast_strdup("inbox");
+	}
 	// discard storage
-	if ((!res) && (!strncmp(begin, "discard", beginlen)) && (++which > count))
+	if ((!res) && (!strncmp(begin, "discard", beginlen)) && (++which > count)) {
 		res = ast_strdup("discard");
+	}
 	// new message
-	if ((!res) && (!strncmp(begin, "new", beginlen)) && (++which > count))
+	if ((!res) && (!strncmp(begin, "new", beginlen)) && (++which > count)) {
 		res = ast_strdup("new");
+	}
 
 	return res;
 }
@@ -30176,10 +30363,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 				ast_cli(a->fd, "  unknown operation \"%s\" in discard\n", a->argv[6]);
 			}
 		}
-	} // end of discard
-
-	// new
-	else if (!strcmp(a->argv[5], "new")) {
+	} else if (!strcmp(a->argv[5], "new")) { // new
 		// check for destination present
 		if (a->argv[6]) {
 			if (a->argv[7]) {
@@ -30264,10 +30448,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 		} else {
 			ast_cli(a->fd, "Usage: polygator channel gsm <alias> sms new <destination> [<content>]\n");
 		}
-	} // end of new
-
-	// unknown
-	else {
+	} else { // unknown
 		ast_cli(a->fd, "  unknown message group \"%s\"\n", a->argv[5]);
 	}
 
@@ -32495,6 +32676,12 @@ static void pg_cleanup(void)
 
 	ast_mutex_lock(&pg_lock);
 
+	// unregistering Polygator Applications
+	if (pg_app_registered) {
+		ast_unregister_application(app_pgsmssend);
+		ast_verbose("%s: Applications unregistered\n", AST_MODULE);
+	}
+
 	// unregistering Polygator Manager commands
 	if (pg_man_registered) {
 		ast_manager_unregister("PolygatorShowGSMNetInfo");
@@ -33830,8 +34017,14 @@ static int pg_load(void)
 	ast_verbose("%s: Manager commands registered\n", AST_MODULE);
 	pg_man_registered = 1;
 
+	ast_register_application(app_pgsmssend, pg_smssend_exec, app_pgsmssend_synopsys, app_pgsmssend_description);
+	ast_verbose("%s: Applications registered\n", AST_MODULE);
+	pg_app_registered = 1;
+
 	// destroy configuration environments
-	if (ast_cfg) ast_config_destroy(ast_cfg);
+	if (ast_cfg) {
+		ast_config_destroy(ast_cfg);
+	}
 
 	ast_verbose("%s: module loaded successfull\n", AST_MODULE);
 	ast_mutex_unlock(&pg_lock);
