@@ -14951,13 +14951,11 @@ static void *pg_channel_gsm_workthread(void *data)
 											o2p_msghash, // hash VARCHAR(32)
 											o2p_msgflash, // flash INTEGER
 											curr->ud); // content TEXT
-								while (1)
-								{
+								while (1) {
 									res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 									if (res == SQLITE_OK) {
 										row = 0;
-										while (1)
-										{
+										while (1) {
 											res = sqlite3_step(sql0);
 											if (res == SQLITE_ROW)
 												row++;
@@ -15331,7 +15329,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				goto pg_channel_gsm_workthread_end;
 			}
 			ast_mutex_unlock(&ch_gsm->lock);
-			usleep(1999999);
+			usleep((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) ? 700000 : 2000000);
 			ast_mutex_lock(&ch_gsm->lock);
 			// key release
 			if (pg_channel_gsm_key_press(ch_gsm, 0) < 0) {
@@ -15381,7 +15379,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				goto pg_channel_gsm_workthread_end;
 			}
 			ast_mutex_unlock(&ch_gsm->lock);
-			usleep(1999999);
+			usleep((ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) ? 700000 : 2000000);
 			ast_mutex_lock(&ch_gsm->lock);
 			// key release
 			if (pg_channel_gsm_key_press(ch_gsm, 0) < 0) {
@@ -15484,7 +15482,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						goto pg_channel_gsm_workthread_end;
 					}
 					ast_mutex_unlock(&ch_gsm->lock);
-					usleep(1999999);
+					usleep(2000000);
 					ast_mutex_lock(&ch_gsm->lock);
 					// key release
 					if (pg_channel_gsm_key_press(ch_gsm, 0) < 0) {
@@ -15950,6 +15948,7 @@ static void *pg_vinetic_workthread(void *data)
 					vin->state = PG_VINETIC_STATE_IDLE;
 					break;
 				}
+				usleep(5000);
 				// reset rdyq
 				if (vin_reset_rdyq(&vin->context) < 0) {
 					while (vin_message_stack_check_line(&vin->context)) {

@@ -4,7 +4,7 @@
 AC_PREREQ([2.60])
 
 # set project attribute
-AC_INIT([chan-polygator], [1.7.7])
+AC_INIT([chan-polygator], [1.7.8])
 
 # init automake
 AM_INIT_AUTOMAKE([-Wall -Werror])
@@ -27,7 +27,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([chan_polygator.c])
 
 AC_COPYRIGHT("Polygator")
-AC_REVISION(1.7.7)
+AC_REVISION(1.7.8)
 
 # prepare autoconfig header data
 AC_CONFIG_HEADER([autoconfig.h])
@@ -83,7 +83,7 @@ AC_ARG_WITH([asterisk], AC_HELP_STRING([--with-asterisk=PATH],[use asterisk file
 
 # Checks for packages.
 # Checks for required polygator-linux version.
-PG_POLYGATOR_LINUX_VERSION_PREREQ([1.1.8])
+PG_POLYGATOR_LINUX_VERSION_PREREQ([1.4.0])
 
 # Checks for required libvinetic version.
 PG_LIBVINETIC_VERSION_PREREQ([1.1.4])
