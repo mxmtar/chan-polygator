@@ -14,8 +14,7 @@
 #include "strutil.h"
 
 #include "sms.h"
-
-//------------------------------------------------------------------------------
+#if 0
 static const unsigned short gsm_to_unicode_le[128] = {
 	// 000xxxx
 	0x0040,		// @ - 00
@@ -154,7 +153,7 @@ static const unsigned short gsm_to_unicode_le[128] = {
 	0x00FC,		// ü - 7E
 	0x00E0,		// à - 7F
 };
-//------------------------------------------------------------------------------
+#else
 static const unsigned short gsm_to_unicode_be[128] = {
 	// 000xxxx
 	0x4000,		// @ - 00
@@ -293,8 +292,9 @@ static const unsigned short gsm_to_unicode_be[128] = {
 	0xFC00,		// ü - 7E
 	0xE000,		// à - 7F
 };
+#endif
+
 #define UCS2_UNKNOWN_SYMBOL 0x3F00
-//------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
 // pdu_parser()

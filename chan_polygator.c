@@ -40,6 +40,9 @@
 #include "asterisk/paths.h"
 #include "asterisk/pbx.h"
 #include "asterisk/app.h"
+#if ASTERISK_VERSION_NUMBER >= 130000
+#include "asterisk/format_cache.h"
+#endif
 
 #include "polygator/polygator-base.h"
 
@@ -296,7 +299,9 @@ struct pg_channel_rtp {
 
 	int event_is_now_recv;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	struct ast_format *format;
+#elif ASTERISK_VERSION_NUMBER >= 100000
 	struct ast_format format;
 #elif ASTERISK_VERSION_NUMBER >= 10800
 	format_t format;
@@ -935,7 +940,9 @@ struct pg_channel_fxo {
 static int pg_xxx_write(struct ast_channel *ast_ch, struct ast_frame *frame);
 static struct ast_frame *pg_xxx_read(struct ast_channel *ast_ch);
 
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *cap, const struct ast_assigned_ids *assignedids, const struct ast_channel *requestor, const char *data, int *cause);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *cap, const struct ast_channel *requestor, const char *data, int *cause);
 #elif ASTERISK_VERSION_NUMBER >= 100000
 static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *cap, const struct ast_channel *requestor, void *data, int *cause);
@@ -956,7 +963,9 @@ static int pg_gsm_fixup(struct ast_channel *oldchan, struct ast_channel *newchan
 static int pg_gsm_dtmf_start(struct ast_channel *ast_ch, char digit);
 static int pg_gsm_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int duration);
 
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+static struct ast_channel *pg_fxs_requester(const char *type, struct ast_format_cap *cap, const struct ast_assigned_ids *assignedids, const struct ast_channel *requestor, const char *data, int *cause);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 static struct ast_channel *pg_fxs_requester(const char *type, struct ast_format_cap *cap, const struct ast_channel *requestor, const char *data, int *cause);
 #elif ASTERISK_VERSION_NUMBER >= 100000
 static struct ast_channel *pg_fxs_requester(const char *type, struct ast_format_cap *cap, const struct ast_channel *requestor, void *data, int *cause);
@@ -977,7 +986,9 @@ static int pg_fxs_fixup(struct ast_channel *oldchan, struct ast_channel *newchan
 static int pg_fxs_dtmf_start(struct ast_channel *ast_ch, char digit);
 static int pg_fxs_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int duration);
 
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+static struct ast_channel *pg_fxo_requester(const char *type, struct ast_format_cap *cap, const struct ast_assigned_ids *assignedids, const struct ast_channel *requestor, const char *data, int *cause);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 static struct ast_channel *pg_fxo_requester(const char *type, struct ast_format_cap *cap, const struct ast_channel *requestor, const char *data, int *cause);
 #elif ASTERISK_VERSION_NUMBER >= 100000
 static struct ast_channel *pg_fxo_requester(const char *type, struct ast_format_cap *cap, const struct ast_channel *requestor, void *data, int *cause);
@@ -1511,13 +1522,13 @@ static int pg_cli_generating_prepare(char *s, int *argc, char *argv[])
 	int escaped = 0;
 	int whitespace = 1;
 
-	if (s == NULL)	/* invalid, though! */
+	if (s == NULL) {	/* invalid, though! */
 		return -1;
+	}
 
 	cur = s;
 	/* scan the original string copying into cur when needed */
-	for (; *s ; s++)
-	{
+	for (; *s ; ++s) {
 		if (x >= AST_MAX_ARGS - 1) {
 			ast_log(LOG_WARNING, "Too many arguments, truncating at %s\n", s);
 			break;
@@ -1663,7 +1674,7 @@ static void pg_sim_db_table_create(ast_mutex_t *lock)
 			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -1694,7 +1705,7 @@ static void pg_sim_db_table_create(ast_mutex_t *lock)
 					while (1) {
 						res = sqlite3_step(sql1);
 						if (res == SQLITE_ROW) {
-							row++;
+							++row;
 						} else if (res == SQLITE_DONE) {
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -1869,7 +1880,7 @@ static void pg_set_pin_by_iccid(const char *iccid, const char *pin, ast_mutex_t 
 			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -1905,7 +1916,7 @@ static void pg_set_pin_by_iccid(const char *iccid, const char *pin, ast_mutex_t 
 				while (1) {
 					res = sqlite3_step(sql);
 					if (res == SQLITE_ROW) {
-						row++;
+						++row;
 					} else if (res == SQLITE_DONE) {
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -1940,7 +1951,7 @@ static void pg_set_pin_by_iccid(const char *iccid, const char *pin, ast_mutex_t 
 				while (1) {
 					res = sqlite3_step(sql);
 					if (res == SQLITE_ROW) {
-						row++;
+						++row;
 					} else if (res == SQLITE_DONE) {
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -1955,8 +1966,7 @@ static void pg_set_pin_by_iccid(const char *iccid, const char *pin, ast_mutex_t 
 				}
 				sqlite3_finalize(sql);
 				break;
-			}
-			else if (res == SQLITE_BUSY) {
+			} else if (res == SQLITE_BUSY) {
 				if (lock) ast_mutex_unlock(lock);
 				usleep(1000);
 				if (lock) ast_mutex_lock(lock);
@@ -1996,7 +2006,7 @@ static void pg_set_puk_by_iccid(const char *iccid, const char *puk, ast_mutex_t 
 			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2032,7 +2042,7 @@ static void pg_set_puk_by_iccid(const char *iccid, const char *puk, ast_mutex_t 
 				while (1) {
 					res = sqlite3_step(sql);
 					if (res == SQLITE_ROW) {
-						row++;
+						++row;
 					} else if (res == SQLITE_DONE) {
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -2067,7 +2077,7 @@ static void pg_set_puk_by_iccid(const char *iccid, const char *puk, ast_mutex_t 
 				while (1) {
 					res = sqlite3_step(sql);
 					if (res == SQLITE_ROW) {
-						row++;
+						++row;
 					} else if (res == SQLITE_DONE) {
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -2122,7 +2132,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2165,7 +2175,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 					while (1) {
 						res = sqlite3_step(sql1);
 						if (res == SQLITE_ROW) {
-							row++;
+							++row;
 						} else if (res == SQLITE_DONE) {
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -2208,7 +2218,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2244,7 +2254,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 					while (1) {
 						res = sqlite3_step(sql1);
 						if (res == SQLITE_ROW) {
-							row++;
+							++row;
 						} else if (res == SQLITE_DONE) {
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -2287,7 +2297,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2335,7 +2345,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 					while (1) {
 						res = sqlite3_step(sql1);
 						if (res == SQLITE_ROW) {
-							row++;
+							++row;
 						} else if (res == SQLITE_DONE) {
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -2378,7 +2388,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2431,7 +2441,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 					while (1) {
 						res = sqlite3_step(sql1);
 						if (res == SQLITE_ROW) {
-							row++;
+							++row;
 						} else if (res == SQLITE_DONE) {
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -2474,7 +2484,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2511,7 +2521,7 @@ static void pg_sms_db_table_create(const char *iccid, ast_mutex_t *lock)
 					while (1) {
 						res = sqlite3_step(sql1);
 						if (res == SQLITE_ROW) {
-							row++;
+							++row;
 						} else if (res == SQLITE_DONE) {
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -2572,7 +2582,7 @@ static void pg_pcr_table_create(const char *imsi, ast_mutex_t *lock)
 			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2606,7 +2616,7 @@ static void pg_pcr_table_create(const char *imsi, ast_mutex_t *lock)
 					while (1) {
 						res = sqlite3_step(sql1);
 						if (res == SQLITE_ROW) {
-							row++;
+							++row;
 						} else if (res == SQLITE_DONE) {
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -2668,7 +2678,7 @@ static void pg_pcr_table_update(const char *imsi, struct address *from, struct a
 			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2704,7 +2714,7 @@ static void pg_pcr_table_update(const char *imsi, struct address *from, struct a
 			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2758,7 +2768,7 @@ static void pg_pcr_table_delete(const char *imsi, struct address *from, ast_mute
 			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2818,7 +2828,7 @@ static struct address *pg_pcr_table_get_match_record(const char *imsi, struct ad
 		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
-				row++;
+				++row;
 				testaddr.type.full = sqlite3_column_int(sql0, 0);
 				ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql0, 1), MAX_ADDRESS_LENGTH);
 				if (is_address_equal(&testaddr, from)) {
@@ -2874,7 +2884,7 @@ static void pg_dcr_table_create(const char *imsi, ast_mutex_t *lock)
 			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -2909,7 +2919,7 @@ static void pg_dcr_table_create(const char *imsi, ast_mutex_t *lock)
 					while (1) {
 						res = sqlite3_step(sql1);
 						if (res == SQLITE_ROW) {
-							row++;
+							++row;
 						} else if (res == SQLITE_DONE) {
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -2972,7 +2982,7 @@ static void pg_dcr_table_update(const char *imsi, struct address *from, struct a
 			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -3010,7 +3020,7 @@ static void pg_dcr_table_update(const char *imsi, struct address *from, struct a
 			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -3070,7 +3080,7 @@ static struct address *pg_xcr_table_get_match_record(const char *imsi, struct ad
 		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
-				row++;
+				++row;
 				testaddr.type.full = sqlite3_column_int(sql0, 0);
 				ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql0, 1), MAX_ADDRESS_LENGTH);
 				if (is_address_equal(&testaddr, from)) {
@@ -3108,7 +3118,7 @@ static struct address *pg_xcr_table_get_match_record(const char *imsi, struct ad
 		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
-				row++;
+				++row;
 				testaddr.type.full = sqlite3_column_int(sql0, 0);
 				ast_copy_string(testaddr.value, (char *)sqlite3_column_text(sql0, 1), MAX_ADDRESS_LENGTH);
 				if (is_address_equal(&testaddr, from)) {
@@ -3139,7 +3149,7 @@ static struct address *pg_xcr_table_get_match_record(const char *imsi, struct ad
 				while (1) {
 					res = sqlite3_step(sql1);
 					if (res == SQLITE_ROW) {
-						row++;
+						++row;
 					} else if (res == SQLITE_DONE) {
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -3191,7 +3201,7 @@ static void pg_cdr_table_create(ast_mutex_t *lock)
 			while (1) {
 				res = sqlite3_step(sql0);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -3233,7 +3243,7 @@ static void pg_cdr_table_create(ast_mutex_t *lock)
 					while (1) {
 						res = sqlite3_step(sql1);
 						if (res == SQLITE_ROW) {
-							row++;
+							++row;
 						} else if (res == SQLITE_DONE) {
 							break;
 						} else if (res == SQLITE_BUSY) {
@@ -3302,7 +3312,7 @@ static void pg_cdr_table_insert_record(const char *channel, const char *imsi, st
 			while (1) {
 				res = sqlite3_step(sql);
 				if (res == SQLITE_ROW) {
-					row++;
+					++row;
 				} else if (res == SQLITE_DONE) {
 					break;
 				} else if (res == SQLITE_BUSY) {
@@ -3361,7 +3371,7 @@ static int64_t pg_cdr_table_get_out_total_call_count(const char *key, const char
 		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
-				row++;
+				++row;
 				count = sqlite3_column_int64(sql0, 0);
 				break;
 			} else if (res == SQLITE_DONE) {
@@ -3416,7 +3426,7 @@ static int64_t pg_cdr_table_get_out_answered_call_count(const char *key, const c
 		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
-				row++;
+				++row;
 				count = sqlite3_column_int64(sql0, 0);
 				break;
 			} else if (res == SQLITE_DONE) {
@@ -3473,7 +3483,7 @@ static time_t pg_cdr_table_get_out_active_call_duration(const char *key, const c
 		while (1) {
 			res = sqlite3_step(sql0);
 			if (res == SQLITE_ROW) {
-				row++;
+				++row;
 				answer_time = sqlite3_column_int64(sql0, 0);
 				end_time = sqlite3_column_int64(sql0, 1);
 				duration += end_time - answer_time;
@@ -3826,7 +3836,7 @@ static int pg_gsm_module_type_get(const char *module_type)
 {
 	size_t i;
 	int res = POLYGATOR_MODULE_TYPE_UNKNOWN;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_gsm_module_types); i++) {
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_gsm_module_types); ++i) {
 		if (!strcasecmp(module_type, pg_gsm_module_types[i].name)) {
 			return pg_gsm_module_types[i].id;
 		}
@@ -3843,7 +3853,7 @@ static int pg_gsm_module_type_get(const char *module_type)
 static char *pg_gsm_module_type_to_string(unsigned int type)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_gsm_module_types); i++) {
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_gsm_module_types); ++i) {
 		if (type == pg_gsm_module_types[i].id) {
 			return pg_gsm_module_types[i].name;
 		}
@@ -3887,7 +3897,7 @@ static int pg_get_callwait_state(const char *callwait)
 	size_t i;
 	int cwt = PG_CALLWAIT_STATE_UNKNOWN;
 	if (callwait) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_callwait_states); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_callwait_states); ++i) {
 			if (!strcmp(callwait, pg_callwait_states[i].name)) {
 				cwt = pg_callwait_states[i].id;
 				break;
@@ -3906,7 +3916,7 @@ static int pg_get_callwait_state(const char *callwait)
 static char *pg_callwait_state_to_string(int state)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_callwait_states); i++) {
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_callwait_states); ++i) {
 		if (state == pg_callwait_states[i].id) {
 			return pg_callwait_states[i].name;
 		}
@@ -3925,7 +3935,7 @@ static int pg_get_clir_state(const char *clir)
 	size_t i;
 	int clr = PG_CLIR_STATE_UNKNOWN;
 	if (clir) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_clir_states); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_clir_states); ++i) {
 			if (!strcmp(clir, pg_clir_states[i].name)) {
 				clr = pg_clir_states[i].id;
 				break;
@@ -3944,7 +3954,7 @@ static int pg_get_clir_state(const char *clir)
 static char *pg_clir_state_to_string(int state)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_clir_states); i++) {
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_clir_states); ++i) {
 		if (state == pg_clir_states[i].id) {
 			return pg_clir_states[i].name;
 		}
@@ -4016,7 +4026,7 @@ static int pg_get_channel_gsm_param(const char *param)
 	size_t i;
 	int prm = PG_CHANNEL_GSM_PARAM_UNKNOWN;
 	if (param) {
-		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_gsm_params); i++) {
+		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_gsm_params); ++i) {
 			if (!strcmp(param, pg_channel_gsm_params[i].name)) {
 				prm = pg_channel_gsm_params[i].id;
 				break;
@@ -4046,7 +4056,7 @@ static int pg_channel_gsm_is_operation_param_valid(const char *channel, const ch
 			all = pg_get_channel_param_operation(operation);
 		}
 		if (single || all) {
-			for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_gsm_params); i++) {
+			for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_gsm_params); ++i) {
 				if ((!strcmp(param, pg_channel_gsm_params[i].name)) && ((single & pg_channel_gsm_params[i].single) || (all & pg_channel_gsm_params[i].all))) {
 					res = 1;
 					break;
@@ -4068,7 +4078,7 @@ static int pg_get_channel_fxs_param(const char *param)
 	size_t i;
 	int prm = PG_CHANNEL_FXS_PARAM_UNKNOWN;
 	if (param) {
-		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxs_params); i++) {
+		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxs_params); ++i) {
 			if (!strcmp(param, pg_channel_fxs_params[i].name)) {
 				prm = pg_channel_fxs_params[i].id;
 				break;
@@ -4098,7 +4108,7 @@ static int pg_channel_fxs_is_operation_param_valid(const char *channel, const ch
 			all = pg_get_channel_param_operation(operation);
 		}
 		if (single || all) {
-			for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxs_params); i++) {
+			for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxs_params); ++i) {
 				if ((!strcmp(param, pg_channel_fxs_params[i].name)) && ((single & pg_channel_fxs_params[i].single) || (all & pg_channel_fxs_params[i].all))) {
 					res = 1;
 					break;
@@ -4120,7 +4130,7 @@ static int pg_get_channel_fxo_param(const char *param)
 	size_t i;
 	int prm = PG_CHANNEL_FXS_PARAM_UNKNOWN;
 	if (param) {
-		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxo_params); i++) {
+		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxo_params); ++i) {
 			if (!strcmp(param, pg_channel_fxo_params[i].name)) {
 				prm = pg_channel_fxo_params[i].id;
 				break;
@@ -4150,7 +4160,7 @@ static int pg_channel_fxo_is_operation_param_valid(const char *channel, const ch
 			all = pg_get_channel_param_operation(operation);
 		}
 		if (single || all) {
-			for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxo_params); i++) {
+			for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxo_params); ++i) {
 				if ((!strcmp(param, pg_channel_fxo_params[i].name)) && ((single & pg_channel_fxo_params[i].single) || (all & pg_channel_fxo_params[i].all))) {
 					res = 1;
 					break;
@@ -4172,7 +4182,7 @@ static int pg_get_channel_gsm_debug_param(const char *debug)
 	size_t i;
 	int prm = PG_CHANNEL_GSM_DEBUG_UNKNOWN;
 	if (debug) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_channel_gsm_debugs); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_channel_gsm_debugs); ++i) {
 			if (!strcmp(debug, pg_channel_gsm_debugs[i].name)) {
 				prm = pg_channel_gsm_debugs[i].id;
 				break;
@@ -4193,7 +4203,7 @@ static int pg_get_gsm_call_progress(const char *progress)
 	size_t i;
 	int prg = PG_GSM_CALL_PROGRESS_TYPE_UNKNOWN;
 	if (progress) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_progress_types); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_progress_types); ++i) {
 			if (!strcmp(progress, pg_call_gsm_progress_types[i].name)) {
 				prg = pg_call_gsm_progress_types[i].id;
 				break;
@@ -4212,7 +4222,7 @@ static int pg_get_gsm_call_progress(const char *progress)
 static char *pg_call_gsm_progress_to_string(int progress)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_progress_types); i++) {
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_progress_types); ++i) {
 		if (progress == pg_call_gsm_progress_types[i].id) {
 			return pg_call_gsm_progress_types[i].name;
 		}
@@ -4231,7 +4241,7 @@ static int pg_call_get_incoming_type(const char *incoming)
 	size_t i;
 	int inc = PG_CALL_INCOMING_TYPE_UNKNOWN;
 	if (incoming) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); ++i) {
 			if (!strcmp(incoming, pg_call_incoming_types[i].name)) {
 				inc = pg_call_incoming_types[i].id;
 				break;
@@ -4250,7 +4260,7 @@ static int pg_call_get_incoming_type(const char *incoming)
 static char *pg_call_incoming_type_to_string(int incoming)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); i++) {
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); ++i) {
 		if (incoming == pg_call_incoming_types[i].id) {
 			return pg_call_incoming_types[i].name;
 		}
@@ -4269,7 +4279,7 @@ static int pg_call_get_dialing_type(const char *dialing)
 	size_t i;
 	int inc = PG_CALL_DIALING_TYPE_UNKNOWN;
 	if (dialing) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_dialing_types); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_dialing_types); ++i) {
 			if (!strcmp(dialing, pg_call_dialing_types[i].name)) {
 				inc = pg_call_dialing_types[i].id;
 				break;
@@ -4288,7 +4298,7 @@ static int pg_call_get_dialing_type(const char *dialing)
 static char *pg_call_dialing_type_to_string(int dialing)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_dialing_types); i++) {
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_dialing_types); ++i) {
 		if (dialing == pg_call_dialing_types[i].id) {
 			return pg_call_dialing_types[i].name;
 		}
@@ -4307,7 +4317,7 @@ static int pg_get_call_permission(const char *outgoing)
 	size_t i;
 	int out = PG_CALL_PERMISSION_UNKNOWN;
 	if (outgoing) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); ++i) {
 			if (!strcmp(outgoing, pg_call_permissions[i].name)) {
 				out = pg_call_permissions[i].id;
 				break;
@@ -4326,7 +4336,7 @@ static int pg_get_call_permission(const char *outgoing)
 static char *pg_call_permission_to_string(int outgoing)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); ++i) {
 		if (outgoing == pg_call_permissions[i].id) {
 			return pg_call_permissions[i].name;
 		}
@@ -4346,7 +4356,7 @@ static int pg_vinetic_get_ali_nelec_nlpm(const char *mode)
 	size_t i;
 	int out = -1;
 	if (mode) {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); ++i) {
 			if (!strcmp(mode, pg_vinetic_ali_nelec_nlpms[i].name)) {
 				out = pg_vinetic_ali_nelec_nlpms[i].id;
 				break;
@@ -4365,7 +4375,7 @@ static int pg_vinetic_get_ali_nelec_nlpm(const char *mode)
 static char *pg_vinetic_ali_nelec_nlpm_to_string(int mode)
 {
 	size_t i;
-	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
+	for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); ++i) {
 		if (mode == pg_vinetic_ali_nelec_nlpms[i].id) {
 			return pg_vinetic_ali_nelec_nlpms[i].name;
 		}
@@ -5431,7 +5441,7 @@ static int pg_smssend_exec(struct ast_channel *ast, const char *data)
 				while (1) {
 					res = sqlite3_step(sql0);
 					if (res == SQLITE_ROW) {
-						row++;
+						++row;
 					} else if (res == SQLITE_DONE) {
 						break;
 					} else if (res == SQLITE_BUSY) {
@@ -5548,7 +5558,7 @@ static int pg_smsgetbyid_exec(struct ast_channel *ast, const char *data)
 				while (1) {
 					res = sqlite3_step(sql0);
 					if (res == SQLITE_ROW) {
-						row++;
+						++row;
 						part++;
 						partof = sqlite3_column_int(sql0, 2);
 						// missed text mark
@@ -6213,7 +6223,6 @@ static int pg_channel_gsm_write_imei_sim300(struct pg_channel_gsm* ch_gsm, const
 		goto pg_channel_gsm_write_imei_sim300_end;
 	}
 
-	ch_gsm->imei[0] = '\0';
 	pg_printf(print_type, print_out, "GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
 
 	result = 0;
@@ -7008,7 +7017,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for erase 0x30
 	state = "wait for erase (0x30)";
 	x_timer_set_second(timer, 300);
-	while(is_x_timer_active(timer)) {
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -7117,7 +7126,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	}
 
 	// Write code page with IMEI
-	for (i=0; i<32; i++) {
+	for (i = 0; i < 32; ++i) {
 		// Set downloaded code section
 		action = "Set downloaded code section";
 		// write command
@@ -7450,7 +7459,7 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 	// wait for erase 0x30
 	state = "wait for erase (0x30)";
 	x_timer_set_second(timer, 300);
-	while(is_x_timer_active(timer)) {
+	while (is_x_timer_active(timer)) {
 		timeout.tv_sec = 1;
 		timeout.tv_usec = 0;
 		FD_ZERO(&fds);
@@ -7483,7 +7492,6 @@ static int pg_channel_gsm_write_imei_sim900(struct pg_channel_gsm* ch_gsm, const
 		goto pg_channel_gsm_write_imei_sim900_end;
 	}
 
-	ch_gsm->imei[0] = '\0';
 	pg_printf(print_type, print_out, "GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
 
 	result = 0;
@@ -7524,7 +7532,6 @@ static int pg_channel_gsm_write_imei_m10(struct pg_channel_gsm* ch_gsm, const ch
 
 	pg_atcommand_queue_append(ch_gsm, AT_M10_EGMR, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "1,7,\"%s\"", imei_buf);
 
-	ch_gsm->imei[0] = '\0';
 	pg_printf(print_type, print_out, "GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
 
 	return 0;
@@ -7544,7 +7551,6 @@ static int pg_channel_gsm_write_imei_sim5215(struct pg_channel_gsm* ch_gsm, cons
 
 	pg_atcommand_queue_append(ch_gsm, AT_SIM5215_SIMEI, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%s", imei_buf);
 
-	ch_gsm->imei[0] = '\0';
 	pg_printf(print_type, print_out, "GSM channel=\"%s\": IMEI write is completed\n", ch_gsm->alias);
 
 	return 0;
@@ -7622,7 +7628,13 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 
 		rtp->event_is_now_recv = 0;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (!(rtp->format = ast_format_cap_get_best_by_type(vin->capabilities, AST_MEDIA_TYPE_AUDIO))) {
+			ast_log(LOG_WARNING, "ast_format_cap_get_best_by_type() failed\n");
+			pg_put_channel_rtp(rtp);
+			return -1;
+		}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		if (!ast_best_codec(vin->capabilities, &rtp->format)) {
 			ast_log(LOG_WARNING, "ast_best_codec() failed\n");
 			pg_put_channel_rtp(rtp);
@@ -7636,6 +7648,37 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 		}
 #endif
 
+#if ASTERISK_VERSION_NUMBER >= 130000
+	if (ast_format_cmp(rtp->format, ast_format_g723)) {
+		/*! G.723.1 compression */
+		rtp->payload_type = RTP_PT_G723;
+		rtp->encoder_packet_time = VIN_PTE_30;
+		rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+	} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+		/*! Raw mu-law data (G.711) */
+		rtp->payload_type = RTP_PT_PCMU;
+		rtp->encoder_packet_time = VIN_PTE_20;
+		rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+	} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+		/*! Raw A-law data (G.711) */
+		rtp->payload_type = RTP_PT_PCMA;
+		rtp->encoder_packet_time = VIN_PTE_20;
+		rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+	} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+		/*! G.729A audio */
+		rtp->payload_type = RTP_PT_G729;
+		rtp->encoder_packet_time = VIN_PTE_20;
+		rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+	} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+		/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+		rtp->payload_type = 2;
+		rtp->encoder_packet_time = VIN_PTE_20;
+		rtp->encoder_algorithm = VIN_ENC_G726_32;
+	} else {
+		rtp->payload_type = -1;
+		ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+	}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 		switch (rtp->format.id) {
 #else
@@ -7680,8 +7723,11 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 #endif
 				break;
 		}
+#endif
 		if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -7771,14 +7817,16 @@ static int pg_channel_gsm_call_incoming(struct pg_channel_gsm *ch_gsm, struct pg
 			goto pg_channel_gsm_call_incoming_end;
 		}
 		// set DTMF receiver
-		vin_dtmf_receiver_set_as(&vin->context, ch_gsm->vinetic_sig_slot, VIN_OFF);
-		vin_dtmf_receiver_set_is(&vin->context, ch_gsm->vinetic_sig_slot, VIN_IS_SIGINA);
-		vin_dtmf_receiver_set_et(&vin->context, ch_gsm->vinetic_sig_slot, VIN_ACTIVE);
-		if ((res = vin_dtmf_receiver_enable(&vin->context, ch_gsm->vinetic_sig_slot)) < 0) {
-			while (vin_message_stack_check_line(&vin->context)) {
-				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+		if (ch_gsm->gsm_module_type != POLYGATOR_MODULE_TYPE_M10) {
+			vin_dtmf_receiver_set_as(&vin->context, ch_gsm->vinetic_sig_slot, VIN_OFF);
+			vin_dtmf_receiver_set_is(&vin->context, ch_gsm->vinetic_sig_slot, VIN_IS_SIGINA);
+			vin_dtmf_receiver_set_et(&vin->context, ch_gsm->vinetic_sig_slot, VIN_ACTIVE);
+			if ((res = vin_dtmf_receiver_enable(&vin->context, ch_gsm->vinetic_sig_slot)) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_channel_gsm_call_incoming_end;
 			}
-			goto pg_channel_gsm_call_incoming_end;
 		}
 		// set signaling channel RTP
 		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);
@@ -7850,7 +7898,7 @@ pg_channel_gsm_call_incoming_end:
 			ast_mutex_unlock(&vin->lock);
 		}
 	}
-	ch_gsm->channel_rtp_usage++;
+	++ch_gsm->channel_rtp_usage;
 	ch_gsm->channel_rtp = rtp;
 
 	// prevent deadlock while asterisk channel is allocating
@@ -7862,7 +7910,7 @@ pg_channel_gsm_call_incoming_end:
 	// allocation channel in pbx spool
 	sprintf(calling, "%s%s", (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
 	sprintf(called, "%s%s", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
-#if ASTERISK_VERSION_NUMBER < 10800
+#if ASTERISK_VERSION_NUMBER >= 130000
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_RING,			/* int state */
 								calling,				/* const char *cid_num */
@@ -7870,7 +7918,21 @@ pg_channel_gsm_call_incoming_end:
 								NULL,					/* const char *acctcode */
 								called,					/* const char *exten */
 								ch_gsm->config.call_context,	/* const char *context */
-								0,						/* const int amaflag */
+								NULL,					/* const struct ast_assigned_ids *assignedids */
+								NULL,					/* const struct ast_channel *requestor */
+								0,						/* enum ama_flags amaflag */
+								"PGGSM/%s-%08x",		/* const char *name_fmt, ... */
+								ch_gsm->alias, ch_id);
+#elif ASTERISK_VERSION_NUMBER >= 10800
+	ast_ch = ast_channel_alloc(1,						/* int needqueue */
+								AST_STATE_RING,			/* int state */
+								calling,				/* const char *cid_num */
+								calling,				/* const char *cid_name */
+								NULL,					/* const char *acctcode */
+								called,					/* const char *exten */
+								ch_gsm->config.call_context,	/* const char *context */
+								NULL,					/* const char *linkedid */
+								0,						/* int amaflag */
 								"PGGSM/%s-%08x",		/* const char *name_fmt, ... */
 								ch_gsm->alias, ch_id);
 #else
@@ -7881,8 +7943,7 @@ pg_channel_gsm_call_incoming_end:
 								NULL,					/* const char *acctcode */
 								called,					/* const char *exten */
 								ch_gsm->config.call_context,	/* const char *context */
-								NULL,					/* const char *linkedid */
-								0,						/* int amaflag */
+								0,						/* const int amaflag */
 								"PGGSM/%s-%08x",		/* const char *name_fmt, ... */
 								ch_gsm->alias, ch_id);
 #endif
@@ -7895,7 +7956,14 @@ pg_channel_gsm_call_incoming_end:
 	}
 
 	// init asterisk channel tag's
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	ast_channel_nativeformats_set(ast_ch, vin->capabilities);
+	ast_channel_set_rawreadformat(ast_ch, rtp->format);
+	ast_channel_set_rawwriteformat(ast_ch, rtp->format);
+	ast_channel_set_readformat(ast_ch, rtp->format);
+	ast_channel_set_writeformat(ast_ch, rtp->format);
+	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
@@ -7968,6 +8036,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 					pg_atcommand_queue_append(ch_gsm, AT_SIM5215_CSDVC, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d,%d", 2, 0);
 				} else if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_M10) {
 					pg_atcommand_queue_append(ch_gsm, AT_M10_QAUDCH, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
+					pg_atcommand_queue_append(ch_gsm, AT_M10_QTONEDET, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 				}
 				// Send ATD
 				pg_atcommand_insert_spacer(ch_gsm, 500);
@@ -8225,6 +8294,7 @@ static int pg_call_gsm_sm(struct pg_call* call, int message, int cause)
 				if (pg_channel_gsm_get_calls_count(ch_gsm) == 1) {
 					pg_atcommand_insert_spacer(ch_gsm, 500);
 					pg_atcommand_queue_prepend(ch_gsm, AT_A, AT_OPER_EXEC, 0, pg_at_response_timeout, 0, NULL);
+					pg_atcommand_queue_append(ch_gsm, AT_M10_QTONEDET, AT_OPER_WRITE, 0, pg_at_response_timeout, 0, "%d", 1);
 				}
 				// set new state
 				ast_setstate(call->owner, AST_STATE_UP);
@@ -8419,7 +8489,13 @@ static int pg_channel_fxs_call_outgoing(struct pg_channel_fxs *ch_fxs, struct pg
 
 		rtp->event_is_now_recv = 0;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (!(rtp->format = ast_format_cap_get_best_by_type(vin->capabilities, AST_MEDIA_TYPE_AUDIO))) {
+			ast_log(LOG_WARNING, "ast_format_cap_get_best_by_type() failed\n");
+			pg_put_channel_rtp(rtp);
+			return -1;
+		}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		if (!ast_best_codec(vin->capabilities, &rtp->format)) {
 			ast_log(LOG_WARNING, "ast_best_codec() failed\n");
 			pg_put_channel_rtp(rtp);
@@ -8432,7 +8508,37 @@ static int pg_channel_fxs_call_outgoing(struct pg_channel_fxs *ch_fxs, struct pg
 			return -1;
 		}
 #endif
-
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (ast_format_cmp(rtp->format, ast_format_g723)) {
+			/*! G.723.1 compression */
+			rtp->payload_type = RTP_PT_G723;
+			rtp->encoder_packet_time = VIN_PTE_30;
+			rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+		} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+			/*! Raw mu-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMU;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+			/*! Raw A-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMA;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+			/*! G.729A audio */
+			rtp->payload_type = RTP_PT_G729;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+		} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+			/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+			rtp->payload_type = 2;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G726_32;
+		} else {
+			rtp->payload_type = -1;
+			ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+		}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 		switch (rtp->format.id) {
 #else
@@ -8477,8 +8583,11 @@ static int pg_channel_fxs_call_outgoing(struct pg_channel_fxs *ch_fxs, struct pg
 #endif
 				break;
 		}
+#endif
 		if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -8602,7 +8711,20 @@ pg_channel_fxs_call_outgoing_end:
 	// allocation channel in pbx spool
 	sprintf(calling, "%s%s", (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
 	sprintf(called, "%s%s", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
-#if ASTERISK_VERSION_NUMBER < 10800
+#if ASTERISK_VERSION_NUMBER >= 130000
+		ast_ch = ast_channel_alloc(1,					/* int needqueue */
+								AST_STATE_RING,			/* int state */
+								calling,				/* const char *cid_num */
+								ch_fxs->config.cid_name,/* const char *cid_name */
+								NULL,					/* const char *acctcode */
+								called,					/* const char *exten */
+								ch_fxs->config.context,	/* const char *context */
+								NULL,					/* const struct ast_assigned_ids *assignedids */
+								NULL,					/* const struct ast_channel *requestor */
+								0,						/* enum ama_flags amaflag */
+								"PGFXS/%s-%08x",		/* const char *name_fmt, ... */
+								ch_fxs->alias, ch_id);
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_RING,			/* int state */
 								calling,				/* const char *cid_num */
@@ -8610,7 +8732,8 @@ pg_channel_fxs_call_outgoing_end:
 								NULL,					/* const char *acctcode */
 								called,					/* const char *exten */
 								ch_fxs->config.context,	/* const char *context */
-								0,						/* const int amaflag */
+								NULL,					/* const char *linkedid */
+								0,						/* int amaflag */
 								"PGFXS/%s-%08x",		/* const char *name_fmt, ... */
 								ch_fxs->alias, ch_id);
 #else
@@ -8621,8 +8744,7 @@ pg_channel_fxs_call_outgoing_end:
 								NULL,					/* const char *acctcode */
 								called,					/* const char *exten */
 								ch_fxs->config.context,	/* const char *context */
-								NULL,					/* const char *linkedid */
-								0,						/* int amaflag */
+								0,						/* const int amaflag */
 								"PGFXS/%s-%08x",		/* const char *name_fmt, ... */
 								ch_fxs->alias, ch_id);
 #endif
@@ -8635,7 +8757,14 @@ pg_channel_fxs_call_outgoing_end:
 	}
 
 	// init asterisk channel tag's
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	ast_channel_nativeformats_set(ast_ch, vin->capabilities);
+	ast_channel_set_rawreadformat(ast_ch, rtp->format);
+	ast_channel_set_rawwriteformat(ast_ch, rtp->format);
+	ast_channel_set_readformat(ast_ch, rtp->format);
+	ast_channel_set_writeformat(ast_ch, rtp->format);
+	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
@@ -8736,7 +8865,7 @@ unsigned int pg_call_fxs_build_cid(unsigned char *msg)
 	msg[22] = '6';
 	msg[23] = '7';
 
-	for (i = 0; i < 24; i++) {
+	for (i = 0; i < 24; ++i) {
 		sum += msg[i];
 	}
 
@@ -9168,7 +9297,13 @@ static int pg_channel_fxo_call_incoming(struct pg_channel_fxo *ch_fxo, struct pg
 
 		rtp->event_is_now_recv = 0;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (!(rtp->format = ast_format_cap_get_best_by_type(vin->capabilities, AST_MEDIA_TYPE_AUDIO))) {
+			ast_log(LOG_WARNING, "ast_format_cap_get_best_by_type() failed\n");
+			pg_put_channel_rtp(rtp);
+			return -1;
+		}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		if (!ast_best_codec(vin->capabilities, &rtp->format)) {
 			ast_log(LOG_WARNING, "ast_best_codec() failed\n");
 			pg_put_channel_rtp(rtp);
@@ -9181,7 +9316,37 @@ static int pg_channel_fxo_call_incoming(struct pg_channel_fxo *ch_fxo, struct pg
 			return -1;
 		}
 #endif
-
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (ast_format_cmp(rtp->format, ast_format_g723)) {
+			/*! G.723.1 compression */
+			rtp->payload_type = RTP_PT_G723;
+			rtp->encoder_packet_time = VIN_PTE_30;
+			rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+		} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+			/*! Raw mu-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMU;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+			/*! Raw A-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMA;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+			/*! G.729A audio */
+			rtp->payload_type = RTP_PT_G729;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+		} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+			/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+			rtp->payload_type = 2;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G726_32;
+		} else {
+			rtp->payload_type = -1;
+			ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+		}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 		switch (rtp->format.id) {
 #else
@@ -9226,8 +9391,11 @@ static int pg_channel_fxo_call_incoming(struct pg_channel_fxo *ch_fxo, struct pg
 #endif
 				break;
 		}
+#endif
 		if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -9413,7 +9581,21 @@ pg_channel_fxo_call_incoming_end:
 	// allocation channel in pbx spool
 	sprintf(calling, "%s%s", (call->calling_name.type.full == 145)?("+"):(""), call->calling_name.value);
 	sprintf(called, "%s%s", (call->called_name.type.full == 145)?("+"):(""), call->called_name.value);
-#if ASTERISK_VERSION_NUMBER < 10800
+#if ASTERISK_VERSION_NUMBER >= 130000
+		ast_ch = ast_channel_alloc(1,					/* int needqueue */
+								AST_STATE_RING,			/* int state */
+								calling,				/* const char *cid_num */
+								calling,				/* const char *cid_name */
+								NULL,					/* const char *acctcode */
+								called,					/* const char *exten */
+								ch_fxo->config.context,	/* const char *context */
+								NULL,					/* const struct ast_assigned_ids *assignedids */
+								NULL,					/* const struct ast_channel *requestor */
+								0,						/* enum ama_flags amaflag */
+								"PGFXO/%s-%08x",		/* const char *name_fmt, ... */
+								ch_fxo->alias, ch_id);
+
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_RING,			/* int state */
 								calling,				/* const char *cid_num */
@@ -9421,7 +9603,8 @@ pg_channel_fxo_call_incoming_end:
 								NULL,					/* const char *acctcode */
 								called,					/* const char *exten */
 								ch_fxo->config.context,	/* const char *context */
-								0,						/* const int amaflag */
+								NULL,					/* const char *linkedid */
+								0,						/* int amaflag */
 								"PGFXO/%s-%08x",		/* const char *name_fmt, ... */
 								ch_fxo->alias, ch_id);
 #else
@@ -9432,8 +9615,7 @@ pg_channel_fxo_call_incoming_end:
 								NULL,					/* const char *acctcode */
 								called,					/* const char *exten */
 								ch_fxo->config.context,	/* const char *context */
-								NULL,					/* const char *linkedid */
-								0,						/* int amaflag */
+								0,						/* const int amaflag */
 								"PGFXO/%s-%08x",		/* const char *name_fmt, ... */
 								ch_fxo->alias, ch_id);
 #endif
@@ -9446,7 +9628,14 @@ pg_channel_fxo_call_incoming_end:
 	}
 
 	// init asterisk channel tag's
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	ast_channel_nativeformats_set(ast_ch, vin->capabilities);
+	ast_channel_set_rawreadformat(ast_ch, rtp->format);
+	ast_channel_set_rawwriteformat(ast_ch, rtp->format);
+	ast_channel_set_readformat(ast_ch, rtp->format);
+	ast_channel_set_writeformat(ast_ch, rtp->format);
+	ast_verb(3, "FXO channel=\"%s\": selected codec \"%s\"\n", ch_fxo->alias, ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
@@ -9883,6 +10072,8 @@ static void *pg_channel_gsm_workthread(void *data)
 
 	struct pg_call *call = NULL;
 
+	struct ast_frame frame;
+
 	struct ast_channel *ast_ch_tmp = NULL;
 	
 	struct pg_trunk_gsm_channel_gsm_fold *ch_gsm_fold;
@@ -10073,11 +10264,14 @@ static void *pg_channel_gsm_workthread(void *data)
 					if ((r_char == '\r') || (r_char == '\n')) {
 						// check for data in received buffer
 						if (r_char == '\n') {
-							if (r_buf_len > 0)
+							if (r_buf_len > 0) {
 								r_buf_valid = 1;
-							else
+							} else {
 								r_buf_valid = 0;
-							if (!r_buf_active) r_buf_active = 1;
+							}
+							if (!r_buf_active) {
+								r_buf_active = 1;
+							}
 						}
 						// terminate end of received string
 						*r_cptr = '\0';
@@ -10086,7 +10280,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						if (ch_gsm->debug.at) {
 							ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
 							if (ch_gsm->debug.at_debug_fp) {
-								if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
+								if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL))) {
 									fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT SEND PDU - [%s]\n",
 															tm_ptr->tm_year + 1900,
 															tm_ptr->tm_mon+1,
@@ -10096,11 +10290,12 @@ static void *pg_channel_gsm_workthread(void *data)
 															tm_ptr->tm_sec,
 															curr_tv.tv_usec,
 															ch_gsm->pdu_send_buf);
-								else
+								} else {
 									fprintf(ch_gsm->debug.at_debug_fp, "[%ld.%06ld] AT SEND PDU - [%s]\n",
 															curr_tv.tv_sec,
 															curr_tv.tv_usec,
 															ch_gsm->pdu_send_buf);
+								}
 								fflush(ch_gsm->debug.at_debug_fp);
 								fclose(ch_gsm->debug.at_debug_fp);
 								ch_gsm->debug.at_debug_fp = NULL;
@@ -10163,7 +10358,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						if (ch_gsm->debug.receiver) {
 							ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
 							if (ch_gsm->debug.receiver_debug_fp) {
-								if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
+								if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL))) {
 									fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT [%.*s] timeout attempt %lu\n",
 															tm_ptr->tm_year + 1900,
 															tm_ptr->tm_mon+1,
@@ -10175,13 +10370,14 @@ static void *pg_channel_gsm_workthread(void *data)
 															ch_gsm->at_cmd->cmd_len - 1,
 				 											ch_gsm->at_cmd->cmd_buf,
 					 										(unsigned long int)ch_gsm->at_cmd->attempt);
-								else
+								} else {
 									fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%ld.%06ld] AT [%.*s] timeout attempt %lu\n",
 															curr_tv.tv_sec,
 															curr_tv.tv_usec,
 															ch_gsm->at_cmd->cmd_len - 1,
 				 											ch_gsm->at_cmd->cmd_buf,
 				 											(unsigned long int)ch_gsm->at_cmd->attempt);
+								}
 								fflush(ch_gsm->debug.receiver_debug_fp);
 								fclose(ch_gsm->debug.receiver_debug_fp);
 								ch_gsm->debug.receiver_debug_fp = NULL;
@@ -10190,7 +10386,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						if (ch_gsm->debug.at) {
 							ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
 							if (ch_gsm->debug.at_debug_fp) {
-								if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
+								if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL))) {
 									fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT [%.*s] timeout attempt %lu\n",
 															tm_ptr->tm_year + 1900,
 															tm_ptr->tm_mon+1,
@@ -10202,13 +10398,14 @@ static void *pg_channel_gsm_workthread(void *data)
 															ch_gsm->at_cmd->cmd_len - 1,
 				 											ch_gsm->at_cmd->cmd_buf,
 				 											(unsigned long int)ch_gsm->at_cmd->attempt);
-								else
+								} else {
 									fprintf(ch_gsm->debug.at_debug_fp, "[%ld.%06ld] AT [%.*s] timeout attempt %lu\n",
 															curr_tv.tv_sec,
 															curr_tv.tv_usec,
 															ch_gsm->at_cmd->cmd_len - 1,
 				 											ch_gsm->at_cmd->cmd_buf,
 					 										(unsigned long int)ch_gsm->at_cmd->attempt);
+								}
 								fflush(ch_gsm->debug.at_debug_fp);
 								fclose(ch_gsm->debug.at_debug_fp);
 								ch_gsm->debug.at_debug_fp = NULL;
@@ -10297,7 +10494,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				if (ch_gsm->debug.receiver) {
 					ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
 					if (ch_gsm->debug.receiver_debug_fp) {
-						if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
+						if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL))) {
 							fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT recv [%.*s] - [%s] - ",
 													tm_ptr->tm_year + 1900,
 													tm_ptr->tm_mon+1,
@@ -10309,13 +10506,14 @@ static void *pg_channel_gsm_workthread(void *data)
 													ch_gsm->at_cmd->cmd_len - 1,
 													ch_gsm->at_cmd->cmd_buf,
 													r_buf);
-						else
+						} else {
 							fprintf(ch_gsm->debug.receiver_debug_fp, "\n[%ld.%06ld] AT recv [%.*s] - [%s] - ",
 													curr_tv.tv_sec,
 													curr_tv.tv_usec,
 													ch_gsm->at_cmd->cmd_len - 1,
 													ch_gsm->at_cmd->cmd_buf,
 													r_buf);
+						}
 						fflush(ch_gsm->debug.receiver_debug_fp);
 						fclose(ch_gsm->debug.receiver_debug_fp);
 						ch_gsm->debug.receiver_debug_fp = NULL;
@@ -10324,7 +10522,7 @@ static void *pg_channel_gsm_workthread(void *data)
 				if (ch_gsm->debug.at) {
 					ch_gsm->debug.at_debug_fp = fopen(ch_gsm->debug.at_debug_path, "a+");
 					if (ch_gsm->debug.at_debug_fp) {
-						if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL)))
+						if ((tm_ptr = ast_localtime(&curr_tv, &tm_buf, NULL))) {
 							fprintf(ch_gsm->debug.at_debug_fp, "[%04d-%02d-%02d-%02d:%02d:%02d.%06ld] AT recv [%.*s] - [%s] - ",
 													tm_ptr->tm_year + 1900,
 													tm_ptr->tm_mon+1,
@@ -10336,13 +10534,14 @@ static void *pg_channel_gsm_workthread(void *data)
 													ch_gsm->at_cmd->cmd_len - 1,
 													ch_gsm->at_cmd->cmd_buf,
 													r_buf);
-						else
+						} else {
 							fprintf(ch_gsm->debug.at_debug_fp, "[%ld.%06ld] AT recv [%.*s] - [%s] - ",
 													curr_tv.tv_sec,
 													curr_tv.tv_usec,
 													ch_gsm->at_cmd->cmd_len - 1,
 													ch_gsm->at_cmd->cmd_buf,
 													r_buf);
+						}
 						fflush(ch_gsm->debug.at_debug_fp);
 						fclose(ch_gsm->debug.at_debug_fp);
 						ch_gsm->debug.at_debug_fp = NULL;
@@ -10350,8 +10549,9 @@ static void *pg_channel_gsm_workthread(void *data)
 				}					
 				// test for command done
 				if (is_at_com_done(r_buf)) {
-					if (ch_gsm->at_cmd->show)
+					if (ch_gsm->at_cmd->show) {
 						close(ch_gsm->at_pipe[1]);
+					}
 					if (ch_gsm->debug.receiver) {
 						ch_gsm->debug.receiver_debug_fp = fopen(ch_gsm->debug.receiver_debug_path, "a+");
 						if (ch_gsm->debug.receiver_debug_fp) {
@@ -10395,15 +10595,14 @@ static void *pg_channel_gsm_workthread(void *data)
 				// select by operation
 				if (ch_gsm->at_cmd->oper == AT_OPER_EXEC) {
 					// EXEC operations
-					switch (ch_gsm->at_cmd->id)
-					{
+					switch (ch_gsm->at_cmd->id) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_D:
 						case AT_A:
 						case AT_H:
 							if (strstr(r_buf, "ERROR")) {
 								if (ch_gsm->at_cmd->attempt) {
-									ch_gsm->at_cmd->attempt--;
+									--ch_gsm->at_cmd->attempt;
 									pg_atcommand_trysend(ch_gsm);
 								} else {
 									ast_log(LOG_WARNING, "GSM channel=\"%s\": command [%.*s] attempts count fired!!!\n", ch_gsm->alias, ch_gsm->at_cmd->cmd_len - 1, ch_gsm->at_cmd->cmd_buf);
@@ -10458,7 +10657,9 @@ static void *pg_channel_gsm_workthread(void *data)
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CIMI:
 							if (is_str_digit(r_buf)) {
-								if (ch_gsm->imsi) ast_free(ch_gsm->imsi);
+								if (ch_gsm->imsi) {
+									ast_free(ch_gsm->imsi);
+								}
 								ch_gsm->imsi = ast_strdup(r_buf);
 								if (ch_gsm->flags.dcr_table_needed) {
 									pg_pcr_table_create(ch_gsm->imsi, &ch_gsm->lock);
@@ -10593,7 +10794,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								conference = 1;
 								count = 0;
 								AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
-									count++;
+									++count;
 									if ((call->state != PG_CALL_GSM_STATE_ACTIVE) || (call->clcc_mpty)) {
 										conference = 0;
 										break;
@@ -10634,11 +10835,10 @@ static void *pg_channel_gsm_workthread(void *data)
 						case AT_CPAS:
 							if (is_str_begin_by(r_buf, "+CPAS:")) {
 								if ((str0 = strchr(r_buf, SP))) {
-									str0++;
+									++str0;
 									if (is_str_digit(str0)) {
 										// perform action if cpas changed
-										switch (atoi(str0))
-										{
+										switch (atoi(str0)) {
 											//++++++++++++++++++++++++++++++++++
 											case 0:
 											case 2:
@@ -10729,21 +10929,19 @@ static void *pg_channel_gsm_workthread(void *data)
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						default:
 							break;
-						}
-					} // end of EXEC operations
-				else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
+					}
+					 // end of EXEC operations
+				} else if (ch_gsm->at_cmd->oper == AT_OPER_TEST) {
 					// TEST operations
-					switch (ch_gsm->at_cmd->id)
-					{
+					switch (ch_gsm->at_cmd->id) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						default:
 							break;
 					}
-				} // end of TEST operations
-				else if (ch_gsm->at_cmd->oper == AT_OPER_READ) {
+					// end of TEST operations
+				} else if (ch_gsm->at_cmd->oper == AT_OPER_READ) {
 					// READ operations
-					switch (ch_gsm->at_cmd->id)
-					{
+					switch (ch_gsm->at_cmd->id) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						case AT_CLIR:
 							if (strstr(r_buf, "+CLIR:")) {
@@ -10852,7 +11050,7 @@ static void *pg_channel_gsm_workthread(void *data)
 											if (ch_gsm->flags.sim_inserted) {
 												// decrement attempt counter
 												if (ch_gsm->reg_try_count > 0)
-													ch_gsm->reg_try_count--;
+													--ch_gsm->reg_try_count;
 												// check rest of attempt count
 												if (ch_gsm->reg_try_count != 0) {
 													ast_verbose("%s: GSM channel=\"%s\": try next attempt registration on BTS\n", AST_MODULE, ch_gsm->alias);
@@ -11248,9 +11446,9 @@ static void *pg_channel_gsm_workthread(void *data)
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 						default:
 							break;
-						}
-					} // end of READ operations
-				else if (ch_gsm->at_cmd->oper == AT_OPER_WRITE) {
+					}
+					// end of READ operations
+				} else if (ch_gsm->at_cmd->oper == AT_OPER_WRITE) {
 					// WRITE operations
 					switch (ch_gsm->at_cmd->id) {
 						//++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -11295,8 +11493,9 @@ static void *pg_channel_gsm_workthread(void *data)
 									}
 								}
 							} else if (strstr(r_buf, "OK")) {
-								if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CCWA_SET)
+								if (ch_gsm->at_cmd->sub_cmd == PG_AT_SUBCMD_CCWA_SET) {
 									ch_gsm->callwait = ch_gsm->config.callwait;
+								}
 								if (ch_gsm->state == PG_CHANNEL_GSM_STATE_SERVICE) {
 									ch_gsm->state = PG_CHANNEL_GSM_STATE_RUN;
 									ast_debug(3, "GSM channel=\"%s\": state=%s\n", ch_gsm->alias, pg_cahnnel_gsm_state_to_string(ch_gsm->state));
@@ -11615,16 +11814,14 @@ static void *pg_channel_gsm_workthread(void *data)
 										// get info from preparing
 										ast_mutex_lock(&pg_sms_db_lock);
 										str0 = sqlite3_mprintf("SELECT owner,scatype,scaname,datype,daname,dcs,partid,partof,part,submitpdulen,submitpdu,attempt,hash,flash,content FROM '%q-preparing' WHERE msgno=%d;", ch_gsm->iccid, ch_gsm->pdu_send_id);
-										while (1)
-										{
+										while (1) {
 											res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 											if (res == SQLITE_OK) {
 												row = 0;
-												while (1)
-												{
+												while (1) {
 													res = sqlite3_step(sql0);
 													if (res == SQLITE_ROW) {
-														row++;
+														++row;
 														p2s_owner = (sqlite3_column_text(sql0, 0))?(ast_strdup((char *)sqlite3_column_text(sql0, 0))):("unknown");
 														p2s_scatype = sqlite3_column_int(sql0, 1);
 														p2s_scaname = (sqlite3_column_text(sql0, 2))?(ast_strdup((char *)sqlite3_column_text(sql0, 2))):("unknown");
@@ -11674,16 +11871,14 @@ static void *pg_channel_gsm_workthread(void *data)
 										maxmsgid = msgid = 0;
 										ast_mutex_lock(&pg_sms_db_lock);
 										str0 = sqlite3_mprintf("SELECT msgid,hash FROM '%q-sent';", ch_gsm->iccid);
-										while (1)
-										{
+										while (1) {
 											res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 											if (res == SQLITE_OK) {
 												row = 0;
-												while (1)
-												{
+												while (1) {
 													res = sqlite3_step(sql0);
 													if (res == SQLITE_ROW) {
-														row++;
+														++row;
 														maxmsgid = mmax(sqlite3_column_int(sql0, 0), maxmsgid);
 														if ((p2s_hash) && (sqlite3_column_text(sql0, 1)) && (!strcmp(p2s_hash, (char *)sqlite3_column_text(sql0, 1)))) {
 															msgid = sqlite3_column_int(sql0, 0);
@@ -11787,19 +11982,17 @@ static void *pg_channel_gsm_workthread(void *data)
 															p2s_hash, // hash VARCHAR(32)
 															p2s_flash, // flash INTEGER
 															p2s_content); // submitpdu TEXT
-										while (1)
-										{
+										while (1) {
 											res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 											if (res == SQLITE_OK) {
 												row = 0;
-												while (1)
-												{
+												while (1) {
 													res = sqlite3_step(sql0);
-													if (res == SQLITE_ROW)
-														row++;
-													else if (res == SQLITE_DONE)
+													if (res == SQLITE_ROW) {
+														++row;
+													} else if (res == SQLITE_DONE) {
 														break;
-													else if (res == SQLITE_BUSY) {
+													} else if (res == SQLITE_BUSY) {
 														ast_mutex_unlock(&pg_sms_db_lock);
 														ast_mutex_unlock(&ch_gsm->lock);
 														usleep(1000);
@@ -11837,19 +12030,17 @@ static void *pg_channel_gsm_workthread(void *data)
 										// delete pdu from preparing
 										ast_mutex_lock(&pg_sms_db_lock);
 										str0 = sqlite3_mprintf("DELETE FROM '%q-preparing' WHERE msgno=%d;", ch_gsm->iccid, ch_gsm->pdu_send_id);
-										while (1)
-										{
+										while (1) {
 											res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 											if (res == SQLITE_OK) {
 												row = 0;
-												while (1)
-												{
+												while (1) {
 													res = sqlite3_step(sql0);
-													if (res == SQLITE_ROW)
-														row++;
-													else if (res == SQLITE_DONE)
+													if (res == SQLITE_ROW) {
+														++row;
+													} else if (res == SQLITE_DONE) {
 														break;
-													else if (res == SQLITE_BUSY) {
+													} else if (res == SQLITE_BUSY) {
 														ast_mutex_unlock(&pg_sms_db_lock);
 														ast_mutex_unlock(&ch_gsm->lock);
 														usleep(1000);
@@ -11887,11 +12078,12 @@ static void *pg_channel_gsm_workthread(void *data)
 								ch_gsm->pdu_send_id = 0;
 							} else if (strstr(r_buf, "ERROR")) {
 								if ((str0 = strrchr(r_buf, SP))) {
-									str0++;
-									if (is_str_digit(str0))
+									++str0;
+									if (is_str_digit(str0)) {
 										ast_log(LOG_ERROR, "GSM channel=\"%s\": message send error: %s\n", ch_gsm->alias, cms_error_print(atoi(str0)));
-									else
+									} else {
 										ast_log(LOG_ERROR, "GSM channel=\"%s\": message send error: %s\n", ch_gsm->alias, r_buf);
+									}
 									// check for send attempt count
 									if (((ch_gsm->pdu_send_attempt+1) >= ch_gsm->config.sms_send_attempt) || atoi(str0) == CMS_ERROR_PS_BUSY) {
 										// copy pdu from preparing to sent
@@ -11909,24 +12101,22 @@ static void *pg_channel_gsm_workthread(void *data)
 										// get info from current preparing PDU
 										ast_mutex_lock(&pg_sms_db_lock);
 										str0 = sqlite3_mprintf("SELECT owner,datype,daname,partof,hash,flash FROM '%q-preparing' WHERE msgno=%d;", ch_gsm->iccid, ch_gsm->pdu_send_id);
-										while (1)
-										{
+										while (1) {
 											res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 											if (res == SQLITE_OK) {
 												row = 0;
-												while (1)
-												{
+												while (1) {
 													res = sqlite3_step(sql0);
 													if (res == SQLITE_ROW) {
-														row++;
+														++row;
 														p2d_owner = ast_strdup((char *)sqlite3_column_text(sql0, 0));
 														sprintf(assembled_destination, "%s%s", (sqlite3_column_int(sql0, 1)==145)?("+"):(""), sqlite3_column_text(sql0, 2));
 														p2d_partof = sqlite3_column_int(sql0, 3);
 														p2d_hash = ast_strdup((char *)sqlite3_column_text(sql0, 4));
 														p2d_flash = sqlite3_column_int(sql0, 5);
-													} else if (res == SQLITE_DONE)
+													} else if (res == SQLITE_DONE) {
 														break;
-													else if (res == SQLITE_BUSY) {
+													} else if (res == SQLITE_BUSY) {
 														ast_mutex_unlock(&pg_sms_db_lock);
 														ast_mutex_unlock(&ch_gsm->lock);
 														usleep(1000);
@@ -11959,30 +12149,29 @@ static void *pg_channel_gsm_workthread(void *data)
 											int traverse_continue;
 											assembled_content_len = 0;
 											// tracking through all parts in all list
-											for (p2d_part=1; p2d_part<=p2d_partof; p2d_part++)
-											{
+											for (p2d_part = 1; p2d_part <= p2d_partof; ++p2d_part) {
 												traverse_continue = 0;
 												// preparing
 												ast_mutex_lock(&pg_sms_db_lock);
 												str0 = sqlite3_mprintf("SELECT content FROM '%q-preparing' WHERE part=%d AND hash='%q';", ch_gsm->iccid, p2d_part, p2d_hash);
-												while (1)
-												{
+												while (1) {
 													res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 													if (res == SQLITE_OK) {
 														row = 0;
-														while (1)
-														{
+														while (1) {
 															res = sqlite3_step(sql0);
 															if (res == SQLITE_ROW) {
-																row++;
+																++row;
 																if (row == 1) {
-																	if (assembled_content)
+																	if (assembled_content) {
 																		assembled_content_len += sprintf(assembled_content+assembled_content_len, "%s", sqlite3_column_text(sql0, 0));
-																} else
+																	}
+																} else {
 																	ast_log(LOG_ERROR, "GSM channel=\"%s\": duplicated(%d) part=%d of message \"%s\"\n", ch_gsm->alias, row, p2d_part, p2d_hash);
-															} else if (res == SQLITE_DONE)
+																}
+															} else if (res == SQLITE_DONE) {
 																break;
-															else if (res == SQLITE_BUSY) {
+															} else if (res == SQLITE_BUSY) {
 																ast_mutex_unlock(&pg_sms_db_lock);
 																ast_mutex_unlock(&ch_gsm->lock);
 																usleep(1000);
@@ -11998,18 +12187,17 @@ static void *pg_channel_gsm_workthread(void *data)
 														if (row) {
 															// delete from preparing list
 															str1 = sqlite3_mprintf("DELETE FROM '%q-preparing' WHERE part=%d AND hash='%q';", ch_gsm->iccid, p2d_part, p2d_hash);
-															while(1){
+															while (1) {
 																res = sqlite3_prepare_fun(pg_sms_db, str1, strlen(str1), &sql1, NULL);
 																if (res == SQLITE_OK) {
 																	row = 0;
-																	while (1)
-																	{
+																	while (1) {
 																		res = sqlite3_step(sql1);
-																		if (res == SQLITE_ROW)
-																			row++;
-																		else if (res == SQLITE_DONE)
+																		if (res == SQLITE_ROW) {
+																			++row;
+																		} else if (res == SQLITE_DONE) {
 																			break;
-																		else if (res == SQLITE_BUSY) {
+																		} else if (res == SQLITE_BUSY) {
 																			ast_mutex_unlock(&pg_sms_db_lock);
 																			ast_mutex_unlock(&ch_gsm->lock);
 																			usleep(1000);
@@ -12055,28 +12243,30 @@ static void *pg_channel_gsm_workthread(void *data)
 												}
 												sqlite3_free(str0);
 												ast_mutex_unlock(&pg_sms_db_lock);
-												if (traverse_continue) continue;
+												if (traverse_continue) {
+													continue;
+												}
 												// sent
 												ast_mutex_lock(&pg_sms_db_lock);
 												str0 = sqlite3_mprintf("SELECT content FROM '%q-sent' WHERE part=%d AND hash='%q';", ch_gsm->iccid, p2d_part, p2d_hash);
-												while (1)
-												{
+												while (1) {
 													res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 													if (res == SQLITE_OK) {
 														row = 0;
-														while (1)
-														{
+														while (1) {
 															res = sqlite3_step(sql0);
 															if (res == SQLITE_ROW){
-																row++;
-																if (row == 1){
-																	if (assembled_content)
+																++row;
+																if (row == 1) {
+																	if (assembled_content) {
 																		assembled_content_len += sprintf(assembled_content+assembled_content_len, "%s", sqlite3_column_text(sql0, 0));
-																} else
+																	}
+																} else {
 																	ast_log(LOG_ERROR, "GSM channel=\"%s\": duplicated(%d) part=%d of message \"%s\"\n", ch_gsm->alias, row, p2d_part, p2d_hash);
-															} else if (res == SQLITE_DONE)
+																}
+															} else if (res == SQLITE_DONE) {
 																break;
-															else if (res == SQLITE_BUSY) {
+															} else if (res == SQLITE_BUSY) {
 																ast_mutex_unlock(&pg_sms_db_lock);
 																ast_mutex_unlock(&ch_gsm->lock);
 																usleep(1000);
@@ -12092,19 +12282,17 @@ static void *pg_channel_gsm_workthread(void *data)
 														if (row) {
 															// delete from preparing list
 															str1 = sqlite3_mprintf("DELETE FROM '%q-sent' WHERE part=%d AND hash='%q';", ch_gsm->iccid, p2d_part, p2d_hash);
-															while (1)
-															{
+															while (1) {
 																res = sqlite3_prepare_fun(pg_sms_db, str1, strlen(str1), &sql1, NULL);
 																if (res == SQLITE_OK) {
 																	row = 0;
-																	while (1)
-																	{
+																	while (1) {
 																		res = sqlite3_step(sql1);
-																		if (res == SQLITE_ROW)
-																			row++;
-																		else if (res == SQLITE_DONE)
+																		if (res == SQLITE_ROW) {
+																			++row;
+																		} else if (res == SQLITE_DONE) {
 																			break;
-																		else if (res == SQLITE_BUSY) {
+																		} else if (res == SQLITE_BUSY) {
 																			ast_mutex_unlock(&pg_sms_db_lock);
 																			ast_mutex_unlock(&ch_gsm->lock);
 																			usleep(1000);
@@ -12171,19 +12359,17 @@ static void *pg_channel_gsm_workthread(void *data)
 																			p2d_flash, // flash TEXT
 																			curr_tv.tv_sec, // enqueued INTEGER
 																			p2d_hash); // hash  VARCHAR(32) UNIQUE
-												while (1)
-												{
+												while (1) {
 													res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 													if (res == SQLITE_OK) {
 														row = 0;
-														while (1)
-														{
+														while (1) {
 															res = sqlite3_step(sql0);
-															if (res == SQLITE_ROW)
-																row++;
-															else if (res == SQLITE_DONE)
+															if (res == SQLITE_ROW) {
+																++row;
+															} else if (res == SQLITE_DONE) {
 																break;
-															else if (res == SQLITE_BUSY) {
+															} else if (res == SQLITE_BUSY) {
 																ast_mutex_unlock(&pg_sms_db_lock);
 																ast_mutex_unlock(&ch_gsm->lock);
 																usleep(1000);
@@ -12235,19 +12421,17 @@ static void *pg_channel_gsm_workthread(void *data)
 																			(is_str_digit(str0))?(cms_error_print(atoi(str0))):(r_buf), // cause TEXT
 																			curr_tv.tv_sec, // timestamp INTEGER
 																			p2d_hash); // hash  VARCHAR(32) UNIQUE
-												while (1)
-												{
+												while (1) {
 													res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 													if (res == SQLITE_OK) {
 														row = 0;
-														while (1)
-														{
+														while (1) {
 															res = sqlite3_step(sql0);
-															if (res == SQLITE_ROW)
-																row++;
-															else if (res == SQLITE_DONE)
+															if (res == SQLITE_ROW) {
+																++row;
+															} else if (res == SQLITE_DONE) {
 																break;
-															else if (res == SQLITE_BUSY) {
+															} else if (res == SQLITE_BUSY) {
 																ast_mutex_unlock(&pg_sms_db_lock);
 																ast_mutex_unlock(&ch_gsm->lock);
 																usleep(1000);
@@ -12293,14 +12477,14 @@ static void *pg_channel_gsm_workthread(void *data)
 						default:
 							break;
 					}
-				} // end of WRITE operations
-				else
+					// end of WRITE operations
+				} else {
 					ast_log(LOG_ERROR, "GSM channel=\"%s\": general AT command [%.*s] with unknown [%0X] operation\n",
 							ch_gsm->alias,
 							ch_gsm->at_cmd->cmd_len - 1,
 							ch_gsm->at_cmd->cmd_buf,
 							ch_gsm->at_cmd->oper);
-
+				}
 				// SIM300 AT commands
 				if (ch_gsm->gsm_module_type == POLYGATOR_MODULE_TYPE_SIM300) {
 					// select by operation
@@ -13899,7 +14083,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 									msgid = sqlite3_column_int(sql0, 0);
 								} else if (res == SQLITE_DONE) {
 									break;
@@ -13951,10 +14135,10 @@ static void *pg_channel_gsm_workthread(void *data)
 							res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 							if (res == SQLITE_OK){
 								row = 0;
-								while(1) {
+								while (1) {
 									res = sqlite3_step(sql0);
 									if (res == SQLITE_ROW) {
-										row++;
+										++row;
 										concatmsgid = sqlite3_column_int(sql0, 0);
 									} else if (res == SQLITE_DONE) {
 										break;
@@ -13993,7 +14177,7 @@ static void *pg_channel_gsm_workthread(void *data)
 									while (1) {
 										res = sqlite3_step(sql0);
 										if (res == SQLITE_ROW) {
-											row++;
+											++row;
 										} else if (res == SQLITE_DONE) {
 											break;
 										} else if (res == SQLITE_BUSY) {
@@ -14090,7 +14274,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
@@ -14127,7 +14311,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						ast_mutex_unlock(&ch_gsm->lock);
 						// allocation channel in pbx spool
 						sprintf(tmpbuf, "%s%s", (pdu->raddr.type.full == 145)?("+"):(""), pdu->raddr.value);
-#if ASTERISK_VERSION_NUMBER < 10800
+#if ASTERISK_VERSION_NUMBER >= 130000
 						ast_ch_tmp = ast_channel_alloc(0,													/* int needqueue */
 														AST_STATE_DOWN,										/* int state */
 														tmpbuf,												/* const char *cid_num */
@@ -14135,7 +14319,21 @@ static void *pg_channel_gsm_workthread(void *data)
 														NULL,												/* const char *acctcode */
 														S_OR(ch_gsm->config.sms_notify_extension, "s"),		/* const char *exten */
 														S_OR(ch_gsm->config.sms_notify_context, "default"),	/* const char *context */
-														0,													/* const int amaflag */
+														NULL,												/* const struct ast_assigned_ids *assignedids */
+														NULL,												/* const struct ast_channel *requestor */
+														0,													/* enum ama_flags amaflag */
+														"PGSMS/%s-%08x",									/* const char *name_fmt, ... */
+														ch_gsm->alias, ch_id);
+#elif ASTERISK_VERSION_NUMBER >= 10800
+						ast_ch_tmp = ast_channel_alloc(0,													/* int needqueue */
+														AST_STATE_DOWN,										/* int state */
+														tmpbuf,												/* const char *cid_num */
+														tmpbuf,												/* const char *cid_name */
+														NULL,												/* const char *acctcode */
+														S_OR(ch_gsm->config.sms_notify_extension, "s"),		/* const char *exten */
+														S_OR(ch_gsm->config.sms_notify_context, "default"),	/* const char *context */
+														NULL,												/* const char *linkedid */
+														0,													/* int amaflag */
 														"PGSMS/%s-%08x",									/* const char *name_fmt, ... */
 														ch_gsm->alias, ch_id);
 #else
@@ -14146,8 +14344,7 @@ static void *pg_channel_gsm_workthread(void *data)
 														NULL,												/* const char *acctcode */
 														S_OR(ch_gsm->config.sms_notify_extension, "s"),		/* const char *exten */
 														S_OR(ch_gsm->config.sms_notify_context, "default"),	/* const char *context */
-														NULL,												/* const char *linkedid */
-														0,													/* int amaflag */
+														0,													/* const int amaflag */
 														"PGSMS/%s-%08x",									/* const char *name_fmt, ... */
 														ch_gsm->alias, ch_id);
 #endif
@@ -14196,7 +14393,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
@@ -14257,7 +14454,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								while (1) {
 									res = sqlite3_step(sql0);
 									if (res == SQLITE_ROW) {
-										row++;
+										++row;
 									} else if (res == SQLITE_DONE) {
 										break;
 									} else if (res == SQLITE_BUSY) {
@@ -14294,6 +14491,35 @@ static void *pg_channel_gsm_workthread(void *data)
 				}
 				// reset wait flag
 				ch_gsm->pdu_cds_wait = 0;
+			// QUECTEL M10 DTMF TONE
+			} else if (strstr(r_buf, "+QTONEDET:")) {
+				str0 = strchr(r_buf, ',');
+				if (str0) {
+					*str0 = '\0';
+				}
+				if ((str0 = strchr(r_buf, SP))) {
+					str0++;
+					if (is_str_digit(str0)) {
+						mr = atoi(str0);
+						// send AST_FRAME_DTMF
+						memset(&frame, 0, sizeof(struct ast_frame));
+						frame.frametype = AST_FRAME_DTMF;
+#if ASTERISK_VERSION_NUMBER >= 10800
+						frame.subclass.integer = mr;
+#else
+						frame.subclass = mr;
+#endif
+						frame.datalen = 0;
+						frame.samples = 0;
+						frame.mallocd = 0;
+						frame.src = "Polygator";
+						frame.len = ast_tvdiff_ms(ast_samp2tv(200, 1000), ast_tv(0, 0));
+						AST_LIST_TRAVERSE(&ch_gsm->call_list, call, entry) {
+							// send dtmf tone
+							ast_queue_frame(call->owner, &frame);
+						}
+					}
+				}
 			}
 			//------------------------------------------------------------------
 			if (!strstr(r_buf, "+CMT:") && !strstr(r_buf, "+CDS:")) {
@@ -14307,6 +14533,12 @@ static void *pg_channel_gsm_workthread(void *data)
 
 		// try to send at command
 		if (pg_atcommand_trysend(ch_gsm) < 0) {
+			// flush AT command queue
+			if (ch_gsm->at_cmd) {
+				ast_free(ch_gsm->at_cmd);
+				ch_gsm->at_cmd = NULL;
+			}
+			pg_atcommand_queue_flush(ch_gsm);
 			// set restart flag
 			if (!ch_gsm->flags.shutdown_now && !ch_gsm->flags.restart_now) {
 				ch_gsm->flags.restart = 1;
@@ -14759,7 +14991,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
-								row++;
+								++row;
 								maxmsgid = sqlite3_column_int(sql0, 0);
 							} else if (res == SQLITE_DONE) {
 								break;
@@ -14813,7 +15045,7 @@ static void *pg_channel_gsm_workthread(void *data)
 						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
-								row++;
+								++row;
 								if (!o2p_msgno) {
 									// msgno
 									o2p_msgno = sqlite3_column_int(sql0, 0);
@@ -14838,8 +15070,9 @@ static void *pg_channel_gsm_workthread(void *data)
 										MD5Update(&Md5Ctx, (unsigned char *)husec, strlen(husec));
 										MD5Final(hashbin, &Md5Ctx);
 										i = olen = 0;
-										for (i=0; i<16; i++)
-											olen += sprintf(o2p_msghash+olen, "%02x", (unsigned char)hashbin[i]);
+										for (i = 0; i < 16; ++i) {
+											olen += sprintf(o2p_msghash + olen, "%02x", (unsigned char)hashbin[i]);
+										}
 									}
 								} else
 									break;
@@ -14891,7 +15124,7 @@ static void *pg_channel_gsm_workthread(void *data)
 								// enqueue new pdu into queue sent
 								memset(tmpbuf, 0, 512);
 								res = 0;
-								for (i = 0; i < curr->full_len; i++) {
+								for (i = 0; i < curr->full_len; ++i) {
 									res += sprintf(tmpbuf+res, "%02X", (unsigned char)curr->buf[i]);
 								}
 								// insert new pdu
@@ -14958,7 +15191,7 @@ static void *pg_channel_gsm_workthread(void *data)
 										while (1) {
 											res = sqlite3_step(sql0);
 											if (res == SQLITE_ROW)
-												row++;
+												++row;
 											else if (res == SQLITE_DONE)
 												break;
 											else if (res == SQLITE_BUSY) {
@@ -15020,19 +15253,17 @@ static void *pg_channel_gsm_workthread(void *data)
 															(is_address_string(o2p_msgdest))?("too many parts"):("invalid destination"), // cause TEXT
 															curr_tv.tv_sec, // timestamp INTEGER
 															o2p_msghash); // hash  VARCHAR(32) UNIQUE
-							while (1)
-							{
+							while (1) {
 								res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 								if (res == SQLITE_OK) {
 									row = 0;
-									while (1)
-									{
+									while (1) {
 										res = sqlite3_step(sql0);
-										if (res == SQLITE_ROW)
-											row++;
-										else if (res == SQLITE_DONE)
+										if (res == SQLITE_ROW) {
+											++row;
+										} else if (res == SQLITE_DONE) {
 											break;
-										else if (res == SQLITE_BUSY) {
+										} else if (res == SQLITE_BUSY) {
 											ast_mutex_unlock(&pg_sms_db_lock);
 											ast_mutex_unlock(&ch_gsm->lock);
 											usleep(1000);
@@ -15075,7 +15306,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
@@ -15119,7 +15350,7 @@ static void *pg_channel_gsm_workthread(void *data)
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 									if (!ch_gsm->pdu_send_id) {
 										ch_gsm->pdu_send_attempt = sqlite3_column_int(sql0, 0);
 										// check attempts counter
@@ -15170,19 +15401,17 @@ static void *pg_channel_gsm_workthread(void *data)
 					if (ch_gsm->pdu_send_id) {
 						ast_mutex_lock(&pg_sms_db_lock);
 						str0 = sqlite3_mprintf("UPDATE '%q-preparing' SET attempt=%d WHERE msgno=%d;", ch_gsm->iccid, ch_gsm->pdu_send_attempt+1, ch_gsm->pdu_send_id);
-						while (1)
-						{
+						while (1) {
 							res = sqlite3_prepare_fun(pg_sms_db, str0, strlen(str0), &sql0, NULL);
 							if (res == SQLITE_OK) {
 								row = 0;
-								while (1)
-								{
+								while (1) {
 									res = sqlite3_step(sql0);
-									if (res == SQLITE_ROW)
-										row++;
-									else if (res == SQLITE_DONE)
+									if (res == SQLITE_ROW) {
+										++row;
+									} else if (res == SQLITE_DONE) {
 										break;
-									else if (res == SQLITE_BUSY) {
+									} else if (res == SQLITE_BUSY) {
 										ast_mutex_unlock(&pg_sms_db_lock);
 										ast_mutex_unlock(&ch_gsm->lock);
 										usleep(1000);
@@ -15347,7 +15576,7 @@ static void *pg_channel_gsm_workthread(void *data)
 			x_timer_set(ch_gsm->timers.waitviodown, waitviodown_timeout);
 		} // end of shutdown
 		// restart
-		if (ch_gsm->flags.restart && !ch_gsm->flags.shutdown_now) {
+		if (ch_gsm->flags.restart && !ch_gsm->flags.shutdown_now && !ch_gsm->at_cmd) {
 			ch_gsm->flags.restart = 0;
 			ast_verb(4, "GSM channel=\"%s\" received restart signal\n", ch_gsm->alias);
 			// hangup active calls
@@ -15360,12 +15589,14 @@ static void *pg_channel_gsm_workthread(void *data)
 				usleep(1000);
 				ast_mutex_lock(&ch_gsm->lock);
 			}
+#if 0
 			// flush AT command queue
 			if (ch_gsm->at_cmd) {
 				ast_free(ch_gsm->at_cmd);
 				ch_gsm->at_cmd = NULL;
 			}
 			pg_atcommand_queue_flush(ch_gsm);
+#endif
 			// stop all timers
 			memset(&ch_gsm->timers, 0, sizeof(struct pg_channel_gsm_timers));
 			// set init signal/flags
@@ -15410,8 +15641,9 @@ static void *pg_channel_gsm_workthread(void *data)
 				// reset ber value
 				ch_gsm->ber = 99;
 				// reset restart_now flag
-				if (ch_gsm->flags.restart_now)
+				if (ch_gsm->flags.restart_now) {
 					ch_gsm->flags.restart_now = 0;
+				}
 				// set hardware baudrate
 				if (!tcgetattr(ch_gsm->tty_fd, &termios)) {
 					switch (ch_gsm->baudrate) {
@@ -15958,7 +16190,7 @@ static void *pg_vinetic_workthread(void *data)
 					break;
 				}
 				// check rdyq status
-				for (i = 0; i < 5000; i++) {
+				for (i = 0; i < 5000; ++i) {
 					if (!vin_is_not_ready(&vin->context)) {
 						break;
 					}
@@ -16027,13 +16259,71 @@ static void *pg_vinetic_workthread(void *data)
 					vin->context.resources[6] = 1;
 					vin->context.resources[7] = 1;
 				}
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				if (vin->capabilities){
+					ast_format_cap_remove_by_type(vin->capabilities, AST_MEDIA_TYPE_UNKNOWN);
+				} else {
+					vin->capabilities = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+				}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				vin->capabilities = ast_format_cap_destroy(vin->capabilities);
 #else
 				vin->capabilities = 0;
 #endif
 				if ((vin->context.edsp_sw_version_register.mv == 0) && (vin->context.edsp_sw_version_register.prt == 0)) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+					switch (vin->context.edsp_sw_version_register.features) {
+						case 0:
+							ast_format_cap_append(vin->capabilities, ast_format_ulaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_alaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g726, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g729, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g723, 0);
+							break;
+						case 4:
+							ast_format_cap_append(vin->capabilities, ast_format_ulaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_alaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g726, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g729, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g723, 0);
+							break;
+						case 12:
+							ast_format_cap_append(vin->capabilities, ast_format_ulaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_alaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g726, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g729, 0);
+							break;
+						case 16:
+							ast_format_cap_append(vin->capabilities, ast_format_ulaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_alaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g726, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g729, 0);
+							break;
+						case 20:
+							ast_format_cap_append(vin->capabilities, ast_format_ulaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_alaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g726, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g729, 0);
+							break;
+						case 24:
+							ast_format_cap_append(vin->capabilities, ast_format_ulaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_alaw, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g726, 0);
+							ast_format_cap_append(vin->capabilities, ast_format_g723, 0);
+							break;
+						default:
+							break;
+					}
+					if (pg_gsm_tech.capabilities) {
+						ast_format_cap_append_from_cap(pg_gsm_tech.capabilities, vin->capabilities, AST_MEDIA_TYPE_UNKNOWN);
+					}
+					if (pg_fxs_tech.capabilities) {
+						ast_format_cap_append_from_cap(pg_fxs_tech.capabilities, vin->capabilities, AST_MEDIA_TYPE_UNKNOWN);
+					}
+					if (pg_fxo_tech.capabilities) {
+						ast_format_cap_append_from_cap(pg_fxo_tech.capabilities, vin->capabilities, AST_MEDIA_TYPE_UNKNOWN);
+					}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 					struct ast_format tmpfmt;
 					vin->capabilities = ast_format_cap_alloc();
 					switch (vin->context.edsp_sw_version_register.features) {
@@ -16078,16 +16368,14 @@ static void *pg_vinetic_workthread(void *data)
 						default:
 							break;
 					}
-					if (vin->capabilities) {
-						if (pg_gsm_tech.capabilities) {
-							ast_format_cap_append(pg_gsm_tech.capabilities, vin->capabilities);
-						}
-						if (pg_fxs_tech.capabilities) {
-							ast_format_cap_append(pg_fxs_tech.capabilities, vin->capabilities);
-						}
-						if (pg_fxo_tech.capabilities) {
-							ast_format_cap_append(pg_fxo_tech.capabilities, vin->capabilities);
-						}
+					if (pg_gsm_tech.capabilities) {
+						ast_format_cap_append(pg_gsm_tech.capabilities, vin->capabilities);
+					}
+					if (pg_fxs_tech.capabilities) {
+						ast_format_cap_append(pg_fxs_tech.capabilities, vin->capabilities);
+					}
+					if (pg_fxo_tech.capabilities) {
+						ast_format_cap_append(pg_fxo_tech.capabilities, vin->capabilities);
 					}
 #else
 					switch (vin->context.edsp_sw_version_register.features) {
@@ -16121,11 +16409,13 @@ static void *pg_vinetic_workthread(void *data)
 							vin->capabilities |= AST_FORMAT_ULAW;
 							vin->capabilities |= AST_FORMAT_ALAW;
 							vin->capabilities |= AST_FORMAT_G726;
+							vin->capabilities |= AST_FORMAT_G729A;
 							break;
 						case 24:
 							vin->capabilities |= AST_FORMAT_ULAW;
 							vin->capabilities |= AST_FORMAT_ALAW;
 							vin->capabilities |= AST_FORMAT_G726;
+							vin->capabilities |= AST_FORMAT_G723_1;
 							break;
 						default:
 							break;
@@ -16166,7 +16456,7 @@ static void *pg_vinetic_workthread(void *data)
 					break;
 				}
 				// download CRAM
-				for (i = 0, restart = 0; i < 4; i++) {
+				for (i = 0, restart = 0; i < 4; ++i) {
 					if (vin_download_cram(&vin->context, i, vin->context.cram_path) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
 							ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
@@ -16196,7 +16486,7 @@ static void *pg_vinetic_workthread(void *data)
 					break;
 				}
 				// patch ALM to work with GSM module direct
-				for (i = 0, restart = 0; i < 4; i++) {
+				for (i = 0, restart = 0; i < 4; ++i) {
 					if (vin->patch_alm_gsm[i]) {
 						if (vin_write_sop_generic(&vin->context, i, 0x07, 0x2011) < 0) {
 							while (vin_message_stack_check_line(&vin->context)) {
@@ -16283,7 +16573,7 @@ static void *pg_vinetic_workthread(void *data)
 				ast_debug(3, "vinetic=\"%s\": run\n", vin->name);
 				// set vinetic's module state to previous state - for fallback purpose after reset
 				// set SLIC's operation mode
-				for (i = 0, restart = 0; i < 4; i++) {
+				for (i = 0, restart = 0; i < 4; ++i) {
 					// restore previous mode
 					if (vin_set_opmode(&vin->context, i, vin->context.ali_opmode[i]) < 0) {
 						while (vin_message_stack_check_line(&vin->context)) {
@@ -16307,7 +16597,7 @@ static void *pg_vinetic_workthread(void *data)
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
-					for (i = 0, restart = 0; i < 4; i++) {
+					for (i = 0, restart = 0; i < 4; ++i) {
 						if (vin_is_ali_channel_enabled(&vin->context, i)) {
 							// enable ALI channel
 							if (vin_ali_channel_enable(&vin->context, i) < 0) {
@@ -16343,7 +16633,7 @@ static void *pg_vinetic_workthread(void *data)
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
-					for (i = 0, restart = 0; i < 4; i++) {
+					for (i = 0, restart = 0; i < 4; ++i) {
 						if (vin_is_signaling_channel_enabled(&vin->context, i)) {
 							// enable signaling channel
 							if (vin_signaling_channel_enable(&vin->context, i) < 0) {
@@ -16396,7 +16686,7 @@ static void *pg_vinetic_workthread(void *data)
 						vin->state = PG_VINETIC_STATE_IDLE;
 						break;
 					}
-					for (i = 0, restart = 0; i < 4; i++) {
+					for (i = 0, restart = 0; i < 4; ++i) {
 						if (vin_is_coder_channel_enabled(&vin->context, i)) {
 							// set coder channel RTP
 							if (vin_coder_channel_config_rtp(&vin->context, i) < 0) {
@@ -16463,6 +16753,7 @@ pg_vinetic_workthread_end:
 	vin_poll_disable(&vin->context);
 	vin_close(&vin->context);
 	vin_destroy(&vin->context);
+	vin->run = 0;
 	vin->thread = AST_PTHREADT_NULL;
 	ast_mutex_unlock(&vin->lock);
 	ast_debug(4, "vinetic=\"%s\": thread stop\n", vin->name);
@@ -17575,6 +17866,8 @@ static int pg_config_file_build(char *filename)
 			ast_mutex_lock(&vin->lock);
 			// vinetic category
 			len += fprintf(fp, "[%s]\n", vin->name);
+			// enable
+			len += fprintf(fp, "enable=%s\n", vin->run ? "yes" : "no");
 			// firmware
 			len += fprintf(fp, "firmware=%s\n", vin->firmware);
 			// almab
@@ -18256,7 +18549,9 @@ static struct ast_frame *pg_xxx_read(struct ast_channel *ast_ch)
 	}
 	// fill asterisk frame
 	rtp->frame.frametype = AST_FRAME_VOICE;
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	rtp->frame.subclass.format = rtp->format;
+#elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_copy(&rtp->frame.subclass.format, &rtp->format);
 #elif ASTERISK_VERSION_NUMBER >= 10800
 	rtp->frame.subclass.codec = rtp->format;
@@ -18277,7 +18572,7 @@ static struct ast_frame *pg_xxx_read(struct ast_channel *ast_ch)
 #endif
 
 	// increment statistic counter
-	rtp->recv_frame_count++;
+	++rtp->recv_frame_count;
 
 	ast_mutex_unlock(&rtp->lock);
 	return &rtp->frame;
@@ -18289,7 +18584,9 @@ static struct ast_frame *pg_xxx_read(struct ast_channel *ast_ch)
 //------------------------------------------------------------------------------
 // pg_gsm_requester()
 //------------------------------------------------------------------------------
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *format, const struct ast_assigned_ids *assignedids, const struct ast_channel *requestor, const char *data, int *cause)
+#elif ASTERISK_VERSION_NUMBER >= 110000
 static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *format, const struct ast_channel *requestor, const char *data, int *cause)
 #elif ASTERISK_VERSION_NUMBER >= 100000
 static struct ast_channel *pg_gsm_requester(const char *type, struct ast_format_cap *format, const struct ast_channel *requestor, void *data, int *cause)
@@ -18374,7 +18671,9 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 		*cause = AST_CAUSE_INCOMPATIBLE_DESTINATION;
 		return NULL;
 	}
-
+#if ASTERISK_VERSION_NUMBER >= 130000
+	joint = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+#endif
 	if (strlen(trunk)) {
 		ast_mutex_lock(&pg_lock);
 		// get requested trunk from general trunk list
@@ -18392,8 +18691,14 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				ch_gsm = ch_gsm_fold->channel_gsm;
 				if (ch_gsm) {
 					ast_mutex_lock(&ch_gsm->lock);
-#if ASTERISK_VERSION_NUMBER >= 100000
-					if (joint) ast_format_cap_destroy(joint);
+#if ASTERISK_VERSION_NUMBER >= 130000
+					ast_format_cap_remove_by_type(joint, AST_MEDIA_TYPE_UNKNOWN);
+#elif ASTERISK_VERSION_NUMBER >= 100000
+					if (joint) {
+						ast_format_cap_destroy(joint);
+					}
+#else
+					joint = 0
 #endif
 					if (
 						(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
@@ -18402,7 +18707,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 						(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 						((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 						(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+						(ast_format_cap_iscompatible(format, vin->capabilities)) &&
+						(!ast_format_cap_get_compatible(format, vin->capabilities, joint)) &&
+#elif ASTERISK_VERSION_NUMBER >= 100000
 						((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 						((joint = format & vin->capabilities)) &&
@@ -18457,8 +18765,14 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				ch_gsm = ch_gsm_fold->channel_gsm;
 				if (ch_gsm) {
 					ast_mutex_lock(&ch_gsm->lock);
-#if ASTERISK_VERSION_NUMBER >= 100000
-					if (joint) ast_format_cap_destroy(joint);
+#if ASTERISK_VERSION_NUMBER >= 130000
+					ast_format_cap_remove_by_type(joint, AST_MEDIA_TYPE_UNKNOWN);
+#elif ASTERISK_VERSION_NUMBER >= 100000
+					if (joint) {
+						ast_format_cap_destroy(joint);
+					}
+#else
+					joint = 0
 #endif
 					if (
 						(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
@@ -18467,7 +18781,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 						(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 						((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 						(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+						(ast_format_cap_iscompatible(format, vin->capabilities)) &&
+						(!ast_format_cap_get_compatible(format, vin->capabilities, joint)) &&
+#elif ASTERISK_VERSION_NUMBER >= 100000
 						((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 						((joint = format & vin->capabilities)) &&
@@ -18517,7 +18834,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 				(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				(ast_format_cap_iscompatible(format, vin->capabilities)) &&
+				(!ast_format_cap_get_compatible(format, vin->capabilities, joint)) &&
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 				((joint = format & vin->capabilities)) &&
@@ -18550,7 +18870,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 				(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				(ast_format_cap_iscompatible(format, vin->capabilities)) &&
+				(!ast_format_cap_get_compatible(format, vin->capabilities, joint)) &&
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 				((joint = format & vin->capabilities)) &&
@@ -18583,7 +18906,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 				(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				(ast_format_cap_iscompatible(format, vin->capabilities)) &&
+				(!ast_format_cap_get_compatible(format, vin->capabilities, joint)) &&
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 				((joint = format & vin->capabilities)) &&
@@ -18627,7 +18953,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 					vin = rtp->vinetic;
 				} else if ((!(vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) ||
 						(!pg_is_vinetic_run(vin)) ||
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+						(!ast_format_cap_iscompatible(format, vin->capabilities)) ||
+						(ast_format_cap_get_compatible(format, vin->capabilities, joint)) ||
+#elif ASTERISK_VERSION_NUMBER >= 100000
 						(!(joint = ast_format_cap_joint(format, vin->capabilities))) ||
 #else
 						(!(joint = format & vin->capabilities)) ||
@@ -18673,8 +19002,14 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 		// traverse channel list
 		while (ch_gsm) {
 			ast_mutex_lock(&ch_gsm->lock);
-#if ASTERISK_VERSION_NUMBER >= 100000
-			if (joint) ast_format_cap_destroy(joint);
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_format_cap_remove_by_type(joint, AST_MEDIA_TYPE_UNKNOWN);
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			if (joint) {
+				ast_format_cap_destroy(joint);
+			}
+#else
+			joint = 0
 #endif
 			if (
 				(ch_gsm->state == PG_CHANNEL_GSM_STATE_RUN) &&
@@ -18684,7 +19019,10 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 				(!pg_is_channel_gsm_has_calls(ch_gsm)) &&
 				((vin = pg_get_vinetic_from_board(ch_gsm->board, ch_gsm->vinetic_number))) &&
 				(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				(ast_format_cap_iscompatible(format, vin->capabilities)) &&
+				(!ast_format_cap_get_compatible(format, vin->capabilities, joint)) &&
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 				((joint = format & vin->capabilities)) &&
@@ -18720,9 +19058,13 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 	}
 
 	if (!ch_gsm) {
-#if ASTERISK_VERSION_NUMBER >= 100000
-		if (joint) ast_format_cap_destroy(joint);
+		if (joint) {
+#if ASTERISK_VERSION_NUMBER >= 130000
+		ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
+		ast_format_cap_destroy(joint);
 #endif
+		}
 		return NULL;
 	}
 
@@ -18740,7 +19082,16 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 
 		rtp->event_is_now_recv = 0;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (!(rtp->format = ast_format_cap_get_best_by_type(joint, AST_MEDIA_TYPE_AUDIO))) {
+			*cause = AST_CAUSE_BEARERCAPABILITY_NOTIMPL;
+			pg_put_channel_rtp(rtp);
+			pg_channel_gsm_put_call(ch_gsm, call);
+			ao2_cleanup(joint);
+			ast_mutex_unlock(&ch_gsm->lock);
+			return NULL;
+		}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		if (!ast_best_codec(joint, &rtp->format)) {
 			*cause = AST_CAUSE_BEARERCAPABILITY_NOTIMPL;
 			pg_put_channel_rtp(rtp);
@@ -18758,7 +19109,37 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 			return NULL;
 		}
 #endif
-
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (ast_format_cmp(rtp->format, ast_format_g723)) {
+			/*! G.723.1 compression */
+			rtp->payload_type = RTP_PT_G723;
+			rtp->encoder_packet_time = VIN_PTE_30;
+			rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+		} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+			/*! Raw mu-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMU;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+			/*! Raw A-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMA;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+			/*! G.729A audio */
+			rtp->payload_type = RTP_PT_G729;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+		} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+			/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+			rtp->payload_type = 2;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G726_32;
+		} else {
+			rtp->payload_type = -1;
+			ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+		}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 		switch (rtp->format.id) {
 #else
@@ -18803,8 +19184,11 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 #endif
 				break;
 		}
+#endif
 		if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -18812,7 +19196,9 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			pg_put_channel_rtp(rtp);
 			pg_channel_gsm_put_call(ch_gsm, call);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(joint);
 #endif
 			ast_mutex_unlock(&ch_gsm->lock);
@@ -18900,14 +19286,16 @@ static struct ast_channel *pg_gsm_requester(const char *type, int format, void *
 			goto pg_gsm_requester_vinetic_end;
 		}
 		// set DTMF receiver
-		vin_dtmf_receiver_set_as(&vin->context, ch_gsm->vinetic_sig_slot, VIN_OFF);
-		vin_dtmf_receiver_set_is(&vin->context, ch_gsm->vinetic_sig_slot, VIN_IS_SIGINA);
-		vin_dtmf_receiver_set_et(&vin->context, ch_gsm->vinetic_sig_slot, VIN_ACTIVE);
-		if ((res = vin_dtmf_receiver_enable(&vin->context, ch_gsm->vinetic_sig_slot)) < 0) {
-			while (vin_message_stack_check_line(&vin->context)) {
-				ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+		if (ch_gsm->gsm_module_type != POLYGATOR_MODULE_TYPE_M10) {
+			vin_dtmf_receiver_set_as(&vin->context, ch_gsm->vinetic_sig_slot, VIN_OFF);
+			vin_dtmf_receiver_set_is(&vin->context, ch_gsm->vinetic_sig_slot, VIN_IS_SIGINA);
+			vin_dtmf_receiver_set_et(&vin->context, ch_gsm->vinetic_sig_slot, VIN_ACTIVE);
+			if ((res = vin_dtmf_receiver_enable(&vin->context, ch_gsm->vinetic_sig_slot)) < 0) {
+				while (vin_message_stack_check_line(&vin->context)) {
+					ast_log(LOG_ERROR, "vinetic=\"%s\": %s\n", vin->name, vin_message_stack_get_line(&vin->context));
+				}
+				goto pg_gsm_requester_vinetic_end;
 			}
-			goto pg_gsm_requester_vinetic_end;
 		}
 		// set signaling channel RTP
 		vin_signaling_channel_config_rtp_set_ssrc(&vin->context, rtp->position_on_vinetic, rtp->rem_ssrc);
@@ -18976,7 +19364,9 @@ pg_gsm_requester_vinetic_end:
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			pg_put_channel_rtp(rtp);
 			pg_channel_gsm_put_call(ch_gsm, call);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(joint);
 #endif
 			ast_mutex_unlock(&ch_gsm->lock);
@@ -18985,7 +19375,7 @@ pg_gsm_requester_vinetic_end:
 			ast_mutex_unlock(&vin->lock);
 		}
 	}
-	ch_gsm->channel_rtp_usage++;
+	++ch_gsm->channel_rtp_usage;
 	ch_gsm->channel_rtp = rtp;
 
 	// prevent deadlock while asterisk channel is allocating
@@ -18995,7 +19385,7 @@ pg_gsm_requester_vinetic_end:
 	ch_id = channel_id++;
 	ast_mutex_unlock(&pg_lock);
 	// allocation channel in pbx spool
-#if ASTERISK_VERSION_NUMBER < 10800
+#if ASTERISK_VERSION_NUMBER >= 130000
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_DOWN,			/* int state */
 								"",						/* const char *cid_num */
@@ -19003,10 +19393,12 @@ pg_gsm_requester_vinetic_end:
 								"",						/* const char *acctcode */
 								"",						/* const char *exten */
 								ch_gsm->config.call_context,	/* const char *context */
-								0,						/* const int amaflag */
+								assignedids,			/* const struct ast_assigned_ids *assignedids */
+								requestor,				/* const struct ast_channel *requestor */
+								0,						/* enum ama_flags amaflag */
 								"PGGSM/%s-%08x",		/* const char *name_fmt, ... */
 								ch_gsm->alias, ch_id);
-#else
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_DOWN,			/* int state */
 								"",						/* const char *cid_num */
@@ -19018,6 +19410,17 @@ pg_gsm_requester_vinetic_end:
 								0,						/* int amaflag */
 								"PGGSM/%s-%08x",		/* const char *name_fmt, ... */
 								ch_gsm->alias, ch_id);
+#else
+	ast_ch = ast_channel_alloc(1,						/* int needqueue */
+								AST_STATE_DOWN,			/* int state */
+								"",						/* const char *cid_num */
+								"",						/* const char *cid_name */
+								"",						/* const char *acctcode */
+								"",						/* const char *exten */
+								ch_gsm->config.call_context,	/* const char *context */
+								0,						/* const int amaflag */
+								"PGGSM/%s-%08x",		/* const char *name_fmt, ... */
+								ch_gsm->alias, ch_id);
 #endif
 	ast_mutex_lock(&ch_gsm->lock);
 
@@ -19025,16 +19428,27 @@ pg_gsm_requester_vinetic_end:
 	if (!ast_ch) {
 		ast_log(LOG_ERROR, "ast_channel_alloc() failed\n");
 		*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
-		if (!ch_gsm->channel_rtp_usage) pg_put_channel_rtp(rtp);
+		if (!ch_gsm->channel_rtp_usage) {
+			pg_put_channel_rtp(rtp);
+		}
 		pg_channel_gsm_put_call(ch_gsm, call);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		ast_format_cap_destroy(joint);
 #endif
 		ast_mutex_unlock(&ch_gsm->lock);
 		return NULL;
 	}
 	// init asterisk channel tag's
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	ast_channel_nativeformats_set(ast_ch, vin->capabilities);
+	ast_channel_set_rawreadformat(ast_ch, rtp->format);
+	ast_channel_set_rawwriteformat(ast_ch, rtp->format);
+	ast_channel_set_readformat(ast_ch, rtp->format);
+	ast_channel_set_writeformat(ast_ch, rtp->format);
+	ast_verb(3, "GSM channel=\"%s\": selected codec \"%s\"\n", ch_gsm->alias, ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
@@ -19069,7 +19483,9 @@ pg_gsm_requester_vinetic_end:
 
 	call->owner = ast_ch;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_destroy(joint);
 #endif
 	ast_mutex_unlock(&ch_gsm->lock);
@@ -19346,6 +19762,10 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 #endif
 	struct pg_channel_gsm *ch_gsm = call->channel.gsm;
 
+#if ASTERISK_VERSION_NUMBER >= 130000
+	joint = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+#endif
+
 	ast_mutex_lock(&ch_gsm->lock);
 
 	switch (condition) {
@@ -19355,13 +19775,46 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 			// adjust voice format
 			rtp = ch_gsm->channel_rtp;
 			vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			rtp->format = ast_channel_writeformat(ast_ch);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_copy(&rtp->format, &ast_ch->writeformat);
 #else
 			rtp->format = ast_ch->writeformat;
 #endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (ast_format_cmp(rtp->format, ast_format_g723)) {
+				/*! G.723.1 compression */
+				rtp->payload_type = RTP_PT_G723;
+				rtp->encoder_packet_time = VIN_PTE_30;
+				rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+			} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+				/*! Raw mu-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMU;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+				/*! Raw A-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMA;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+				/*! G.729A audio */
+				rtp->payload_type = RTP_PT_G729;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+			} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+				/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+				rtp->payload_type = 2;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G726_32;
+			} else {
+				rtp->payload_type = -1;
+				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+			}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 			switch (rtp->format.id) {
 #else
@@ -19406,8 +19859,11 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 #endif
 					break;
 			}
+#endif
 			if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -19436,8 +19892,8 @@ static int pg_gsm_indicate(struct ast_channel *ast_ch, int condition, const void
 			}
 pg_gsm_indicate_ringing_end:
 			ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
-			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_format_get_name(rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
@@ -19477,13 +19933,46 @@ pg_gsm_indicate_ringing_end:
 			// adjust voice format
 			rtp = ch_gsm->channel_rtp;
 			vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			rtp->format = ast_channel_writeformat(ast_ch);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_copy(&rtp->format, &ast_ch->writeformat);
 #else
 			rtp->format = ast_ch->writeformat;
 #endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (ast_format_cmp(rtp->format, ast_format_g723)) {
+				/*! G.723.1 compression */
+				rtp->payload_type = RTP_PT_G723;
+				rtp->encoder_packet_time = VIN_PTE_30;
+				rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+			} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+				/*! Raw mu-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMU;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+				/*! Raw A-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMA;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+				/*! G.729A audio */
+				rtp->payload_type = RTP_PT_G729;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+			} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+				/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+				rtp->payload_type = 2;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G726_32;
+			} else {
+				rtp->payload_type = -1;
+				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+			}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 			switch (rtp->format.id) {
 #else
@@ -19528,8 +20017,11 @@ pg_gsm_indicate_ringing_end:
 #endif
 					break;
 			}
+#endif
 			if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -19558,8 +20050,8 @@ pg_gsm_indicate_ringing_end:
 			}
 pg_gsm_proceeding_ringing_end:
 			ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
-			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_format_get_name(rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
@@ -19573,13 +20065,46 @@ pg_gsm_proceeding_ringing_end:
 			// adjust voice format
 			rtp = ch_gsm->channel_rtp;
 			vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			rtp->format = ast_channel_writeformat(ast_ch);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_copy(&rtp->format, &ast_ch->writeformat);
 #else
 			rtp->format = ast_ch->writeformat;
 #endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (ast_format_cmp(rtp->format, ast_format_g723)) {
+				/*! G.723.1 compression */
+				rtp->payload_type = RTP_PT_G723;
+				rtp->encoder_packet_time = VIN_PTE_30;
+				rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+			} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+				/*! Raw mu-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMU;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+				/*! Raw A-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMA;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+				/*! G.729A audio */
+				rtp->payload_type = RTP_PT_G729;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+			} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+				/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+				rtp->payload_type = 2;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G726_32;
+			} else {
+				rtp->payload_type = -1;
+				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+			}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 			switch (rtp->format.id) {
 #else
@@ -19624,8 +20149,11 @@ pg_gsm_proceeding_ringing_end:
 #endif
 					break;
 			}
+#endif
 			if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -19654,8 +20182,8 @@ pg_gsm_proceeding_ringing_end:
 			}
 pg_gsm_indicate_progress_end:
 			ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
-			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_format_get_name(rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(&rtp->format));
 #else
@@ -19690,8 +20218,15 @@ pg_gsm_indicate_progress_end:
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_SRCUPDATE:
 			ast_debug(4, "GSM channel=\"%s\": call line=%d src update\n", ch_gsm->alias, call->line);
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (((bridge = ast_channel_bridge_peer(call->owner))) &&
+#else
 			if (((bridge = ast_bridged_channel(call->owner))) &&
-#if ASTERISK_VERSION_NUMBER >= 110000
+#endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+					(ast_format_cap_iscompatible(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch))) &&
+					(!ast_format_cap_get_compatible(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch), joint))) {
+#elif ASTERISK_VERSION_NUMBER >= 110000
 					((joint = ast_format_cap_joint(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch))))) {
 #elif ASTERISK_VERSION_NUMBER >= 100000
 					((joint = ast_format_cap_joint(bridge->nativeformats, ast_ch->nativeformats)))) {
@@ -19700,7 +20235,12 @@ pg_gsm_indicate_progress_end:
 #endif
 				rtp = ch_gsm->channel_rtp;
 				vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				if (!(rtp->format = ast_format_cap_get_best_by_type(joint, AST_MEDIA_TYPE_AUDIO))) {
+					ao2_cleanup(joint);
+					break;
+				}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				if (!ast_best_codec(joint, &rtp->format)) {
 					ast_format_cap_destroy(joint);
 					break;
@@ -19710,7 +20250,37 @@ pg_gsm_indicate_progress_end:
 					break;
 				}
 #endif
-
+#if ASTERISK_VERSION_NUMBER >= 130000
+				if (ast_format_cmp(rtp->format, ast_format_g723)) {
+					/*! G.723.1 compression */
+					rtp->payload_type = RTP_PT_G723;
+					rtp->encoder_packet_time = VIN_PTE_30;
+					rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+				} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+					/*! Raw mu-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMU;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+				} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+					/*! Raw A-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMA;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+				} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+					/*! G.729A audio */
+					rtp->payload_type = RTP_PT_G729;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+				} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+					/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+					rtp->payload_type = 2;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G726_32;
+				} else {
+					rtp->payload_type = -1;
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+				}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 				switch (rtp->format.id) {
 #else
@@ -19755,13 +20325,18 @@ pg_gsm_indicate_progress_end:
 #endif
 						break;
 				}
+#endif
 				if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
 #endif
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+					ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 					ast_format_cap_destroy(joint);
 #endif
 					break;;
@@ -19788,7 +20363,14 @@ pg_gsm_indicate_progress_end:
 				}
 pg_gsm_indicate_srcupdate_end:
 				ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_channel_nativeformats_set(ast_ch, vin->capabilities);
+				ast_channel_set_rawreadformat(ast_ch, rtp->format);
+				ast_channel_set_rawwriteformat(ast_ch, rtp->format);
+				ast_channel_set_readformat(ast_ch, rtp->format);
+				ast_channel_set_writeformat(ast_ch, rtp->format);
+				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 110000
 				ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
 				ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
@@ -19811,7 +20393,9 @@ pg_gsm_indicate_srcupdate_end:
 				ast_ch->readformat = rtp->format;
 				ast_verb(3, "GSM channel=\"%s\": change codec to \"%s\"\n", ch_gsm->alias, ast_getformatname(rtp->format));
 #endif
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_format_cap_destroy(joint);
 #endif
 			}
@@ -19965,7 +20549,9 @@ static int pg_gsm_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int 
 //------------------------------------------------------------------------------
 // pg_fxs_requester()
 //------------------------------------------------------------------------------
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+static struct ast_channel *pg_fxs_requester(const char *type, struct ast_format_cap *format, const struct ast_assigned_ids *assignedids, const struct ast_channel *requestor, const char *data, int *cause)
+#elif ASTERISK_VERSION_NUMBER >= 110000
 static struct ast_channel *pg_fxs_requester(const char *type, struct ast_format_cap *format, const struct ast_channel *requestor, const char *data, int *cause)
 #elif ASTERISK_VERSION_NUMBER >= 100000
 static struct ast_channel *pg_fxs_requester(const char *type, struct ast_format_cap *format, const struct ast_channel *requestor, void *data, int *cause)
@@ -19995,6 +20581,10 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 	vin = NULL;
 	rtp = NULL;
 
+#if ASTERISK_VERSION_NUMBER >= 130000
+	joint = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+#endif
+
 	// get requested FXS channel from general channel list
 	if ((ch_fxs = pg_get_channel_fxs_by_name((char *)data)) || (ch_fxs = pg_get_channel_fxs_by_number((char *)data))) {
 		ast_mutex_lock(&ch_fxs->lock);
@@ -20004,7 +20594,10 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 			(ch_fxs->hook_state == PG_CHANNEL_FXS_HOOK_STATE_ON) &&
 			((vin = pg_get_vinetic_from_board(ch_fxs->board, ch_fxs->vinetic_number))) &&
 			(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			(ast_format_cap_iscompatible(format, vin->capabilities)) &&
+			(!ast_format_cap_get_compatible(format, vin->capabilities, joint)) &&
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 			((joint = format & vin->capabilities)) &&
@@ -20026,9 +20619,13 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 	}
 
 	if (!ch_fxs) {
-#if ASTERISK_VERSION_NUMBER >= 100000
-		ast_format_cap_destroy(joint);
+		if (joint) {
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			ast_format_cap_destroy(joint);
 #endif
+		}
 		return NULL;
 	}
 
@@ -20046,7 +20643,16 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 
 		rtp->event_is_now_recv = 0;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (!(rtp->format = ast_format_cap_get_best_by_type(joint, AST_MEDIA_TYPE_AUDIO))) {
+			*cause = AST_CAUSE_BEARERCAPABILITY_NOTIMPL;
+			pg_put_channel_rtp(rtp);
+			pg_channel_fxs_put_call(ch_fxs, call);
+			ao2_cleanup(joint);
+			ast_mutex_unlock(&ch_fxs->lock);
+			return NULL;
+		}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		if (!ast_best_codec(joint, &rtp->format)) {
 			*cause = AST_CAUSE_BEARERCAPABILITY_NOTIMPL;
 			pg_put_channel_rtp(rtp);
@@ -20064,7 +20670,37 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 			return NULL;
 		}
 #endif
-
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (ast_format_cmp(rtp->format, ast_format_g723)) {
+			/*! G.723.1 compression */
+			rtp->payload_type = RTP_PT_G723;
+			rtp->encoder_packet_time = VIN_PTE_30;
+			rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+		} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+			/*! Raw mu-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMU;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+			/*! Raw A-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMA;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+			/*! G.729A audio */
+			rtp->payload_type = RTP_PT_G729;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+		} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+			/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+			rtp->payload_type = 2;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G726_32;
+		} else {
+			rtp->payload_type = -1;
+			ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+		}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 		switch (rtp->format.id) {
 #else
@@ -20109,8 +20745,11 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 #endif
 				break;
 		}
+#endif
 		if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -20118,7 +20757,9 @@ static struct ast_channel *pg_fxs_requester(const char *type, int format, void *
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			pg_put_channel_rtp(rtp);
 			pg_channel_fxs_put_call(ch_fxs, call);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(joint);
 #endif
 			ast_mutex_unlock(&ch_fxs->lock);
@@ -20287,7 +20928,9 @@ pg_fxs_requester_vinetic_end:
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			pg_put_channel_rtp(rtp);
 			pg_channel_fxs_put_call(ch_fxs, call);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(joint);
 #endif
 			ast_mutex_unlock(&ch_fxs->lock);
@@ -20296,7 +20939,7 @@ pg_fxs_requester_vinetic_end:
 			ast_mutex_unlock(&vin->lock);
 		}
 	}
-	ch_fxs->channel_rtp_usage++;
+	++ch_fxs->channel_rtp_usage;
 	ch_fxs->channel_rtp = rtp;
 
 	// prevent deadlock while asterisk channel is allocating
@@ -20306,7 +20949,7 @@ pg_fxs_requester_vinetic_end:
 	ch_id = channel_id++;
 	ast_mutex_unlock(&pg_lock);
 	// allocation channel in pbx spool
-#if ASTERISK_VERSION_NUMBER < 10800
+#if ASTERISK_VERSION_NUMBER >= 130000
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_DOWN,			/* int state */
 								"",						/* const char *cid_num */
@@ -20314,10 +20957,12 @@ pg_fxs_requester_vinetic_end:
 								"",						/* const char *acctcode */
 								"",						/* const char *exten */
 								ch_fxs->config.context,	/* const char *context */
-								0,						/* const int amaflag */
+								assignedids,			/* const struct ast_assigned_ids *assignedids */
+								requestor,				/* const struct ast_channel *requestor */
+								0,						/* enum ama_flags amaflag */
 								"PGFXS/%s-%08x",		/* const char *name_fmt, ... */
 								ch_fxs->alias, ch_id);
-#else
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_DOWN,			/* int state */
 								"",						/* const char *cid_num */
@@ -20329,6 +20974,18 @@ pg_fxs_requester_vinetic_end:
 								0,						/* int amaflag */
 								"PGFXS/%s-%08x",		/* const char *name_fmt, ... */
 								ch_fxs->alias, ch_id);
+	
+#else
+	ast_ch = ast_channel_alloc(1,						/* int needqueue */
+								AST_STATE_DOWN,			/* int state */
+								"",						/* const char *cid_num */
+								"",						/* const char *cid_name */
+								"",						/* const char *acctcode */
+								"",						/* const char *exten */
+								ch_fxs->config.context,	/* const char *context */
+								0,						/* const int amaflag */
+								"PGFXS/%s-%08x",		/* const char *name_fmt, ... */
+								ch_fxs->alias, ch_id);
 #endif
 	ast_mutex_lock(&ch_fxs->lock);
 
@@ -20336,16 +20993,27 @@ pg_fxs_requester_vinetic_end:
 	if (!ast_ch) {
 		ast_log(LOG_ERROR, "ast_channel_alloc() failed\n");
 		*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
-		if (!ch_fxs->channel_rtp_usage) pg_put_channel_rtp(rtp);
+		if (!ch_fxs->channel_rtp_usage) {
+			pg_put_channel_rtp(rtp);
+		}
 		pg_channel_fxs_put_call(ch_fxs, call);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		ast_format_cap_destroy(joint);
 #endif
 		ast_mutex_unlock(&ch_fxs->lock);
 		return NULL;
 	}
 	// init asterisk channel tag's
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	ast_channel_nativeformats_set(ast_ch, vin->capabilities);
+	ast_channel_set_rawreadformat(ast_ch, rtp->format);
+	ast_channel_set_rawwriteformat(ast_ch, rtp->format);
+	ast_channel_set_readformat(ast_ch, rtp->format);
+	ast_channel_set_writeformat(ast_ch, rtp->format);
+	ast_verb(3, "FXS channel=\"%s\": selected codec \"%s\"\n", ch_fxs->alias, ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
@@ -20380,14 +21048,16 @@ pg_fxs_requester_vinetic_end:
 
 	call->owner = ast_ch;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_destroy(joint);
 #endif
 	ast_mutex_unlock(&ch_fxs->lock);
 	return ast_ch;
 }
 //------------------------------------------------------------------------------
-// pg_fxs_requester()
+// end of pg_fxs_requester()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -20713,6 +21383,10 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 #endif
 	struct pg_channel_fxs *ch_fxs = call->channel.fxs;
 
+#if ASTERISK_VERSION_NUMBER >= 130000
+	joint = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+#endif
+
 	ast_mutex_lock(&ch_fxs->lock);
 
 	switch (condition) {
@@ -20726,13 +21400,46 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 			// adjust voice format
 			rtp = ch_fxs->channel_rtp;
 			vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			rtp->format = ast_channel_writeformat(ast_ch);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_copy(&rtp->format, &ast_ch->writeformat);
 #else
 			rtp->format = ast_ch->writeformat;
 #endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (ast_format_cmp(rtp->format, ast_format_g723)) {
+				/*! G.723.1 compression */
+				rtp->payload_type = RTP_PT_G723;
+				rtp->encoder_packet_time = VIN_PTE_30;
+				rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+			} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+				/*! Raw mu-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMU;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+				/*! Raw A-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMA;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+				/*! G.729A audio */
+				rtp->payload_type = RTP_PT_G729;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+			} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+				/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+				rtp->payload_type = 2;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G726_32;
+			} else {
+				rtp->payload_type = -1;
+				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+			}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 			switch (rtp->format.id) {
 #else
@@ -20777,8 +21484,11 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 #endif
 					break;
 			}
+#endif
 			if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -20807,8 +21517,8 @@ static int pg_fxs_indicate(struct ast_channel *ast_ch, int condition, const void
 			}
 pg_fxs_indicate_ringing_end:
 			ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
-			ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_format_get_name(rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #else
@@ -21022,13 +21732,46 @@ pg_fxs_indicate_ringing_end:
 			// adjust voice format
 			rtp = ch_fxs->channel_rtp;
 			vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			rtp->format = ast_channel_writeformat(ast_ch);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_copy(&rtp->format, &ast_ch->writeformat);
 #else
 			rtp->format = ast_ch->writeformat;
 #endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (ast_format_cmp(rtp->format, ast_format_g723)) {
+				/*! G.723.1 compression */
+				rtp->payload_type = RTP_PT_G723;
+				rtp->encoder_packet_time = VIN_PTE_30;
+				rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+			} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+				/*! Raw mu-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMU;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+				/*! Raw A-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMA;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+				/*! G.729A audio */
+				rtp->payload_type = RTP_PT_G729;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+			} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+				/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+				rtp->payload_type = 2;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G726_32;
+			} else {
+				rtp->payload_type = -1;
+				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+			}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 			switch (rtp->format.id) {
 #else
@@ -21073,8 +21816,11 @@ pg_fxs_indicate_ringing_end:
 #endif
 					break;
 			}
+#endif
 			if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -21103,8 +21849,8 @@ pg_fxs_indicate_ringing_end:
 			}
 pg_fxs_indicate_proceeding_end:
 			ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
-				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_format_get_name(rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(&rtp->format));
 #else
@@ -21176,8 +21922,15 @@ pg_fxs_indicate_proceeding_end:
 		case AST_CONTROL_SRCUPDATE:
 			ast_debug(4, "FXS channel=\"%s\": call line=%d src update\n", ch_fxs->alias, call->line);
 			// get bridged channel for dicovering current voice codec
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (((bridge = ast_channel_bridge_peer(call->owner))) &&
+#else
 			if (((bridge = ast_bridged_channel(call->owner))) &&
-#if ASTERISK_VERSION_NUMBER >= 110000
+#endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+					(ast_format_cap_iscompatible(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch))) &&
+					(!ast_format_cap_get_compatible(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch), joint))) {
+#elif ASTERISK_VERSION_NUMBER >= 110000
 					((joint = ast_format_cap_joint(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch))))) {
 #elif ASTERISK_VERSION_NUMBER >= 100000
 					((joint = ast_format_cap_joint(bridge->nativeformats, ast_ch->nativeformats)))) {
@@ -21186,7 +21939,12 @@ pg_fxs_indicate_proceeding_end:
 #endif
 				rtp = ch_fxs->channel_rtp;
 				vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				if (!(rtp->format = ast_format_cap_get_best_by_type(joint, AST_MEDIA_TYPE_AUDIO))) {
+					ao2_cleanup(joint);
+					break;
+				}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				if (!ast_best_codec(joint, &rtp->format)) {
 					ast_format_cap_destroy(joint);
 					break;
@@ -21196,7 +21954,37 @@ pg_fxs_indicate_proceeding_end:
 					break;
 				}
 #endif
-
+#if ASTERISK_VERSION_NUMBER >= 130000
+				if (ast_format_cmp(rtp->format, ast_format_g723)) {
+					/*! G.723.1 compression */
+					rtp->payload_type = RTP_PT_G723;
+					rtp->encoder_packet_time = VIN_PTE_30;
+					rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+				} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+					/*! Raw mu-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMU;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+				} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+					/*! Raw A-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMA;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+				} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+					/*! G.729A audio */
+					rtp->payload_type = RTP_PT_G729;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+				} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+					/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+					rtp->payload_type = 2;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G726_32;
+				} else {
+					rtp->payload_type = -1;
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+				}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 				switch (rtp->format.id) {
 #else
@@ -21241,13 +22029,18 @@ pg_fxs_indicate_proceeding_end:
 #endif
 						break;
 				}
+#endif
 				if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
 #endif
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+					ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 					ast_format_cap_destroy(joint);
 #endif
 					break;;
@@ -21274,7 +22067,14 @@ pg_fxs_indicate_proceeding_end:
 				}
 pg_fxs_indicate_srcupdate_end:
 				ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_channel_nativeformats_set(ast_ch, vin->capabilities);
+				ast_channel_set_rawreadformat(ast_ch, rtp->format);
+				ast_channel_set_rawwriteformat(ast_ch, rtp->format);
+				ast_channel_set_readformat(ast_ch, rtp->format);
+				ast_channel_set_writeformat(ast_ch, rtp->format);
+				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 110000
 				ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
 				ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
@@ -21296,7 +22096,9 @@ pg_fxs_indicate_srcupdate_end:
 				ast_ch->readformat = rtp->format;
 				ast_verb(3, "FXS channel=\"%s\": change codec to \"%s\"\n", ch_fxs->alias, ast_getformatname(rtp->format));
 #endif
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_format_cap_destroy(joint);
 #endif
 			}
@@ -21527,7 +22329,9 @@ static int pg_fxs_dtmf_end(struct ast_channel *ast_ch, char digit, unsigned int 
 //------------------------------------------------------------------------------
 // pg_fxo_requester()
 //------------------------------------------------------------------------------
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+static struct ast_channel *pg_fxo_requester(const char *type, struct ast_format_cap *format, const struct ast_assigned_ids *assignedids, const struct ast_channel *requestor, const char *data, int *cause)
+#elif ASTERISK_VERSION_NUMBER >= 110000
 static struct ast_channel *pg_fxo_requester(const char *type, struct ast_format_cap *format, const struct ast_channel *requestor, const char *data, int *cause)
 #elif ASTERISK_VERSION_NUMBER >= 100000
 static struct ast_channel *pg_fxo_requester(const char *type, struct ast_format_cap *format, const struct ast_channel *requestor, void *data, int *cause)
@@ -21557,6 +22361,9 @@ static struct ast_channel *pg_fxo_requester(const char *type, int format, void *
 	vin = NULL;
 	rtp = NULL;
 
+#if ASTERISK_VERSION_NUMBER >= 130000
+	joint = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+#endif
 
 	ast_mutex_lock(&pg_lock);
 	// search free channel in general channel list
@@ -21577,7 +22384,10 @@ static struct ast_channel *pg_fxo_requester(const char *type, int format, void *
 			(!pg_is_channel_fxo_has_calls(ch_fxo)) &&
 			((vin = pg_get_vinetic_from_board(ch_fxo->board, ch_fxo->vinetic_number))) &&
 			(pg_is_vinetic_run(vin)) &&
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			(ast_format_cap_iscompatible(format, vin->capabilities)) &&
+			(!ast_format_cap_get_compatible(format, vin->capabilities, joint)) &&
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			((joint = ast_format_cap_joint(format, vin->capabilities))) &&
 #else
 			((joint = format & vin->capabilities)) &&
@@ -21612,9 +22422,13 @@ static struct ast_channel *pg_fxo_requester(const char *type, int format, void *
 	}
 
 	if (!ch_fxo) {
-#if ASTERISK_VERSION_NUMBER >= 100000
-		if (joint) ast_format_cap_destroy(joint);
+		if (joint) {
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
+			ast_format_cap_destroy(joint);
 #endif
+		}
 		return NULL;
 	}
 
@@ -21632,7 +22446,16 @@ static struct ast_channel *pg_fxo_requester(const char *type, int format, void *
 
 		rtp->event_is_now_recv = 0;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (!(rtp->format = ast_format_cap_get_best_by_type(joint, AST_MEDIA_TYPE_AUDIO))) {
+			*cause = AST_CAUSE_BEARERCAPABILITY_NOTIMPL;
+			pg_put_channel_rtp(rtp);
+			pg_channel_fxo_put_call(ch_fxo, call);
+			ao2_cleanup(joint);
+			ast_mutex_unlock(&ch_fxo->lock);
+			return NULL;
+		}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		if (!ast_best_codec(joint, &rtp->format)) {
 			*cause = AST_CAUSE_BEARERCAPABILITY_NOTIMPL;
 			pg_put_channel_rtp(rtp);
@@ -21650,7 +22473,37 @@ static struct ast_channel *pg_fxo_requester(const char *type, int format, void *
 			return NULL;
 		}
 #endif
-
+#if ASTERISK_VERSION_NUMBER >= 130000
+		if (ast_format_cmp(rtp->format, ast_format_g723)) {
+			/*! G.723.1 compression */
+			rtp->payload_type = RTP_PT_G723;
+			rtp->encoder_packet_time = VIN_PTE_30;
+			rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+		} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+			/*! Raw mu-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMU;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+			/*! Raw A-law data (G.711) */
+			rtp->payload_type = RTP_PT_PCMA;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+		} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+			/*! G.729A audio */
+			rtp->payload_type = RTP_PT_G729;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+		} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+			/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+			rtp->payload_type = 2;
+			rtp->encoder_packet_time = VIN_PTE_20;
+			rtp->encoder_algorithm = VIN_ENC_G726_32;
+		} else {
+			rtp->payload_type = -1;
+			ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+		}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 		switch (rtp->format.id) {
 #else
@@ -21695,8 +22548,11 @@ static struct ast_channel *pg_fxo_requester(const char *type, int format, void *
 #endif
 				break;
 		}
+#endif
 		if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 			ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -21704,7 +22560,9 @@ static struct ast_channel *pg_fxo_requester(const char *type, int format, void *
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			pg_put_channel_rtp(rtp);
 			pg_channel_fxo_put_call(ch_fxo, call);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(joint);
 #endif
 			ast_mutex_unlock(&ch_fxo->lock);
@@ -22028,7 +22886,9 @@ pg_fxo_requester_vinetic_end:
 			*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
 			pg_put_channel_rtp(rtp);
 			pg_channel_fxo_put_call(ch_fxo, call);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(joint);
 #endif
 			ast_mutex_unlock(&ch_fxo->lock);
@@ -22037,7 +22897,7 @@ pg_fxo_requester_vinetic_end:
 			ast_mutex_unlock(&vin->lock);
 		}
 	}
-	ch_fxo->channel_rtp_usage++;
+	++ch_fxo->channel_rtp_usage;
 	ch_fxo->channel_rtp = rtp;
 
 	// prevent deadlock while asterisk channel is allocating
@@ -22047,7 +22907,7 @@ pg_fxo_requester_vinetic_end:
 	ch_id = channel_id++;
 	ast_mutex_unlock(&pg_lock);
 	// allocation channel in pbx spool
-#if ASTERISK_VERSION_NUMBER < 10800
+#if ASTERISK_VERSION_NUMBER >= 130000
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_DOWN,			/* int state */
 								"",						/* const char *cid_num */
@@ -22055,10 +22915,12 @@ pg_fxo_requester_vinetic_end:
 								"",						/* const char *acctcode */
 								"",						/* const char *exten */
 								ch_fxo->config.context,	/* const char *context */
-								0,						/* const int amaflag */
+								assignedids,			/* const struct ast_assigned_ids *assignedids */
+								requestor,				/* const struct ast_channel *requestor */
+								0,						/* enum ama_flags amaflag */
 								"PGFXO/%s-%08x",		/* const char *name_fmt, ... */
 								ch_fxo->alias, ch_id);
-#else
+#elif ASTERISK_VERSION_NUMBER >= 10800
 	ast_ch = ast_channel_alloc(1,						/* int needqueue */
 								AST_STATE_DOWN,			/* int state */
 								"",						/* const char *cid_num */
@@ -22070,6 +22932,17 @@ pg_fxo_requester_vinetic_end:
 								0,						/* int amaflag */
 								"PGFXO/%s-%08x",		/* const char *name_fmt, ... */
 								ch_fxo->alias, ch_id);
+#else
+	ast_ch = ast_channel_alloc(1,						/* int needqueue */
+								AST_STATE_DOWN,			/* int state */
+								"",						/* const char *cid_num */
+								"",						/* const char *cid_name */
+								"",						/* const char *acctcode */
+								"",						/* const char *exten */
+								ch_fxo->config.context,	/* const char *context */
+								0,						/* const int amaflag */
+								"PGFXO/%s-%08x",		/* const char *name_fmt, ... */
+								ch_fxo->alias, ch_id);
 #endif
 	ast_mutex_lock(&ch_fxo->lock);
 
@@ -22077,16 +22950,27 @@ pg_fxo_requester_vinetic_end:
 	if (!ast_ch) {
 		ast_log(LOG_ERROR, "ast_channel_alloc() failed\n");
 		*cause = AST_CAUSE_REQUESTED_CHAN_UNAVAIL;
-		if (!ch_fxo->channel_rtp_usage) pg_put_channel_rtp(rtp);
+		if (!ch_fxo->channel_rtp_usage) {
+			pg_put_channel_rtp(rtp);
+		}
 		pg_channel_fxo_put_call(ch_fxo, call);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		ast_format_cap_destroy(joint);
 #endif
 		ast_mutex_unlock(&ch_fxo->lock);
 		return NULL;
 	}
 	// init asterisk channel tag's
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	ast_channel_nativeformats_set(ast_ch, vin->capabilities);
+	ast_channel_set_rawreadformat(ast_ch, rtp->format);
+	ast_channel_set_rawwriteformat(ast_ch, rtp->format);
+	ast_channel_set_readformat(ast_ch, rtp->format);
+	ast_channel_set_writeformat(ast_ch, rtp->format);
+	ast_verb(3, "FXO channel=\"%s\": selected codec \"%s\"\n", ch_fxo->alias, ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 110000
 	ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
 	ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 	ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
@@ -22123,14 +23007,16 @@ pg_fxo_requester_vinetic_end:
 
 	ast_channel_set_fd(ast_ch, 0, ch_fxo->channel_rtp->fd);
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+	ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 	ast_format_cap_destroy(joint);
 #endif
 	ast_mutex_unlock(&ch_fxo->lock);
 	return ast_ch;
 }
 //------------------------------------------------------------------------------
-// pg_fxo_requester()
+// end of pg_fxo_requester()
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
@@ -22384,6 +23270,10 @@ static int pg_fxo_indicate(struct ast_channel *ast_ch, int condition, const void
 #endif
 	struct pg_channel_fxo *ch_fxo = call->channel.fxo;
 
+#if ASTERISK_VERSION_NUMBER >= 130000
+	joint = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+#endif
+
 	ast_mutex_lock(&ch_fxo->lock);
 
 	switch (condition) {
@@ -22393,13 +23283,46 @@ static int pg_fxo_indicate(struct ast_channel *ast_ch, int condition, const void
 			// adjust voice format
 			rtp = ch_fxo->channel_rtp;
 			vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			rtp->format = ast_channel_writeformat(ast_ch);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_copy(&rtp->format, &ast_ch->writeformat);
 #else
 			rtp->format = ast_ch->writeformat;
 #endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (ast_format_cmp(rtp->format, ast_format_g723)) {
+				/*! G.723.1 compression */
+				rtp->payload_type = RTP_PT_G723;
+				rtp->encoder_packet_time = VIN_PTE_30;
+				rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+			} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+				/*! Raw mu-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMU;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+				/*! Raw A-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMA;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+				/*! G.729A audio */
+				rtp->payload_type = RTP_PT_G729;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+			} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+				/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+				rtp->payload_type = 2;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G726_32;
+			} else {
+				rtp->payload_type = -1;
+				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+			}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 			switch (rtp->format.id) {
 #else
@@ -22444,8 +23367,11 @@ static int pg_fxo_indicate(struct ast_channel *ast_ch, int condition, const void
 #endif
 					break;
 			}
+#endif
 			if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -22474,8 +23400,8 @@ static int pg_fxo_indicate(struct ast_channel *ast_ch, int condition, const void
 			}
 pg_fxo_indicate_ringing_end:
 			ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
-			ast_verb(3, "FXO channel=\"%s\": change codec to \"%s\"\n", ch_fxo->alias, ast_getformatname(&rtp->format));
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_verb(3, "FXO channel=\"%s\": change codec to \"%s\"\n", ch_fxo->alias, ast_format_get_name(rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_verb(3, "FXO channel=\"%s\": change codec to \"%s\"\n", ch_fxo->alias, ast_getformatname(&rtp->format));
 #else
@@ -22517,13 +23443,46 @@ pg_fxo_indicate_ringing_end:
 			// adjust voice format
 			rtp = ch_fxo->channel_rtp;
 			vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			rtp->format = ast_channel_writeformat(ast_ch);
+#elif ASTERISK_VERSION_NUMBER >= 110000
 			ast_format_copy(&rtp->format, ast_channel_writeformat(ast_ch));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_copy(&rtp->format, &ast_ch->writeformat);
 #else
 			rtp->format = ast_ch->writeformat;
 #endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (ast_format_cmp(rtp->format, ast_format_g723)) {
+				/*! G.723.1 compression */
+				rtp->payload_type = RTP_PT_G723;
+				rtp->encoder_packet_time = VIN_PTE_30;
+				rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+			} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+				/*! Raw mu-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMU;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+				/*! Raw A-law data (G.711) */
+				rtp->payload_type = RTP_PT_PCMA;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+			} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+				/*! G.729A audio */
+				rtp->payload_type = RTP_PT_G729;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+			} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+				/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+				rtp->payload_type = 2;
+				rtp->encoder_packet_time = VIN_PTE_20;
+				rtp->encoder_algorithm = VIN_ENC_G726_32;
+			} else {
+				rtp->payload_type = -1;
+				ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+			}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 			switch (rtp->format.id) {
 #else
@@ -22568,8 +23527,11 @@ pg_fxo_indicate_ringing_end:
 #endif
 					break;
 			}
+#endif
 			if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 				ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
@@ -22598,8 +23560,8 @@ pg_fxo_indicate_ringing_end:
 			}
 pg_fxo_indicate_proceeding_end:
 			ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
-			ast_verb(3, "FXO channel=\"%s\": change codec to \"%s\"\n", ch_fxo->alias, ast_getformatname(&rtp->format));
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ast_verb(3, "FXO channel=\"%s\": change codec to \"%s\"\n", ch_fxo->alias, ast_format_get_name(rtp->format));
 #elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_verb(3, "FXO channel=\"%s\": change codec to \"%s\"\n", ch_fxo->alias, ast_getformatname(&rtp->format));
 #else
@@ -22627,8 +23589,15 @@ pg_fxo_indicate_proceeding_end:
 		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 		case AST_CONTROL_SRCUPDATE:
 			ast_debug(4, "FXO channel=\"%s\": call line=%d src update\n", ch_fxo->alias, call->line);
+#if ASTERISK_VERSION_NUMBER >= 130000
+			if (((bridge = ast_channel_bridge_peer(call->owner))) &&
+#else
 			if (((bridge = ast_bridged_channel(call->owner))) &&
-#if ASTERISK_VERSION_NUMBER >= 110000
+#endif
+#if ASTERISK_VERSION_NUMBER >= 130000
+					(ast_format_cap_iscompatible(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch))) &&
+					(!ast_format_cap_get_compatible(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch), joint))) {
+#elif ASTERISK_VERSION_NUMBER >= 110000
 					((joint = ast_format_cap_joint(ast_channel_nativeformats(bridge), ast_channel_nativeformats(ast_ch))))) {
 #elif ASTERISK_VERSION_NUMBER >= 100000
 					((joint = ast_format_cap_joint(bridge->nativeformats, ast_ch->nativeformats)))) {
@@ -22637,7 +23606,12 @@ pg_fxo_indicate_proceeding_end:
 #endif
 				rtp = ch_fxo->channel_rtp;
 				vin = rtp->vinetic;
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				if (!(rtp->format = ast_format_cap_get_best_by_type(joint, AST_MEDIA_TYPE_AUDIO))) {
+					ao2_cleanup(joint);
+					break;
+				}
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				if (!ast_best_codec(joint, &rtp->format)) {
 					ast_format_cap_destroy(joint);
 					break;
@@ -22647,7 +23621,37 @@ pg_fxo_indicate_proceeding_end:
 					break;
 				}
 #endif
-
+#if ASTERISK_VERSION_NUMBER >= 130000
+				if (ast_format_cmp(rtp->format, ast_format_g723)) {
+					/*! G.723.1 compression */
+					rtp->payload_type = RTP_PT_G723;
+					rtp->encoder_packet_time = VIN_PTE_30;
+					rtp->encoder_algorithm = VIN_ENC_G7231_5_3;
+				} else if (ast_format_cmp(rtp->format, ast_format_ulaw)) {
+					/*! Raw mu-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMU;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_MLAW;
+				} else if (ast_format_cmp(rtp->format, ast_format_alaw)) {
+					/*! Raw A-law data (G.711) */
+					rtp->payload_type = RTP_PT_PCMA;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G711_ALAW;
+				} else if (ast_format_cmp(rtp->format, ast_format_g729)) {
+					/*! G.729A audio */
+					rtp->payload_type = RTP_PT_G729;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G729AB_8;
+				} else if (ast_format_cmp(rtp->format, ast_format_g726)) {
+					/*! ADPCM (G.726, 32kbps, RFC3551 codeword packing) */
+					rtp->payload_type = 2;
+					rtp->encoder_packet_time = VIN_PTE_20;
+					rtp->encoder_algorithm = VIN_ENC_G726_32;
+				} else {
+					rtp->payload_type = -1;
+					ast_log(LOG_ERROR, "unknown asterisk frame format=%s\n", ast_format_get_name(rtp->format));
+				}
+#else
 #if ASTERISK_VERSION_NUMBER >= 100000
 				switch (rtp->format.id) {
 #else
@@ -22692,16 +23696,21 @@ pg_fxo_indicate_proceeding_end:
 #endif
 						break;
 				}
+#endif
 				if (rtp->payload_type < 0) {
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 100000
 					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(&rtp->format));
 #else
 					ast_log(LOG_WARNING, "can't assign frame format=%s with RTP payload type\n", ast_getformatname(rtp->format));
 #endif
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+					ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 					ast_format_cap_destroy(joint);
 #endif
-					break;;
+					break;
 				}
 				rtp->payload_type &= 0x7f;
 				rtp->event_payload_type = 107;
@@ -22725,7 +23734,14 @@ pg_fxo_indicate_proceeding_end:
 				}
 pg_fxo_indicate_srcupdate_end:
 				ast_mutex_unlock(&vin->lock);
-#if ASTERISK_VERSION_NUMBER >= 110000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ast_channel_nativeformats_set(ast_ch, vin->capabilities);
+				ast_channel_set_rawreadformat(ast_ch, rtp->format);
+				ast_channel_set_rawwriteformat(ast_ch, rtp->format);
+				ast_channel_set_readformat(ast_ch, rtp->format);
+				ast_channel_set_writeformat(ast_ch, rtp->format);
+				ast_verb(3, "FXO channel=\"%s\": change codec to \"%s\"\n", ch_fxo->alias, ast_format_get_name(rtp->format));
+#elif ASTERISK_VERSION_NUMBER >= 110000
 				ast_format_cap_copy(ast_channel_nativeformats(ast_ch), vin->capabilities);
 				ast_format_copy(ast_channel_rawreadformat(ast_ch), &rtp->format);
 				ast_format_copy(ast_channel_rawwriteformat(ast_ch), &rtp->format);
@@ -22748,7 +23764,9 @@ pg_fxo_indicate_srcupdate_end:
 				ast_ch->readformat = rtp->format;
 				ast_verb(3, "FXO channel=\"%s\": change codec to \"%s\"\n", ch_fxo->alias, ast_getformatname(rtp->format));
 #endif
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+				ao2_cleanup(joint);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 				ast_format_cap_destroy(joint);
 #endif
 			}
@@ -23200,7 +24218,7 @@ static char *pg_cli_generate_complete_channel_gsm_action(const char *begin, int 
 	which = 0;
 	beginlen = strlen(begin);
 
-	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); i++) {
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); ++i) {
 		// get actions name
 		if ((!strncmp(begin, pg_cli_channel_gsm_action_handlers[i].name, beginlen)) && (++which > count)) {
 			res = ast_strdup(pg_cli_channel_gsm_action_handlers[i].name);
@@ -23277,7 +24295,7 @@ static char *pg_cli_generate_complete_channel_gsm_action_params(const char *begi
 	}
 
 	if (single || all) {
-		for (i=0; i<PG_CHANNEL_PARAMS_COUNT(pg_channel_gsm_params); i++) {
+		for (i=0; i<PG_CHANNEL_PARAMS_COUNT(pg_channel_gsm_params); ++i) {
 			// get actions name
 			if (((single & pg_channel_gsm_params[i].single) || (all & pg_channel_gsm_params[i].all)) && (!strncmp(begin, pg_channel_gsm_params[i].name, beginlen)) && (++which > count)) {
 				res = ast_strdup(pg_channel_gsm_params[i].name);
@@ -23306,7 +24324,7 @@ static char *pg_cli_generate_complete_channel_gsm_action_debug_params(const char
 	which = 0;
 	beginlen = strlen(begin);
 
-	for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_channel_gsm_debugs); i++)
+	for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_channel_gsm_debugs); ++i)
 	{
 		// get actions name
 		if ((!strncmp(begin, pg_channel_gsm_debugs[i].name, beginlen)) && (++which > count)) {
@@ -23399,7 +24417,7 @@ static char *pg_cli_generate_complete_channel_gsm_progress(const char *begin, in
 	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
 		ast_mutex_lock(&ch_gsm->lock);
 
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_progress_types); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_gsm_progress_types); ++i) {
 			if ((pg_call_gsm_progress_types[i].id != ch_gsm->config.progress) &&
 				(!strncmp(begin, pg_call_gsm_progress_types[i].name, beginlen)) &&
 					(++which > count)) {
@@ -23432,7 +24450,7 @@ static char *pg_cli_generate_complete_channel_gsm_incoming(const char *begin, in
 
 	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
 		ast_mutex_lock(&ch_gsm->lock);
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); ++i) {
 			if ((pg_call_incoming_types[i].id != ch_gsm->config.incoming_type) &&
 				(!strncmp(begin, pg_call_incoming_types[i].name, beginlen)) &&
 					(++which > count)) {
@@ -23465,7 +24483,7 @@ static char *pg_cli_generate_complete_channel_gsm_outgoing(const char *begin, in
 
 	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
 		ast_mutex_lock(&ch_gsm->lock);
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); ++i) {
 			if ((pg_call_permissions[i].id != ch_gsm->config.outgoing_perm) &&
 				(!strncmp(begin, pg_call_permissions[i].name, beginlen)) &&
 					(++which > count)) {
@@ -23498,7 +24516,7 @@ static char *pg_cli_generate_complete_channel_gsm_callwait(const char *begin, in
 
 	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
 		ast_mutex_lock(&ch_gsm->lock);
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_callwait_states); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_callwait_states); ++i) {
 			if ((pg_callwait_states[i].id != ch_gsm->config.callwait) &&
 				(pg_callwait_states[i].id != PG_CALLWAIT_STATE_QUERY) &&
 				(!strncmp(begin, pg_callwait_states[i].name, beginlen)) &&
@@ -23532,7 +24550,7 @@ static char *pg_cli_generate_complete_channel_gsm_clir(const char *begin, int co
 
 	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
 		ast_mutex_lock(&ch_gsm->lock);
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_clir_states); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_clir_states); ++i) {
 			if ((pg_clir_states[i].id != ch_gsm->config.clir) &&
 				(pg_clir_states[i].id != PG_CLIR_STATE_QUERY) &&
 				(!strncmp(begin, pg_clir_states[i].name, beginlen)) &&
@@ -23802,7 +24820,7 @@ static char *pg_cli_generate_complete_channel_gsm_ali_nelec_nlpm(const char *beg
 
 	if ((ch_gsm = pg_get_channel_gsm_by_name(channel_gsm))) {
 		ast_mutex_lock(&ch_gsm->lock);
-		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); ++i) {
 			if ((pg_vinetic_ali_nelec_nlpms[i].id != ch_gsm->config.ali_nelec_nlpm) &&
 				(!strncmp(begin, pg_vinetic_ali_nelec_nlpms[i].name, beginlen)) &&
 					(++which > count)) {
@@ -23812,7 +24830,7 @@ static char *pg_cli_generate_complete_channel_gsm_ali_nelec_nlpm(const char *beg
 		}
 		ast_mutex_unlock(&ch_gsm->lock);
 	} else {
-		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); ++i) {
 			if ((!strncmp(begin, pg_vinetic_ali_nelec_nlpms[i].name, beginlen)) && (++which > count)) {
 				res = ast_strdup(pg_vinetic_ali_nelec_nlpms[i].name);
 				break;
@@ -23975,7 +24993,7 @@ static char *pg_cli_generate_complete_channel_fxs_action(const char *begin, int 
 	which = 0;
 	beginlen = strlen(begin);
 
-	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxs_action_handlers); i++) {
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxs_action_handlers); ++i) {
 		// get actions name
 		if ((!strncmp(begin, pg_cli_channel_fxs_action_handlers[i].name, beginlen)) && (++which > count)) {
 			res = ast_strdup(pg_cli_channel_fxs_action_handlers[i].name);
@@ -24016,7 +25034,7 @@ static char *pg_cli_generate_complete_channel_fxs_action_params(const char *begi
 	}
 
 	if (single || all) {
-		for (i=0; i<PG_CHANNEL_PARAMS_COUNT(pg_channel_fxs_params); i++) {
+		for (i=0; i<PG_CHANNEL_PARAMS_COUNT(pg_channel_fxs_params); ++i) {
 			// get actions name
 			if (((single & pg_channel_fxs_params[i].single) || (all & pg_channel_fxs_params[i].all)) && (!strncmp(begin, pg_channel_fxs_params[i].name, beginlen)) && (++which > count)) {
 				res = ast_strdup(pg_channel_fxs_params[i].name);
@@ -24048,7 +25066,7 @@ static char *pg_cli_generate_complete_channel_fxs_outgoing(const char *begin, in
 
 	if ((ch_fxs = pg_get_channel_fxs_by_name(channel_fxs))) {
 		ast_mutex_lock(&ch_fxs->lock);
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); ++i) {
 			if ((pg_call_permissions[i].id != ch_fxs->config.outgoing_perm) &&
 				(!strncmp(begin, pg_call_permissions[i].name, beginlen)) &&
 					(++which > count)) {
@@ -24058,7 +25076,7 @@ static char *pg_cli_generate_complete_channel_fxs_outgoing(const char *begin, in
 		}
 		ast_mutex_unlock(&ch_fxs->lock);
 	} else {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); ++i) {
 			if ((!strncmp(begin, pg_call_permissions[i].name, beginlen)) &&
 					(++which > count)) {
 				res = ast_strdup(pg_call_permissions[i].name);
@@ -24090,7 +25108,7 @@ static char *pg_cli_generate_complete_channel_fxs_incoming(const char *begin, in
 
 	if ((ch_fxs = pg_get_channel_fxs_by_name(channel_fxs))) {
 		ast_mutex_lock(&ch_fxs->lock);
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); ++i) {
 			if ((pg_call_permissions[i].id != ch_fxs->config.incoming_perm) &&
 				(!strncmp(begin, pg_call_permissions[i].name, beginlen)) &&
 					(++which > count)) {
@@ -24100,7 +25118,7 @@ static char *pg_cli_generate_complete_channel_fxs_incoming(const char *begin, in
 		}
 		ast_mutex_unlock(&ch_fxs->lock);
 	} else {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); ++i) {
 			if ((!strncmp(begin, pg_call_permissions[i].name, beginlen)) &&
 					(++which > count)) {
 				res = ast_strdup(pg_call_permissions[i].name);
@@ -24337,7 +25355,7 @@ static char *pg_cli_generate_complete_channel_fxs_ali_nelec_nlpm(const char *beg
 
 	if ((ch_fxs = pg_get_channel_fxs_by_name(channel_fxs))) {
 		ast_mutex_lock(&ch_fxs->lock);
-		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); ++i) {
 			if ((pg_vinetic_ali_nelec_nlpms[i].id != ch_fxs->config.ali_nelec_nlpm) &&
 				(!strncmp(begin, pg_vinetic_ali_nelec_nlpms[i].name, beginlen)) &&
 					(++which > count)) {
@@ -24347,7 +25365,7 @@ static char *pg_cli_generate_complete_channel_fxs_ali_nelec_nlpm(const char *beg
 		}
 		ast_mutex_unlock(&ch_fxs->lock);
 	} else {
-		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); ++i) {
 			if ((!strncmp(begin, pg_vinetic_ali_nelec_nlpms[i].name, beginlen)) && (++which > count)) {
 				res = ast_strdup(pg_vinetic_ali_nelec_nlpms[i].name);
 				break;
@@ -24413,7 +25431,7 @@ static char *pg_cli_generate_complete_channel_fxo_action(const char *begin, int 
 	which = 0;
 	beginlen = strlen(begin);
 
-	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxo_action_handlers); i++) {
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxo_action_handlers); ++i) {
 		// get actions name
 		if ((!strncmp(begin, pg_cli_channel_fxo_action_handlers[i].name, beginlen)) && (++which > count)) {
 			res = ast_strdup(pg_cli_channel_fxo_action_handlers[i].name);
@@ -24454,7 +25472,7 @@ static char *pg_cli_generate_complete_channel_fxo_action_params(const char *begi
 	}
 
 	if (single || all) {
-		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxo_params); i++) {
+		for (i = 0; i < PG_CHANNEL_PARAMS_COUNT(pg_channel_fxo_params); ++i) {
 			// get actions name
 			if (((single & pg_channel_fxo_params[i].single) || (all & pg_channel_fxo_params[i].all)) && (!strncmp(begin, pg_channel_fxo_params[i].name, beginlen)) && (++which > count)) {
 				res = ast_strdup(pg_channel_fxo_params[i].name);
@@ -24486,7 +25504,7 @@ static char *pg_cli_generate_complete_channel_fxo_outgoing(const char *begin, in
 
 	if ((ch_fxo = pg_get_channel_fxo_by_name(channel_fxo))) {
 		ast_mutex_lock(&ch_fxo->lock);
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); ++i) {
 			if ((pg_call_permissions[i].id != ch_fxo->config.outgoing_perm) &&
 				(!strncmp(begin, pg_call_permissions[i].name, beginlen)) &&
 					(++which > count)) {
@@ -24496,7 +25514,7 @@ static char *pg_cli_generate_complete_channel_fxo_outgoing(const char *begin, in
 		}
 		ast_mutex_unlock(&ch_fxo->lock);
 	} else {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_permissions); ++i) {
 			if ((!strncmp(begin, pg_call_permissions[i].name, beginlen)) &&
 					(++which > count)) {
 				res = ast_strdup(pg_call_permissions[i].name);
@@ -24528,7 +25546,7 @@ static char *pg_cli_generate_complete_channel_fxo_incoming(const char *begin, in
 
 	if ((ch_fxo = pg_get_channel_fxo_by_name(channel_fxo))) {
 		ast_mutex_lock(&ch_fxo->lock);
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); ++i) {
 			if ((pg_call_incoming_types[i].id != ch_fxo->config.incoming_type) &&
 				(!strncmp(begin, pg_call_incoming_types[i].name, beginlen)) &&
 					(++which > count)) {
@@ -24538,7 +25556,7 @@ static char *pg_cli_generate_complete_channel_fxo_incoming(const char *begin, in
 		}
 		ast_mutex_unlock(&ch_fxo->lock);
 	} else {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_incoming_types); ++i) {
 			if ((!strncmp(begin, pg_call_incoming_types[i].name, beginlen)) &&
 					(++which > count)) {
 				res = ast_strdup(pg_call_incoming_types[i].name);
@@ -24570,7 +25588,7 @@ static char *pg_cli_generate_complete_channel_fxo_dialing(const char *begin, int
 
 	if ((ch_fxo = pg_get_channel_fxo_by_name(channel_fxo))) {
 		ast_mutex_lock(&ch_fxo->lock);
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_dialing_types); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_dialing_types); ++i) {
 			if ((pg_call_dialing_types[i].id != ch_fxo->config.dialing_type) &&
 				(!strncmp(begin, pg_call_dialing_types[i].name, beginlen)) &&
 					(++which > count)) {
@@ -24580,7 +25598,7 @@ static char *pg_cli_generate_complete_channel_fxo_dialing(const char *begin, int
 		}
 		ast_mutex_unlock(&ch_fxo->lock);
 	} else {
-		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_dialing_types); i++) {
+		for (i = 0; i < PG_GENERIC_PARAMS_COUNT(pg_call_dialing_types); ++i) {
 			if ((!strncmp(begin, pg_call_dialing_types[i].name, beginlen)) &&
 					(++which > count)) {
 				res = ast_strdup(pg_call_dialing_types[i].name);
@@ -24858,7 +25876,7 @@ static char *pg_cli_generate_complete_channel_fxo_ali_nelec_nlpm(const char *beg
 
 	if ((ch_fxo = pg_get_channel_fxo_by_name(channel_fxo))) {
 		ast_mutex_lock(&ch_fxo->lock);
-		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); ++i) {
 			if ((pg_vinetic_ali_nelec_nlpms[i].id != ch_fxo->config.ali_nelec_nlpm) &&
 				(!strncmp(begin, pg_vinetic_ali_nelec_nlpms[i].name, beginlen)) &&
 					(++which > count)) {
@@ -24868,7 +25886,7 @@ static char *pg_cli_generate_complete_channel_fxo_ali_nelec_nlpm(const char *beg
 		}
 		ast_mutex_unlock(&ch_fxo->lock);
 	} else {
-		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); i++) {
+		for (i=0; i<PG_GENERIC_PARAMS_COUNT(pg_vinetic_ali_nelec_nlpms); ++i) {
 			if ((!strncmp(begin, pg_vinetic_ali_nelec_nlpms[i].name, beginlen)) && (++which > count)) {
 				res = ast_strdup(pg_vinetic_ali_nelec_nlpms[i].name);
 				break;
@@ -26821,7 +27839,7 @@ static char *pg_cli_channel_gsm_actions(struct ast_cli_entry *e, int cmd, struct
 				// search action CLI entry
 				gline = ast_strdupa(a->line);
 				if (!(pg_cli_generating_prepare(gline, &gargc, gargv))) {
-					for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); i++) {
+					for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); ++i) {
 						// get actions by name
 						if (!strcmp(gargv[4], pg_cli_channel_gsm_action_handlers[i].name)) {
 							subhandler = pg_cli_channel_gsm_action_handlers[i].handler;
@@ -26851,7 +27869,7 @@ static char *pg_cli_channel_gsm_actions(struct ast_cli_entry *e, int cmd, struct
 
 	subhandler = NULL;
 	// search action CLI entry
-	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); i++) {
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_gsm_action_handlers); ++i) {
 		// get actions by name
 		if (!strcmp(a->argv[4], pg_cli_channel_gsm_action_handlers[i].name)) {
 			subhandler = pg_cli_channel_gsm_action_handlers[i].handler;
@@ -27432,7 +28450,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 												number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%d", row));
 												from_fl = mmax(from_fl, snprintf(from, sizeof(from), "%s%s", (sqlite3_column_int(sql, 0) == 145)?("+"):(""), sqlite3_column_text(sql, 1)));
 												to_fl = mmax(to_fl, snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3)));
-												row++;
+												++row;
 											} else if (res == SQLITE_DONE) {
 												break;
 											} else if (res == SQLITE_BUSY) {
@@ -27461,7 +28479,7 @@ static char *pg_cli_channel_gsm_action_param(struct ast_cli_entry *e, int cmd, s
 																number_fl, buf,
 			  													from_fl, from,
 																to_fl, to);
-													row++;
+													++row;
 												} else if (res == SQLITE_DONE) {
 													break;
 												} else if (res == SQLITE_BUSY) {
@@ -29064,8 +30082,7 @@ static char *pg_cli_channel_gsm_action_at(struct ast_cli_entry *e, int cmd, stru
 				ast_cli(a->fd, "  GSM channel=\"%s\": fcntl(ch_gsm->at_pipe[1], F_SETFL): %s\n", ch_gsm->alias, strerror(errno));
 				goto is_at_send_end;
 			}
-			while (1)
-			{
+			while (1) {
 				// prepare select
 				tv.tv_sec = 60;
 				tv.tv_usec = 0;
@@ -29178,7 +30195,7 @@ static char *pg_cli_channel_gsm_action_pcr(struct ast_cli_entry *e, int cmd, str
 								number_fl = mmax(number_fl, snprintf(buf, sizeof(buf), "%d", row));
 								from_fl = mmax(from_fl, snprintf(from, sizeof(from), "%s%s", (sqlite3_column_int(sql, 0) == 145)?("+"):(""), sqlite3_column_text(sql, 1)));
 								to_fl = mmax(to_fl, snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3)));
-								row++;
+								++row;
 							} else if (res == SQLITE_DONE) {
 								break;
 							} else if (res == SQLITE_BUSY) {
@@ -29207,7 +30224,7 @@ static char *pg_cli_channel_gsm_action_pcr(struct ast_cli_entry *e, int cmd, str
 										number_fl, buf,
 			  							from_fl, from,
 										to_fl, to);
-									row++;
+									++row;
 								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
@@ -29327,7 +30344,7 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 								from_fl = mmax(from_fl, snprintf(from, sizeof(from), "%s%s", (sqlite3_column_int(sql, 0) == 145)?("+"):(""), sqlite3_column_text(sql, 1)));
 								to_fl = mmax(to_fl, snprintf(to, sizeof(to), "%s%s", (sqlite3_column_int(sql, 2) == 145)?("+"):(""), sqlite3_column_text(sql, 3)));
 								ttl_fl = mmax(ttl_fl, snprintf(tmbuf, sizeof(tmbuf), "%ld", (long int)(ch_gsm->config.dcrttl - (tv.tv_sec - (long int)sqlite3_column_int64(sql, 4)))));
-								row++;
+								++row;
 							} else if (res == SQLITE_DONE) {
 								break;
 							} else if (res == SQLITE_BUSY) {
@@ -29359,7 +30376,7 @@ static char *pg_cli_channel_gsm_action_dcr(struct ast_cli_entry *e, int cmd, str
 			  							from_fl, from,
 										to_fl, to,
 										ttl_fl, tmbuf);
-									row++;
+									++row;
 								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
@@ -29478,7 +30495,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 									smscnt = sqlite3_column_int(sql0, 0);
 								} else if (res == SQLITE_DONE) {
 									break;
@@ -29561,7 +30578,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
-								row++;
+								++row;
 								if (row > smscnt) {
 									break;
 								}
@@ -29628,7 +30645,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 									part++;
 									if (row == 1) {
 										// SMS Center Address
@@ -29695,7 +30712,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 										while (1) {
 											res = sqlite3_step(sql1);
 											if (res == SQLITE_ROW) {
-												row++;
+												++row;
 											} else if (res == SQLITE_DONE) {
 												break;
 											} else if (res == SQLITE_BUSY) {
@@ -29752,7 +30769,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
@@ -29803,7 +30820,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
-								row++;
+								++row;
 								time_data.tv_sec = sqlite3_column_int64(sql0, 0);
 								time_ptr = ast_localtime(&time_data, &time_buf, NULL);
 								ast_cli(a->fd, "%0d: %04d-%02d-%02d-%02d:%02d:%02d \"%s\"%s\n",
@@ -29868,7 +30885,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 									// Destination Address
 									ast_cli(a->fd, "Destination Address: %s\n", sqlite3_column_text(sql0, 0));
 									// Enqueued time
@@ -29929,7 +30946,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
@@ -29992,7 +31009,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
-								row++;
+								++row;
 								if (row > smscnt) {
 									break;
 								}
@@ -30087,7 +31104,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 									part++;
 									if (row == 1) {
 										// SMS Center Address
@@ -30180,7 +31197,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
@@ -30244,7 +31261,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
-								row++;
+								++row;
 								if (row > smscnt) {
 									break;
 								}
@@ -30313,7 +31330,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 									// Timestamp
 									time_data.tv_sec = sqlite3_column_int64(sql0, 0);
 									time_ptr = ast_localtime(&time_data, &time_buf, NULL);
@@ -30376,7 +31393,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 							while (1) {
 								res = sqlite3_step(sql0);
 								if (res == SQLITE_ROW) {
-									row++;
+									++row;
 								} else if (res == SQLITE_DONE) {
 									break;
 								} else if (res == SQLITE_BUSY) {
@@ -30462,7 +31479,7 @@ static char *pg_cli_channel_gsm_action_sms(struct ast_cli_entry *e, int cmd, str
 						while (1) {
 							res = sqlite3_step(sql0);
 							if (res == SQLITE_ROW) {
-								row++;
+								++row;
 							} else if (res == SQLITE_DONE) {
 								break;
 							} else if (res == SQLITE_BUSY) {
@@ -30541,7 +31558,7 @@ static char *pg_cli_channel_fxs_actions(struct ast_cli_entry *e, int cmd, struct
 				// search action CLI entry
 				gline = ast_strdupa(a->line);
 				if (!(pg_cli_generating_prepare(gline, &gargc, gargv))) {
-					for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxs_action_handlers); i++) {
+					for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxs_action_handlers); ++i) {
 						// get actions by name
 						if (!strcmp(gargv[4], pg_cli_channel_fxs_action_handlers[i].name)) {
 							subhandler = pg_cli_channel_fxs_action_handlers[i].handler;
@@ -30571,7 +31588,7 @@ static char *pg_cli_channel_fxs_actions(struct ast_cli_entry *e, int cmd, struct
 
 	subhandler = NULL;
 	// search action CLI entry
-	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxs_action_handlers); i++) {
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxs_action_handlers); ++i) {
 		// get actions by name
 		if (!strcmp(a->argv[4], pg_cli_channel_fxs_action_handlers[i].name)) {
 			subhandler = pg_cli_channel_fxs_action_handlers[i].handler;
@@ -31575,7 +32592,7 @@ static char *pg_cli_channel_fxo_actions(struct ast_cli_entry *e, int cmd, struct
 				// search action CLI entry
 				gline = ast_strdupa(a->line);
 				if (!(pg_cli_generating_prepare(gline, &gargc, gargv))) {
-					for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxo_action_handlers); i++) {
+					for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxo_action_handlers); ++i) {
 						// get actions by name
 						if (!strcmp(gargv[4], pg_cli_channel_fxo_action_handlers[i].name)) {
 							subhandler = pg_cli_channel_fxo_action_handlers[i].handler;
@@ -31605,7 +32622,7 @@ static char *pg_cli_channel_fxo_actions(struct ast_cli_entry *e, int cmd, struct
 
 	subhandler = NULL;
 	// search action CLI entry
-	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxo_action_handlers); i++) {
+	for (i = 0; i < PG_CLI_ACTION_HANDLERS_COUNT(pg_cli_channel_fxo_action_handlers); ++i) {
 		// get actions by name
 		if (!strcmp(a->argv[4], pg_cli_channel_fxo_action_handlers[i].name)) {
 			subhandler = pg_cli_channel_fxo_action_handlers[i].handler;
@@ -32772,7 +33789,7 @@ static void pg_cleanup(void)
 			}
 			ast_mutex_unlock(&ch_gsm->lock);
 		}
-	} while(is_wait);
+	} while (is_wait);
 
 	// wait for all FXS channel shutdown
 	do {
@@ -32795,7 +33812,7 @@ static void pg_cleanup(void)
 			}
 			ast_mutex_unlock(&ch_fxs->lock);
 		}
-	} while(is_wait);
+	} while (is_wait);
 
 	// wait for all FXO channel shutdown
 	do {
@@ -32818,12 +33835,14 @@ static void pg_cleanup(void)
 			}
 			ast_mutex_unlock(&ch_fxo->lock);
 		}
-	} while(is_wait);
+	} while (is_wait);
 
 	// unregistering PGGSM channel technology
 	if (pg_gsm_tech_registered) {
 		ast_channel_unregister(&pg_gsm_tech);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		ao2_cleanup(pg_gsm_tech.capabilities);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		ast_format_cap_destroy(pg_gsm_tech.capabilities);
 #endif
 	}
@@ -32831,7 +33850,9 @@ static void pg_cleanup(void)
 	// unregistering PGFXS channel technology
 	if (pg_fxs_tech_registered) {
 		ast_channel_unregister(&pg_fxs_tech);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		ao2_cleanup(pg_fxs_tech.capabilities);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		ast_format_cap_destroy(pg_fxs_tech.capabilities);
 #endif
 	}
@@ -32839,7 +33860,9 @@ static void pg_cleanup(void)
 	// unregistering PGFXO channel technology
 	if (pg_fxo_tech_registered) {
 		ast_channel_unregister(&pg_fxo_tech);
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		ao2_cleanup(&pg_fxo_tech);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		ast_format_cap_destroy(pg_fxo_tech.capabilities);
 #endif
 	}
@@ -32871,7 +33894,7 @@ static void pg_cleanup(void)
 			}
 			ast_mutex_unlock(&brd->lock);
 		}
-	} while(is_wait);
+	} while (is_wait);
 
 	// destroy general GSM channel list
 	while ((ch_gsm = AST_LIST_REMOVE_HEAD(&pg_general_channel_gsm_list, pg_general_channel_gsm_list_entry)));
@@ -32928,7 +33951,9 @@ static void pg_cleanup(void)
 				ast_free(rtp->path);
 				ast_free(rtp);
 			}
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+			ao2_cleanup(vin->capabilities);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 			ast_format_cap_destroy(vin->capabilities);
 #endif
 			ast_free(vin->name);
@@ -33960,6 +34985,11 @@ static int pg_load(void)
 				vin->name = ast_strdup((cp)?(cp+1):(name));
 				snprintf(path, sizeof(path), "/dev/%s", name);
 				vin->path = ast_strdup(path);
+				// enable
+				vin->run = 1;
+				if ((cvar = pg_get_config_variable(ast_cfg, vin->name, "enable"))) {
+					vin->run = -str_true(cvar);
+				}
 				// firmware
 				if ((cvar = pg_get_config_variable(ast_cfg, vin->name, "firmware"))) {
 					vin->firmware = ast_strdup(cvar);
@@ -33988,7 +35018,7 @@ static int pg_load(void)
 				if (!vin->cram) {
 					vin->cram = ast_strdup("cram.byt");
 				}
-				vin->run = 1;
+				
 				vin->thread = AST_PTHREADT_NULL;
 				vin->state = PG_VINETIC_STATE_INIT;
 				AST_LIST_TRAVERSE(&pg_general_channel_gsm_list, ch_gsm, pg_general_channel_gsm_list_entry) {
@@ -34000,11 +35030,13 @@ static int pg_load(void)
 					}
 					ast_mutex_unlock(&ch_gsm->lock);
 				}
-				// start vinetic workthread
-				if (ast_pthread_create_detached(&vin->thread, NULL, pg_vinetic_workthread, vin) < 0) {
-					ast_log(LOG_ERROR, "can't start workthread for vinetic=\"%s\"\n", vin->name);
-					vin->thread = AST_PTHREADT_NULL;
-					goto pg_load_error;
+				if (vin->run) {
+					// start vinetic workthread
+					if (ast_pthread_create_detached(&vin->thread, NULL, pg_vinetic_workthread, vin) < 0) {
+						ast_log(LOG_ERROR, "can't start workthread for vinetic=\"%s\"\n", vin->name);
+						vin->thread = AST_PTHREADT_NULL;
+						goto pg_load_error;
+					}
 				}
 			}
 		}
@@ -34021,7 +35053,9 @@ static int pg_load(void)
 		}
 		pg_gsm_tech_registered = 1;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		pg_gsm_tech.capabilities = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		pg_gsm_tech.capabilities = ast_format_cap_alloc();
 #endif
 	}
@@ -34034,7 +35068,9 @@ static int pg_load(void)
 		}
 		pg_fxs_tech_registered = 1;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		pg_fxs_tech.capabilities = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		pg_fxs_tech.capabilities = ast_format_cap_alloc();
 #endif
 	}
@@ -34047,7 +35083,9 @@ static int pg_load(void)
 		}
 		pg_fxo_tech_registered = 1;
 
-#if ASTERISK_VERSION_NUMBER >= 100000
+#if ASTERISK_VERSION_NUMBER >= 130000
+		pg_fxo_tech.capabilities = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+#elif ASTERISK_VERSION_NUMBER >= 100000
 		pg_fxo_tech.capabilities = ast_format_cap_alloc();
 #endif
 	}

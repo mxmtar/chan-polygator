@@ -192,6 +192,7 @@ const struct at_command m10_at_com_list[] = {
 	{AT_M10_EGPAU, AT_OPER_EXEC|AT_OPER_TEST, "AT+EGPAU",  {"+EGPAU:", ""}, "PPP authentication", NULL},
 	{AT_M10_QNITZ, AT_OPER_TEST|AT_OPER_WRITE, "AT+QNITZ",  {"+QNITZ:", ""}, "Network time synchronization", NULL},
 	{AT_M10_EGMR, AT_OPER_TEST|AT_OPER_WRITE, "AT+EGMR",  {"+EGMR:", ""}, "Set/Inquiry product serial number identification", NULL},
+	{AT_M10_QTONEDET, AT_OPER_TEST|AT_OPER_WRITE, "AT+QTONEDET",  {"+QTONEDET:", ""}, "Enable DTMF decoding and set threshold", NULL},
 };
 
 size_t m10_at_com_list_length()

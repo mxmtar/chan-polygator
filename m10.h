@@ -193,6 +193,8 @@ enum {
 	//
 	AT_M10_EGMR,				// AT+EGMR - Set/Inquiry product serial number identification
 
+	AT_M10_QTONEDET,			// AT+QTONEDET - Enable DTMF decoding and set threshold
+
 	//
 	AT_M10_MAXNUM,
 };
