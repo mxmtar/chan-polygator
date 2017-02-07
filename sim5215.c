@@ -60,6 +60,7 @@ const struct at_command sim5215_at_com_list[] = {
 	{AT_SIM5215_CPCMFMT, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT+CPCMFMT",  {"+CPCMFMT:", ""}, "Change the PCM format", NULL},
 	{AT_SIM5215_CPCMREG, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT+CPCMREG",  {"+CPCMREG:", ""}, "Control PCM data transfer by diagnostics port", NULL},
 	{AT_SIM5215_VTD, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE, "AT+VTD",  {"+VTD:", ""}, "Tone duration", NULL},
+	{AT_SIM5215_CODEC, AT_OPER_TEST|AT_OPER_READ|AT_OPER_WRITE|AT_OPER_EXEC, "AT+CODEC",  {"+CODEC:", ""}, "Set audio codec mode", NULL},
 
 	// Video Call Related Commands
 	{AT_SIM5215_VPMAKE, AT_OPER_WRITE, "AT+VPMAKE",  {"", ""}, "Originate video call", NULL},
