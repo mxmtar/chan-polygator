@@ -1,3 +1,6 @@
+2017-02-07
+1. Flush AT command queue on TTY line break.
+2. Add voice codec quality selector with auto and best options.
 2015-11-20
 1. Rebooting all types of modules on loosing registration.
 2015-10-19

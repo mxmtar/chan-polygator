@@ -15,7 +15,7 @@ chan_polygator_la_SOURCES = \
 		sim900.c \
 		sim5215.c
 
-chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall 
+chan_polygator_la_CFLAGS = $(AM_CFLAGS) -Wall
 chan_polygator_la_LDFLAGS = $(AM_LDFLAGS) -module -avoid-version -shared -lsqlite3 -lvinetic -lrt
 
 noinst_HEADERS = \
