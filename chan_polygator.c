@@ -14427,7 +14427,7 @@ static void *pg_channel_gsm_workthread(void *data)
                                 pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSDESTADDRESSVALUE", ch_gsm->subscriber_number.value); // SMS Destination Address
                                 sprintf(tmpbuf, "%d", ch_gsm->subscriber_number.type.full);
                                 pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSDESTADDRESSTYPE", tmpbuf); // SMS Destination Address Type
-                                sprintf(tmpbuf, "%s%s", ch_gsm->subscriber_number.type.full == 145)?("+"):(""), ch_gsm->subscriber_number.value);
+                                sprintf(tmpbuf, "%s%s", (ch_gsm->subscriber_number.type.full == 145)?("+"):(""), ch_gsm->subscriber_number.value);
                                 pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSDESTADDRESS", tmpbuf); // SMS Destination Address Full
                                 sprintf(tmpbuf, "%d", pdu->concat_num);
 								pbx_builtin_setvar_helper(ast_ch_tmp, "PGSMSPART", tmpbuf); // SMS current part number
